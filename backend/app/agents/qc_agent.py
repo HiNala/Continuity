@@ -26,6 +26,7 @@ from app.models import (
     Policy, Iteration, Constraint, EvaluationDetail, PolicyChange, EvaluationStatus, EvaluationCriterion,
     PolicyCreator, ConstraintClassification, GenerationPhase
 )
+from app.redis_service import redis_service
 
 
 # ============================================
@@ -789,6 +790,12 @@ Return a JSON response:
             session.add(policy_change)
         
         await session.flush()
+        
+        # Invalidate Redis policy cache so next generation uses updated policy
+        try:
+            await redis_service.invalidate_policy_cache(str(project_id))
+        except Exception:
+            pass  # Redis unavailable, continue
         
         return {
             "success": True,

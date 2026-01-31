@@ -23,6 +23,7 @@ from app.models import (
     Project, Constraint, ProjectAnalysis, ProjectStatus,
     ConstraintClassification, ConstructionState, ElementType
 )
+from app.redis_service import redis_service
 
 
 # ============================================
@@ -178,14 +179,17 @@ class SpatialAnalysisAgent:
     async def analyze_single_image(
         self,
         image_data: Dict[str, Any],
-        image_index: int = 0
+        image_index: int = 0,
+        project_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Analyze a single image using Gemini vision.
+        Uses Redis caching to avoid re-analyzing the same image.
         
         Args:
             image_data: Prepared image data from prepare_image()
             image_index: Index of this image (for multi-image tracking)
+            project_id: Optional project ID for caching
             
         Returns:
             Analysis results as structured dict
@@ -196,6 +200,25 @@ class SpatialAnalysisAgent:
                 "elements": [],
                 "construction_state": None,
             }
+        
+        # Generate cache key from image data
+        image_hash = None
+        if project_id:
+            if image_data["type"] == "url":
+                image_hash = redis_service.hash_image_url(image_data["url"])
+            elif image_data["type"] == "base64":
+                # Hash the base64 data (first 1000 chars for efficiency)
+                image_hash = redis_service.hash_image_url(image_data["data"][:1000])
+            
+            # Check Redis cache
+            if image_hash:
+                try:
+                    cached = await redis_service.get_cached_spatial_analysis(project_id, image_hash)
+                    if cached:
+                        cached["from_cache"] = True
+                        return cached
+                except Exception:
+                    pass  # Redis unavailable, continue with API call
         
         try:
             # Build the Gemini API request
@@ -257,6 +280,13 @@ class SpatialAnalysisAgent:
             analysis = json.loads(json_str.strip())
             analysis["image_index"] = image_index
             analysis["analyzed_at"] = datetime.now(timezone.utc).isoformat()
+            
+            # Cache the result in Redis for future requests
+            if project_id and image_hash:
+                try:
+                    await redis_service.cache_spatial_analysis(project_id, image_hash, analysis)
+                except Exception:
+                    pass  # Redis unavailable, continue without caching
             
             return analysis
             

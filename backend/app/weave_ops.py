@@ -5,6 +5,13 @@ Weave-traced operations for observability.
 Weave is the core of Continuity's self-improvement capability.
 Every significant operation is traced, allowing the Quality Control
 agent to analyze what happened and modify the process accordingly.
+
+All major agent operations are traced in their respective modules:
+- app/agents/requirements_agent.py - Requirements gathering and clarification
+- app/agents/spatial_agent.py - Spatial analysis and constraint extraction
+- app/agents/generation_agent.py - Phased image generation
+- app/agents/qc_agent.py - Quality control and policy optimization
+- app/orchestrator.py - Pipeline orchestration and state management
 """
 
 from datetime import datetime, timezone
@@ -40,7 +47,7 @@ def test_weave_operation(input_text: str) -> str:
 @weave.op()
 def analyze_text(text: str, analysis_type: str = "basic") -> dict:
     """
-    Example analysis operation (placeholder for real analysis).
+    Example analysis operation for testing.
     
     This demonstrates how Weave traces can capture structured outputs,
     which is essential for the Quality Control agent to analyze.
@@ -52,7 +59,6 @@ def analyze_text(text: str, analysis_type: str = "basic") -> dict:
     Returns:
         Analysis results as a dictionary
     """
-    # Placeholder analysis - will be replaced with real logic
     word_count = len(text.split())
     char_count = len(text)
     
@@ -62,64 +68,4 @@ def analyze_text(text: str, analysis_type: str = "basic") -> dict:
         "char_count": char_count,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "status": "analyzed",
-    }
-
-
-# ============================================
-# Agent Operations (to be expanded in later missions)
-# ============================================
-@weave.op()
-def requirements_agent_placeholder(goal: str) -> dict:
-    """
-    Placeholder for Requirements Agent.
-    Will be fully implemented in Mission 02.
-    """
-    return {
-        "agent": "requirements",
-        "goal": goal,
-        "status": "placeholder",
-        "message": "Full implementation in Mission 02",
-    }
-
-
-@weave.op()
-def spatial_analysis_agent_placeholder(image_reference: str) -> dict:
-    """
-    Placeholder for Spatial Analysis Agent.
-    Will be fully implemented in Mission 03.
-    """
-    return {
-        "agent": "spatial_analysis",
-        "image": image_reference,
-        "status": "placeholder",
-        "message": "Full implementation in Mission 03",
-    }
-
-
-@weave.op()
-def generation_agent_placeholder(phase: str, input_data: dict) -> dict:
-    """
-    Placeholder for Generation Agent.
-    Will be fully implemented in Mission 04.
-    """
-    return {
-        "agent": "generation",
-        "phase": phase,
-        "input": input_data,
-        "status": "placeholder",
-        "message": "Full implementation in Mission 04",
-    }
-
-
-@weave.op()
-def quality_control_agent_placeholder(iteration: dict) -> dict:
-    """
-    Placeholder for Quality Control Agent.
-    Will be fully implemented in Mission 05.
-    """
-    return {
-        "agent": "quality_control",
-        "iteration": iteration,
-        "status": "placeholder",
-        "message": "Full implementation in Mission 05",
     }

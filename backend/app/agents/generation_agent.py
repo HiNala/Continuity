@@ -28,6 +28,7 @@ from app.models import (
     Project, Policy, Iteration, Constraint, ProjectAnalysis, Requirements,
     ProjectStatus, GenerationPhase, IterationStatus, ConstraintClassification
 )
+from app.redis_service import redis_service
 
 
 # ============================================
@@ -166,9 +167,18 @@ class GenerationAgent:
     ) -> Dict[str, Any]:
         """
         Load the current policy configuration for a project.
+        Uses Redis cache for faster retrieval during generation.
         Falls back to default policy if none exists.
         """
-        # First try to find project-specific policy
+        # Check Redis cache first
+        try:
+            cached_policy = await redis_service.get_cached_policy(str(project_id))
+            if cached_policy:
+                return cached_policy
+        except Exception:
+            pass  # Redis unavailable, continue with database
+        
+        # Try to find project-specific policy in database
         result = await session.execute(
             select(Policy)
             .where(and_(Policy.project_id == project_id, Policy.is_active.is_(True)))
@@ -178,7 +188,7 @@ class GenerationAgent:
         policy = result.scalar_one_or_none()
         
         if policy:
-            return {
+            policy_data = {
                 "id": policy.id,
                 "version": policy.version,
                 "cleanup_config": policy.cleanup_config or DEFAULT_CLEANUP_CONFIG,
@@ -186,13 +196,21 @@ class GenerationAgent:
                 "fixture_config": policy.fixture_config or DEFAULT_FIXTURE_CONFIG,
                 "style_config": policy.style_config or DEFAULT_STYLE_CONFIG,
             }
+        else:
+            # Fall back to default policy
+            policy_data = {
+                "id": None,
+                "version": 1,
+                **DEFAULT_POLICY,
+            }
         
-        # Fall back to default policy
-        return {
-            "id": None,
-            "version": 1,
-            **DEFAULT_POLICY,
-        }
+        # Cache in Redis for subsequent calls
+        try:
+            await redis_service.cache_policy(str(project_id), policy_data)
+        except Exception:
+            pass  # Redis unavailable, continue without caching
+        
+        return policy_data
     
     @weave.op(name="generation_agent_load_constraints")
     async def load_constraints(
