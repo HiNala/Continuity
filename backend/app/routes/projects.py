@@ -14,9 +14,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.database import get_async_session
-from app.models import Project, Requirements, ProjectStatus, Constraint, ProjectAnalysis
+from app.models import (
+    Project, Requirements, ProjectStatus, Constraint, ProjectAnalysis,
+    Iteration, Policy, GenerationPhase, IterationStatus
+)
 from app.agents.requirements_agent import requirements_agent
 from app.agents.spatial_agent import spatial_agent
+from app.agents.generation_agent import generation_agent
 
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -561,4 +565,248 @@ async def get_analysis_summary(
         summary=analysis.analysis_summary.get("summary", "") if analysis.analysis_summary else "",
         recommended_phases=analysis.recommended_phase_sequence or [],
         analyzed_at=analysis.created_at.isoformat(),
+    )
+
+
+# ============================================
+# Generation Models (Mission 04)
+# ============================================
+class GenerateRequest(BaseModel):
+    """Request to trigger generation."""
+    input_image_url: Optional[str] = Field(
+        default=None,
+        description="URL of the input image. If not provided, uses first project image."
+    )
+
+
+class PhaseResult(BaseModel):
+    """Result from a single generation phase."""
+    phase: str
+    iteration_id: str
+    input_path: Optional[str]
+    output_path: Optional[str]
+    success: bool
+    error: Optional[str]
+    latency_ms: Optional[int]
+    style: Optional[str] = None
+
+
+class GenerationResponse(BaseModel):
+    """Response from full generation pipeline."""
+    project_id: str
+    input_image: str
+    policy_version: int
+    construction_state: Optional[str]
+    phases: List[PhaseResult]
+    style_variations: List[PhaseResult]
+    total_latency_ms: int
+    success: bool
+    error: Optional[str] = None
+
+
+class IterationResponse(BaseModel):
+    """Response for a single iteration record."""
+    id: str
+    phase: str
+    iteration_number: int
+    input_image_path: Optional[str]
+    output_image_path: Optional[str]
+    prompt_used: Optional[str]
+    generation_latency_ms: Optional[int]
+    policy_version: Optional[int]
+    status: str
+    error_message: Optional[str]
+    created_at: str
+    metadata: Optional[Dict[str, Any]]
+
+
+class PolicyResponse(BaseModel):
+    """Response for policy configuration."""
+    id: Optional[int]
+    version: int
+    cleanup_config: Dict[str, Any]
+    structural_config: Dict[str, Any]
+    fixture_config: Dict[str, Any]
+    style_config: Dict[str, Any]
+
+
+# ============================================
+# Generation Endpoints (Mission 04)
+# ============================================
+@router.post("/{project_id}/generate", response_model=GenerationResponse)
+async def generate(
+    project_id: UUID,
+    request: Optional[GenerateRequest] = None,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Trigger the full generation pipeline for a project.
+    
+    Runs all four phases: Cleanup → Structural → Fixture → Style.
+    Each phase's output becomes the next phase's input.
+    """
+    # Get the project
+    result = await session.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Determine input image
+    input_image = (
+        request.input_image_url if request and request.input_image_url
+        else (project.images[0] if project.images else None)
+    )
+    
+    if not input_image:
+        raise HTTPException(
+            status_code=400,
+            detail="No input image available. Provide input_image_url or add images to project."
+        )
+    
+    # Run the full pipeline
+    results = await generation_agent.run_full_pipeline(
+        session, project_id, input_image
+    )
+    
+    await session.commit()
+    
+    return GenerationResponse(
+        project_id=results["project_id"],
+        input_image=results["input_image"],
+        policy_version=results.get("policy_version", 1),
+        construction_state=results.get("construction_state"),
+        phases=[PhaseResult(**p) for p in results["phases"]],
+        style_variations=[PhaseResult(**s) for s in results["style_variations"]],
+        total_latency_ms=results["total_latency_ms"],
+        success=results["success"],
+        error=results.get("error"),
+    )
+
+
+@router.post("/{project_id}/generate/{phase}")
+async def generate_single_phase(
+    project_id: UUID,
+    phase: str,
+    request: Optional[GenerateRequest] = None,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Trigger a single generation phase.
+    
+    Useful for testing or re-running specific phases.
+    Valid phases: cleanup, structural, fixture, style
+    """
+    valid_phases = ["cleanup", "structural", "fixture", "style"]
+    if phase.lower() not in valid_phases:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid phase. Must be one of: {valid_phases}"
+        )
+    
+    # Get the project
+    result = await session.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Determine input image
+    input_image = (
+        request.input_image_url if request and request.input_image_url
+        else (project.images[0] if project.images else None)
+    )
+    
+    if not input_image:
+        raise HTTPException(
+            status_code=400,
+            detail="No input image available."
+        )
+    
+    # Load requirements
+    policy = await generation_agent.load_policy(session, project_id)
+    constraints, _ = await generation_agent.load_constraints(session, project_id)
+    requirements = await generation_agent.load_requirements(session, project_id)
+    
+    # Execute the requested phase
+    phase_lower = phase.lower()
+    
+    if phase_lower == "cleanup":
+        result = await generation_agent.execute_cleanup_phase(
+            session, project_id, input_image, policy, constraints
+        )
+    elif phase_lower == "structural":
+        result = await generation_agent.execute_structural_phase(
+            session, project_id, input_image, policy, constraints
+        )
+    elif phase_lower == "fixture":
+        result = await generation_agent.execute_fixture_phase(
+            session, project_id, input_image, policy, constraints, requirements
+        )
+    elif phase_lower == "style":
+        style = requirements.get("style_targets", ["modern"])[0]
+        result = await generation_agent.execute_style_phase(
+            session, project_id, input_image, policy, constraints, requirements, style
+        )
+    
+    await session.commit()
+    
+    return PhaseResult(**result)
+
+
+@router.get("/{project_id}/iterations", response_model=List[IterationResponse])
+async def get_iterations(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Retrieve all generation iterations for a project.
+    """
+    result = await session.execute(
+        select(Iteration)
+        .where(Iteration.project_id == project_id)
+        .order_by(Iteration.created_at)
+    )
+    iterations = result.scalars().all()
+    
+    return [
+        IterationResponse(
+            id=str(i.id),
+            phase=i.phase,
+            iteration_number=i.iteration_number,
+            input_image_path=i.input_image_path,
+            output_image_path=i.output_image_path,
+            prompt_used=i.prompt_used[:500] if i.prompt_used else None,  # Truncate for response
+            generation_latency_ms=i.generation_latency_ms,
+            policy_version=i.policy_version,
+            status=i.status,
+            error_message=i.error_message,
+            created_at=i.created_at.isoformat(),
+            metadata=i.metadata_,
+        )
+        for i in iterations
+    ]
+
+
+@router.get("/{project_id}/policy", response_model=PolicyResponse)
+async def get_policy(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Retrieve the current policy configuration for a project.
+    """
+    policy = await generation_agent.load_policy(session, project_id)
+    
+    return PolicyResponse(
+        id=policy.get("id"),
+        version=policy["version"],
+        cleanup_config=policy["cleanup_config"],
+        structural_config=policy["structural_config"],
+        fixture_config=policy["fixture_config"],
+        style_config=policy["style_config"],
     )
