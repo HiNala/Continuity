@@ -1,6 +1,6 @@
 """
 Continuity - Projects API Routes
-Handles project creation, requirements gathering, and project management.
+Handles project creation, requirements gathering, spatial analysis, and project management.
 """
 
 from datetime import datetime, timezone
@@ -14,8 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.database import get_async_session
-from app.models import Project, Requirements, ProjectStatus
+from app.models import Project, Requirements, ProjectStatus, Constraint, ProjectAnalysis
 from app.agents.requirements_agent import requirements_agent
+from app.agents.spatial_agent import spatial_agent
 
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -325,3 +326,239 @@ async def list_projects(
         )
         for p in projects
     ]
+
+
+# ============================================
+# Spatial Analysis Models (Mission 03)
+# ============================================
+class ConstraintItem(BaseModel):
+    """A single spatial constraint."""
+    id: str
+    element_type: str
+    location: Optional[str]
+    classification: str
+    confidence: float
+    notes: Optional[str]
+
+
+class AnalysisSummaryResponse(BaseModel):
+    """High-level spatial analysis summary."""
+    project_id: str
+    construction_state: Optional[str]
+    image_quality: Optional[str]
+    confidence_overall: float
+    locked_count: int
+    preferred_count: int
+    flexible_count: int
+    summary: str
+    recommended_phases: List[str]
+    analyzed_at: str
+
+
+class ConstraintsResponse(BaseModel):
+    """Full constraints response with all identified elements."""
+    project_id: str
+    total_constraints: int
+    locked: List[ConstraintItem]
+    preferred: List[ConstraintItem]
+    flexible: List[ConstraintItem]
+
+
+class AnalyzeSpaceRequest(BaseModel):
+    """Request to analyze space - can override project images."""
+    image_urls: Optional[List[str]] = Field(
+        default=None,
+        description="Optional image URLs to analyze. If not provided, uses project images."
+    )
+
+
+# ============================================
+# Spatial Analysis Endpoints (Mission 03)
+# ============================================
+@router.post("/{project_id}/analyze-space", response_model=AnalysisSummaryResponse)
+async def analyze_space(
+    project_id: UUID,
+    request: Optional[AnalyzeSpaceRequest] = None,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Trigger spatial analysis on the project's images.
+    
+    The Spatial Analysis Agent examines the uploaded images to identify
+    physical constraints like floor drains, plumbing, structural elements,
+    and movable items.
+    """
+    # Get the project
+    result = await session.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Check if analysis already exists
+    existing = await session.execute(
+        select(ProjectAnalysis).where(ProjectAnalysis.project_id == project_id)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="Spatial analysis already completed for this project"
+        )
+    
+    # Get images to analyze
+    images = (request.image_urls if request and request.image_urls else project.images) or []
+    
+    if not images:
+        # No images - create a placeholder analysis
+        placeholder_analysis = ProjectAnalysis(
+            project_id=project_id,
+            construction_state=None,
+            analysis_summary={"summary": "No images provided for analysis"},
+            recommended_phase_sequence=["style"],
+            locked_count=0,
+            preferred_count=0,
+            flexible_count=0,
+            image_quality_assessment="none",
+            confidence_overall=0.0,
+        )
+        session.add(placeholder_analysis)
+        project.status = ProjectStatus.ANALYZING
+        await session.commit()
+        
+        return AnalysisSummaryResponse(
+            project_id=str(project_id),
+            construction_state=None,
+            image_quality="none",
+            confidence_overall=0.0,
+            locked_count=0,
+            preferred_count=0,
+            flexible_count=0,
+            summary="No images provided for analysis. Add images to get spatial constraints.",
+            recommended_phases=["style"],
+            analyzed_at=datetime.now(timezone.utc).isoformat(),
+        )
+    
+    # Prepare and analyze each image
+    analyses = []
+    for idx, image_path in enumerate(images):
+        prepared = spatial_agent.prepare_image(image_path)
+        if prepared:
+            analysis = await spatial_agent.analyze_single_image(prepared, idx)
+            analyses.append(analysis)
+    
+    # Merge results if multiple images
+    merged = spatial_agent.merge_multi_image_analysis(analyses)
+    
+    # Classify elements
+    elements = merged.get("elements", [])
+    classified = spatial_agent.classify_elements(elements)
+    
+    # Assess construction state
+    construction_state = spatial_agent.assess_construction_state(merged)
+    merged["construction_state"] = construction_state
+    
+    # Save to database
+    project_analysis = await spatial_agent.save_constraints(
+        session, project_id, merged, classified
+    )
+    
+    await session.commit()
+    
+    return AnalysisSummaryResponse(
+        project_id=str(project_id),
+        construction_state=project_analysis.construction_state,
+        image_quality=project_analysis.image_quality_assessment,
+        confidence_overall=project_analysis.confidence_overall,
+        locked_count=project_analysis.locked_count,
+        preferred_count=project_analysis.preferred_count,
+        flexible_count=project_analysis.flexible_count,
+        summary=merged.get("summary", "Analysis complete"),
+        recommended_phases=project_analysis.recommended_phase_sequence or [],
+        analyzed_at=project_analysis.created_at.isoformat(),
+    )
+
+
+@router.get("/{project_id}/constraints", response_model=ConstraintsResponse)
+async def get_constraints(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Retrieve all spatial constraints for a project.
+    """
+    # Get all constraints for the project
+    result = await session.execute(
+        select(Constraint).where(Constraint.project_id == project_id)
+    )
+    constraints = result.scalars().all()
+    
+    if not constraints:
+        raise HTTPException(
+            status_code=404,
+            detail="No constraints found. Call /analyze-space first."
+        )
+    
+    # Group by classification
+    locked = []
+    preferred = []
+    flexible = []
+    
+    for c in constraints:
+        item = ConstraintItem(
+            id=str(c.id),
+            element_type=c.element_type,
+            location=c.element_location,
+            classification=c.classification,
+            confidence=c.confidence_score,
+            notes=c.notes,
+        )
+        
+        if c.classification == "locked":
+            locked.append(item)
+        elif c.classification == "preferred":
+            preferred.append(item)
+        else:
+            flexible.append(item)
+    
+    return ConstraintsResponse(
+        project_id=str(project_id),
+        total_constraints=len(constraints),
+        locked=locked,
+        preferred=preferred,
+        flexible=flexible,
+    )
+
+
+@router.get("/{project_id}/analysis-summary", response_model=AnalysisSummaryResponse)
+async def get_analysis_summary(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Retrieve the high-level spatial analysis summary.
+    """
+    result = await session.execute(
+        select(ProjectAnalysis).where(ProjectAnalysis.project_id == project_id)
+    )
+    analysis = result.scalar_one_or_none()
+    
+    if not analysis:
+        raise HTTPException(
+            status_code=404,
+            detail="Analysis not found. Call /analyze-space first."
+        )
+    
+    return AnalysisSummaryResponse(
+        project_id=str(project_id),
+        construction_state=analysis.construction_state,
+        image_quality=analysis.image_quality_assessment,
+        confidence_overall=analysis.confidence_overall,
+        locked_count=analysis.locked_count,
+        preferred_count=analysis.preferred_count,
+        flexible_count=analysis.flexible_count,
+        summary=analysis.analysis_summary.get("summary", "") if analysis.analysis_summary else "",
+        recommended_phases=analysis.recommended_phase_sequence or [],
+        analyzed_at=analysis.created_at.isoformat(),
+    )

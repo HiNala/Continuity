@@ -14,19 +14,30 @@ import {
   Accessibility,
   DollarSign,
   Briefcase,
+  Eye,
+  Lock,
+  Star,
+  Move,
+  Building2,
+  Droplets,
+  Zap,
+  Wind,
+  Trash2,
 } from "lucide-react";
 import {
   createProject,
   analyzeGoal,
   submitAnswers,
+  analyzeSpace,
   ClarifyingQuestion,
   RequirementsResponse,
+  AnalysisSummaryResponse,
 } from "@/lib/api";
 
 // ============================================
 // Types
 // ============================================
-type Step = "input" | "questions" | "complete";
+type Step = "input" | "questions" | "complete" | "analyzing" | "constraints";
 
 interface Answers {
   [questionId: string]: string | string[];
@@ -61,6 +72,9 @@ export default function ProjectPage() {
   const [requirements, setRequirements] = useState<RequirementsResponse | null>(
     null
   );
+  
+  // Spatial Analysis (Mission 03)
+  const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummaryResponse | null>(null);
 
   // ==========================================
   // Step 1: Create project and analyze goal
@@ -166,6 +180,60 @@ export default function ProjectPage() {
   };
 
   // ==========================================
+  // Step 4: Analyze Space (Mission 03)
+  // ==========================================
+  const handleAnalyzeSpace = async () => {
+    if (!projectId) return;
+
+    setLoading(true);
+    setError(null);
+    setStep("analyzing");
+
+    try {
+      // For demo, we'll use placeholder images or none
+      const result = await analyzeSpace(projectId);
+      setAnalysisSummary(result);
+      setStep("constraints");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Spatial analysis failed");
+      setStep("complete"); // Go back to complete step on error
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==========================================
+  // Helpers for display
+  // ==========================================
+  const getConstructionStateLabel = (state: string | null) => {
+    const labels: Record<string, string> = {
+      unfinished: "Unfinished Construction",
+      partially_complete: "Partially Complete",
+      existing_finish: "Existing Finish",
+    };
+    return state ? labels[state] || state : "Unknown";
+  };
+
+  const getElementIcon = (elementType: string) => {
+    if (elementType.includes("wall") || elementType.includes("column") || elementType.includes("beam")) {
+      return <Building2 className="w-4 h-4" />;
+    }
+    if (elementType.includes("drain") || elementType.includes("plumbing") || elementType.includes("water")) {
+      return <Droplets className="w-4 h-4" />;
+    }
+    if (elementType.includes("electric") || elementType.includes("outlet") || elementType.includes("switch")) {
+      return <Zap className="w-4 h-4" />;
+    }
+    if (elementType.includes("vent") || elementType.includes("hvac") || elementType.includes("duct")) {
+      return <Wind className="w-4 h-4" />;
+    }
+    if (elementType.includes("debris") || elementType.includes("temporary")) {
+      return <Trash2 className="w-4 h-4" />;
+    }
+    return <Target className="w-4 h-4" />;
+  };
+
+  // ==========================================
   // Render
   // ==========================================
   return (
@@ -179,13 +247,22 @@ export default function ProjectPage() {
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div>
+          <div className="flex-1">
             <h1 className="text-xl font-bold">New Project</h1>
             <p className="text-sm text-slate-400">
               {step === "input" && "Describe your visualization goal"}
               {step === "questions" && "Answer a few questions"}
               {step === "complete" && "Requirements complete"}
+              {step === "analyzing" && "Analyzing your space..."}
+              {step === "constraints" && "Spatial analysis complete"}
             </p>
+          </div>
+          {/* Step indicator */}
+          <div className="hidden md:flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${step === "input" ? "bg-continuity-500" : "bg-emerald-500"}`} />
+            <div className={`w-2 h-2 rounded-full ${step === "questions" ? "bg-continuity-500" : step === "input" ? "bg-slate-600" : "bg-emerald-500"}`} />
+            <div className={`w-2 h-2 rounded-full ${step === "complete" ? "bg-continuity-500" : ["analyzing", "constraints"].includes(step) ? "bg-emerald-500" : "bg-slate-600"}`} />
+            <div className={`w-2 h-2 rounded-full ${step === "analyzing" ? "bg-continuity-500 animate-pulse" : step === "constraints" ? "bg-emerald-500" : "bg-slate-600"}`} />
           </div>
         </div>
       </header>
@@ -462,15 +539,192 @@ export default function ProjectPage() {
               </dl>
             </div>
 
+            <div className="card bg-continuity-500/5 border-continuity-500/20">
+              <div className="flex items-start gap-3">
+                <Eye className="w-5 h-5 text-continuity-400 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-medium text-continuity-400 mb-1">Ready for Spatial Analysis</p>
+                  <p className="text-sm text-slate-300 mb-4">
+                    Our AI will analyze your space images to identify physical constraints 
+                    like floor drains, plumbing, structural elements, and what can be moved.
+                  </p>
+                  <button
+                    onClick={handleAnalyzeSpace}
+                    disabled={loading}
+                    className="btn-primary flex items-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-5 h-5" />
+                        Analyze Space
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                onClick={() => router.push("/")}
+                className="btn-secondary flex-1"
+              >
+                Back to Home
+              </button>
+              <button
+                onClick={() => {
+                  setStep("input");
+                  setGoal("");
+                  setProjectId(null);
+                  setQuestions([]);
+                  setIdentified({});
+                  setAnswers({});
+                  setRequirements(null);
+                  setAnalysisSummary(null);
+                }}
+                className="btn-primary flex-1"
+              >
+                Create Another Project
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 4: Analyzing (Loading State) */}
+        {step === "analyzing" && (
+          <div className="space-y-8 animate-fade-in">
+            <div className="text-center space-y-4">
+              <div className="w-20 h-20 rounded-full bg-continuity-500/20 border border-continuity-500/30 flex items-center justify-center mx-auto">
+                <Eye className="w-10 h-10 text-continuity-400 animate-pulse" />
+              </div>
+              <h2 className="text-2xl font-bold">Analyzing Your Space</h2>
+              <p className="text-slate-400 max-w-lg mx-auto">
+                Our AI is examining the images to identify physical constraints,
+                structural elements, and what can be modified.
+              </p>
+            </div>
+
+            <div className="max-w-md mx-auto">
+              <div className="card">
+                <div className="space-y-4">
+                  {["Detecting structural elements...", "Identifying plumbing constraints...", "Classifying elements..."].map((text, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <Loader2 className="w-4 h-4 animate-spin text-continuity-400" />
+                      <span className="text-slate-300 text-sm">{text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 5: Constraints Display */}
+        {step === "constraints" && analysisSummary && (
+          <div className="space-y-8 animate-fade-in">
+            <div className="text-center space-y-4">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+              </div>
+              <h2 className="text-2xl font-bold">Spatial Analysis Complete</h2>
+              <p className="text-slate-400 max-w-lg mx-auto">
+                We've identified the physical constraints in your space.
+                Here's what we found.
+              </p>
+            </div>
+
+            {/* Construction State */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-lg">Construction State</h3>
+                <span className="badge-info">
+                  {getConstructionStateLabel(analysisSummary.construction_state)}
+                </span>
+              </div>
+              <p className="text-slate-400 text-sm">{analysisSummary.summary}</p>
+              
+              {/* Confidence indicator */}
+              <div className="mt-4 flex items-center gap-2">
+                <span className="text-xs text-slate-500">Confidence:</span>
+                <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-continuity-500 rounded-full transition-all"
+                    style={{ width: `${analysisSummary.confidence_overall * 100}%` }}
+                  />
+                </div>
+                <span className="text-xs text-slate-400">
+                  {Math.round(analysisSummary.confidence_overall * 100)}%
+                </span>
+              </div>
+            </div>
+
+            {/* Constraints Summary */}
+            <div className="grid md:grid-cols-3 gap-4">
+              {/* Locked */}
+              <div className="card border-red-500/20 bg-red-500/5">
+                <div className="flex items-center gap-2 mb-2">
+                  <Lock className="w-5 h-5 text-red-400" />
+                  <span className="font-semibold text-red-400">Locked</span>
+                </div>
+                <p className="text-3xl font-bold text-white">{analysisSummary.locked_count}</p>
+                <p className="text-xs text-slate-400 mt-1">Cannot be changed</p>
+              </div>
+
+              {/* Preferred */}
+              <div className="card border-amber-500/20 bg-amber-500/5">
+                <div className="flex items-center gap-2 mb-2">
+                  <Star className="w-5 h-5 text-amber-400" />
+                  <span className="font-semibold text-amber-400">Preferred</span>
+                </div>
+                <p className="text-3xl font-bold text-white">{analysisSummary.preferred_count}</p>
+                <p className="text-xs text-slate-400 mt-1">Should be preserved</p>
+              </div>
+
+              {/* Flexible */}
+              <div className="card border-emerald-500/20 bg-emerald-500/5">
+                <div className="flex items-center gap-2 mb-2">
+                  <Move className="w-5 h-5 text-emerald-400" />
+                  <span className="font-semibold text-emerald-400">Flexible</span>
+                </div>
+                <p className="text-3xl font-bold text-white">{analysisSummary.flexible_count}</p>
+                <p className="text-xs text-slate-400 mt-1">Can be modified</p>
+              </div>
+            </div>
+
+            {/* Recommended Phases */}
+            {analysisSummary.recommended_phases.length > 0 && (
+              <div className="card">
+                <h3 className="font-semibold mb-4">Recommended Generation Phases</h3>
+                <div className="flex flex-wrap gap-2">
+                  {analysisSummary.recommended_phases.map((phase, i) => (
+                    <div
+                      key={phase}
+                      className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700"
+                    >
+                      <span className="w-5 h-5 rounded-full bg-continuity-500/20 flex items-center justify-center text-xs text-continuity-400 font-bold">
+                        {i + 1}
+                      </span>
+                      <span className="text-sm capitalize">{phase}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Next Steps */}
             <div className="card bg-amber-500/5 border-amber-500/20">
               <div className="flex items-start gap-3">
                 <Sparkles className="w-5 h-5 text-amber-400 mt-0.5" />
                 <div>
                   <p className="font-medium text-amber-400 mb-1">Next Steps</p>
                   <p className="text-sm text-slate-300">
-                    Spatial analysis and image generation will be available in
-                    Mission 03 and 04. For now, your requirements are saved and
-                    ready!
+                    Image generation will be available in Mission 04. Your spatial 
+                    constraints are saved and ready to guide the generation process!
                   </p>
                 </div>
               </div>
@@ -492,6 +746,7 @@ export default function ProjectPage() {
                   setIdentified({});
                   setAnswers({});
                   setRequirements(null);
+                  setAnalysisSummary(null);
                 }}
                 className="btn-primary flex-1"
               >

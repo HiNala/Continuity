@@ -205,3 +205,100 @@ export async function checkHealth(): Promise<{
 
   return response.json();
 }
+
+// ============================================
+// Spatial Analysis Types (Mission 03)
+// ============================================
+export interface ConstraintItem {
+  id: string;
+  element_type: string;
+  location: string | null;
+  classification: string;
+  confidence: number;
+  notes: string | null;
+}
+
+export interface AnalysisSummaryResponse {
+  project_id: string;
+  construction_state: string | null;
+  image_quality: string | null;
+  confidence_overall: number;
+  locked_count: number;
+  preferred_count: number;
+  flexible_count: number;
+  summary: string;
+  recommended_phases: string[];
+  analyzed_at: string;
+}
+
+export interface ConstraintsResponse {
+  project_id: string;
+  total_constraints: number;
+  locked: ConstraintItem[];
+  preferred: ConstraintItem[];
+  flexible: ConstraintItem[];
+}
+
+// ============================================
+// Spatial Analysis Functions (Mission 03)
+// ============================================
+
+/**
+ * Trigger spatial analysis on project images.
+ */
+export async function analyzeSpace(
+  projectId: string,
+  imageUrls?: string[]
+): Promise<AnalysisSummaryResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/analyze-space`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(imageUrls ? { image_urls: imageUrls } : {}),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to analyze space");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get spatial constraints for a project.
+ */
+export async function getConstraints(
+  projectId: string
+): Promise<ConstraintsResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/constraints`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get constraints");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get analysis summary for a project.
+ */
+export async function getAnalysisSummary(
+  projectId: string
+): Promise<AnalysisSummaryResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/analysis-summary`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get analysis summary");
+  }
+
+  return response.json();
+}
