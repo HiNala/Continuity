@@ -16,11 +16,13 @@ from sqlalchemy.orm import selectinload
 from app.database import get_async_session
 from app.models import (
     Project, Requirements, ProjectStatus, Constraint, ProjectAnalysis,
-    Iteration, Policy, GenerationPhase, IterationStatus
+    Iteration, Policy, GenerationPhase, IterationStatus, EvaluationDetail,
+    PolicyChange, EvaluationStatus
 )
 from app.agents.requirements_agent import requirements_agent
 from app.agents.spatial_agent import spatial_agent
 from app.agents.generation_agent import generation_agent
+from app.agents.qc_agent import qc_agent
 
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -810,3 +812,299 @@ async def get_policy(
         fixture_config=policy["fixture_config"],
         style_config=policy["style_config"],
     )
+
+
+# ============================================
+# QC & Evaluation Models (Mission 05)
+# ============================================
+class EvaluationRequest(BaseModel):
+    """Request to evaluate an iteration."""
+    target_style: Optional[str] = None
+
+
+class CriterionResult(BaseModel):
+    """Result for a single evaluation criterion."""
+    criterion: str
+    passed: bool
+    score: float
+    details: str
+    evidence: Dict[str, Any]
+
+
+class EvaluationResponse(BaseModel):
+    """Response from iteration evaluation."""
+    success: bool
+    iteration_id: str
+    overall_score: Optional[float] = None
+    passed: Optional[bool] = None
+    status: Optional[str] = None
+    evaluations: Optional[List[CriterionResult]] = None
+    threshold: float = 0.7
+    error: Optional[str] = None
+
+
+class FailureAnalysisResponse(BaseModel):
+    """Response from failure analysis."""
+    iteration_id: str
+    phase: str
+    overall_score: Optional[float]
+    failed_criteria: List[Dict[str, Any]]
+    insights: List[str]
+    recommended_changes: List[Dict[str, Any]]
+
+
+class ApplyChangesRequest(BaseModel):
+    """Request to apply policy changes."""
+    changes: List[Dict[str, Any]]
+    trigger_iteration_id: Optional[str] = None
+
+
+class ApplyChangesResponse(BaseModel):
+    """Response from applying policy changes."""
+    success: bool
+    old_version: int
+    new_version: int
+    new_policy_id: int
+    changes_applied: List[Dict[str, Any]]
+
+
+class PolicyChangeRecord(BaseModel):
+    """Record of a policy change."""
+    id: str
+    old_policy_id: int
+    new_policy_id: int
+    trigger_iteration_id: Optional[str]
+    trigger_reason: Optional[str]
+    changes_made: List[Dict[str, Any]]
+    rationale: Optional[str]
+    created_at: str
+
+
+class EvaluationDetailResponse(BaseModel):
+    """Detailed evaluation for an iteration."""
+    iteration_id: str
+    evaluation_status: str
+    overall_score: Optional[float]
+    evaluated_at: Optional[str]
+    criteria: List[CriterionResult]
+
+
+# ============================================
+# QC & Evaluation Endpoints (Mission 05)
+# ============================================
+@router.post("/{project_id}/iterations/{iteration_id}/evaluate", response_model=EvaluationResponse)
+async def evaluate_iteration(
+    project_id: UUID,
+    iteration_id: UUID,
+    request: Optional[EvaluationRequest] = None,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Evaluate a generation iteration against all criteria.
+    
+    Runs constraint compliance, geometry, hallucination, style, and phase checks.
+    """
+    target_style = request.target_style if request else None
+    
+    result = await qc_agent.compute_overall_evaluation(
+        session, iteration_id, target_style
+    )
+    
+    if not result.get("success"):
+        return EvaluationResponse(
+            success=False,
+            iteration_id=str(iteration_id),
+            error=result.get("error", "Evaluation failed")
+        )
+    
+    await session.commit()
+    
+    return EvaluationResponse(
+        success=True,
+        iteration_id=result["iteration_id"],
+        overall_score=result["overall_score"],
+        passed=result["passed"],
+        status=result["status"],
+        evaluations=[CriterionResult(**e) for e in result["evaluations"]],
+        threshold=result["threshold"],
+    )
+
+
+@router.get("/{project_id}/iterations/{iteration_id}/evaluation", response_model=EvaluationDetailResponse)
+async def get_iteration_evaluation(
+    project_id: UUID,
+    iteration_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Retrieve stored evaluation results for an iteration.
+    """
+    # Get iteration
+    result = await session.execute(
+        select(Iteration).where(Iteration.id == iteration_id)
+    )
+    iteration = result.scalar_one_or_none()
+    
+    if not iteration:
+        raise HTTPException(status_code=404, detail="Iteration not found")
+    
+    # Get evaluation details
+    details_result = await session.execute(
+        select(EvaluationDetail).where(EvaluationDetail.iteration_id == iteration_id)
+    )
+    details = details_result.scalars().all()
+    
+    return EvaluationDetailResponse(
+        iteration_id=str(iteration_id),
+        evaluation_status=iteration.evaluation_status or EvaluationStatus.PENDING,
+        overall_score=iteration.evaluation_score,
+        evaluated_at=iteration.evaluated_at.isoformat() if iteration.evaluated_at else None,
+        criteria=[
+            CriterionResult(
+                criterion=d.criterion,
+                passed=d.passed,
+                score=d.score,
+                details=d.details or "",
+                evidence=d.evidence or {},
+            )
+            for d in details
+        ],
+    )
+
+
+@router.post("/{project_id}/analyze-failure", response_model=FailureAnalysisResponse)
+async def analyze_failure(
+    project_id: UUID,
+    iteration_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Analyze a failed iteration to understand what went wrong.
+    
+    Returns insights and recommended policy changes.
+    """
+    analysis = await qc_agent.analyze_failure(session, iteration_id)
+    
+    if not analysis.get("iteration_id"):
+        raise HTTPException(status_code=404, detail="Iteration not found")
+    
+    return FailureAnalysisResponse(
+        iteration_id=analysis["iteration_id"],
+        phase=analysis["phase"],
+        overall_score=analysis["overall_score"],
+        failed_criteria=analysis["failed_criteria"],
+        insights=analysis["insights"],
+        recommended_changes=analysis["recommended_changes"],
+    )
+
+
+@router.post("/{project_id}/apply-policy-change", response_model=ApplyChangesResponse)
+async def apply_policy_change(
+    project_id: UUID,
+    request: ApplyChangesRequest,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Apply recommended policy changes and create a new policy version.
+    """
+    trigger_id = UUID(request.trigger_iteration_id) if request.trigger_iteration_id else None
+    
+    result = await qc_agent.apply_policy_changes(
+        session, project_id, request.changes, trigger_id
+    )
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail="Failed to apply policy changes")
+    
+    await session.commit()
+    
+    return ApplyChangesResponse(
+        success=True,
+        old_version=result["old_version"],
+        new_version=result["new_version"],
+        new_policy_id=result["new_policy_id"],
+        changes_applied=result["changes_applied"],
+    )
+
+
+@router.get("/{project_id}/policy-history", response_model=List[PolicyChangeRecord])
+async def get_policy_history(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Retrieve the history of policy changes for a project.
+    
+    Shows how the policy evolved through the self-improvement loop.
+    """
+    history = await qc_agent.get_policy_history(session, project_id)
+    
+    return [
+        PolicyChangeRecord(
+            id=h["id"],
+            old_policy_id=h["old_policy_id"],
+            new_policy_id=h["new_policy_id"],
+            trigger_iteration_id=h["trigger_iteration_id"],
+            trigger_reason=h["trigger_reason"],
+            changes_made=h["changes_made"],
+            rationale=h["rationale"],
+            created_at=h["created_at"],
+        )
+        for h in history
+    ]
+
+
+@router.post("/{project_id}/evaluate-and-improve")
+async def evaluate_and_improve(
+    project_id: UUID,
+    iteration_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Full QC pipeline: evaluate iteration, analyze if failed, apply improvements.
+    
+    This is the core self-improvement endpoint that:
+    1. Evaluates the iteration
+    2. If failed, analyzes the failure
+    3. Applies recommended policy changes
+    4. Returns all results
+    """
+    # Step 1: Evaluate
+    eval_result = await qc_agent.compute_overall_evaluation(session, iteration_id)
+    
+    if not eval_result.get("success"):
+        raise HTTPException(status_code=500, detail="Evaluation failed")
+    
+    response = {
+        "evaluation": {
+            "passed": eval_result["passed"],
+            "score": eval_result["overall_score"],
+            "status": eval_result["status"],
+        },
+        "analysis": None,
+        "policy_update": None,
+    }
+    
+    # Step 2: If failed, analyze and improve
+    if not eval_result["passed"]:
+        analysis = await qc_agent.analyze_failure(session, iteration_id)
+        response["analysis"] = {
+            "insights": analysis.get("insights", []),
+            "recommended_changes": analysis.get("recommended_changes", []),
+        }
+        
+        # Step 3: Apply changes if any recommended
+        recommended = analysis.get("recommended_changes", [])
+        if recommended:
+            policy_result = await qc_agent.apply_policy_changes(
+                session, project_id, recommended, iteration_id
+            )
+            response["policy_update"] = {
+                "old_version": policy_result["old_version"],
+                "new_version": policy_result["new_version"],
+                "changes_applied": policy_result["changes_applied"],
+            }
+    
+    await session.commit()
+    
+    return response
