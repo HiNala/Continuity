@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # Model Configuration
     # ==========================================
     default_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.0-flash"  # Vision model for spatial analysis
     max_iterations: int = 5
     quality_threshold: float = 0.7
     

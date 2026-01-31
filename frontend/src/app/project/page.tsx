@@ -65,6 +65,8 @@ export default function ProjectPage() {
 
   // Project data
   const [goal, setGoal] = useState("");
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [imageUrlInput, setImageUrlInput] = useState("");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [questions, setQuestions] = useState<ClarifyingQuestion[]>([]);
   const [identified, setIdentified] = useState<Record<string, any>>({});
@@ -75,6 +77,21 @@ export default function ProjectPage() {
   
   // Spatial Analysis (Mission 03)
   const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummaryResponse | null>(null);
+
+  // ==========================================
+  // Image URL handling
+  // ==========================================
+  const addImageUrl = () => {
+    const url = imageUrlInput.trim();
+    if (url && !imageUrls.includes(url)) {
+      setImageUrls([...imageUrls, url]);
+      setImageUrlInput("");
+    }
+  };
+
+  const removeImageUrl = (urlToRemove: string) => {
+    setImageUrls(imageUrls.filter((url) => url !== urlToRemove));
+  };
 
   // ==========================================
   // Step 1: Create project and analyze goal
@@ -89,8 +106,11 @@ export default function ProjectPage() {
     setError(null);
 
     try {
-      // Create the project
-      const project = await createProject({ goal: goal.trim() });
+      // Create the project with goal and images
+      const project = await createProject({ 
+        goal: goal.trim(),
+        images: imageUrls,
+      });
       setProjectId(project.project_id);
 
       // Analyze the goal
@@ -190,8 +210,8 @@ export default function ProjectPage() {
     setStep("analyzing");
 
     try {
-      // For demo, we'll use placeholder images or none
-      const result = await analyzeSpace(projectId);
+      // Analyze with provided image URLs (if any)
+      const result = await analyzeSpace(projectId, imageUrls.length > 0 ? imageUrls : undefined);
       setAnalysisSummary(result);
       setStep("constraints");
     } catch (err) {
@@ -302,21 +322,53 @@ export default function ProjectPage() {
                 />
               </div>
 
-              {/* Upload placeholder */}
-              <div className="card border-dashed border-2 border-slate-700 opacity-50 cursor-not-allowed">
-                <div className="flex items-center gap-4 py-4">
-                  <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center">
-                    <Upload className="w-6 h-6 text-slate-500" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-slate-400">
-                      Upload images (coming soon)
-                    </p>
-                    <p className="text-sm text-slate-600">
-                      Drag and drop or click to upload space photos
-                    </p>
-                  </div>
+              {/* Image URL Input */}
+              <div className="card">
+                <div className="flex items-center gap-2 mb-3">
+                  <Upload className="w-5 h-5 text-slate-400" />
+                  <span className="font-medium text-slate-300">Add Image URLs</span>
+                  <span className="text-xs text-slate-500">(optional)</span>
                 </div>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={imageUrlInput}
+                    onChange={(e) => setImageUrlInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addImageUrl()}
+                    placeholder="https://example.com/room-photo.jpg"
+                    className="flex-1 px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-continuity-500/50 focus:border-continuity-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={addImageUrl}
+                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium transition-colors"
+                  >
+                    Add
+                  </button>
+                </div>
+                {imageUrls.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {imageUrls.map((url, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg text-sm"
+                      >
+                        <span className="text-slate-300 truncate max-w-[200px]">
+                          {url.split("/").pop() || `Image ${index + 1}`}
+                        </span>
+                        <button
+                          onClick={() => removeImageUrl(url)}
+                          className="text-slate-500 hover:text-red-400 transition-colors"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="mt-2 text-xs text-slate-500">
+                  Add URLs to images of your space for AI spatial analysis
+                </p>
               </div>
 
               <button
@@ -580,6 +632,8 @@ export default function ProjectPage() {
                 onClick={() => {
                   setStep("input");
                   setGoal("");
+                  setImageUrls([]);
+                  setImageUrlInput("");
                   setProjectId(null);
                   setQuestions([]);
                   setIdentified({});
@@ -741,6 +795,8 @@ export default function ProjectPage() {
                 onClick={() => {
                   setStep("input");
                   setGoal("");
+                  setImageUrls([]);
+                  setImageUrlInput("");
                   setProjectId(null);
                   setQuestions([]);
                   setIdentified({});

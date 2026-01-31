@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
-from app.models import Base, SystemStatus, Project, Requirements, Iteration, Constraint, Policy
+from app.models import Base, SystemStatus, Project, Requirements, Iteration, Constraint, Policy, ProjectAnalysis
 
 # ============================================
 # Database Configuration
@@ -113,6 +113,7 @@ __all__ = [
     "Iteration",
     "Constraint",
     "Policy",
+    "ProjectAnalysis",
     "async_engine",
     "sync_engine",
     "AsyncSessionLocal",
