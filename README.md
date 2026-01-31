@@ -383,6 +383,69 @@ This project is organized into missions for the hackathon:
 
 ---
 
+## 🏆 Sponsor Technology Integration
+
+This project showcases deep integration with hackathon sponsor technologies:
+
+### Weave (Weights & Biases) — The Learning Substrate
+
+Weave is not just used for logging — it's the **core mechanism** that enables self-improvement. Every significant operation is traced with `@weave.op()` decorators:
+
+**How Weave Enables Self-Improvement:**
+1. **Trace Capture**: Every Gemini API call, constraint analysis, and generation phase is recorded
+2. **QC Analysis**: The Quality Control Agent programmatically queries Weave traces to understand what went wrong
+3. **Policy Modification**: Based on trace analysis, the system modifies its own generation policy
+4. **Feedback Loop**: Next generation uses updated policy, creating a genuine improvement loop
+
+**What Gets Traced:**
+- `requirements_agent_analyze_goal` — Goal parsing and question generation
+- `spatial_agent_analyze_image` — Constraint extraction from images
+- `gemini_generate_image` — Every image generation call with prompts
+- `qc_compute_overall_evaluation` — Quality assessments
+- `orchestrator_run_pipeline` — Full pipeline orchestration
+
+**View your traces at**: [wandb.ai/home](https://wandb.ai/home)
+
+### Redis — High-Performance Caching Layer
+
+Redis is used for performance-critical caching and session management:
+
+**Use Cases:**
+| Feature | Purpose | TTL |
+|---------|---------|-----|
+| Spatial Analysis Cache | Avoid re-analyzing identical images (expensive Gemini Vision calls) | 1 hour |
+| Policy Cache | Quick retrieval of active generation policy during iterations | 30 min |
+| Orchestration Progress | Real-time progress tracking for frontend polling | 2 hours |
+| Rate Limiting | Prevent excessive API calls to external services | Variable |
+
+**Key Benefits:**
+- **Cost Reduction**: Cached spatial analysis results avoid redundant Gemini Vision API calls
+- **Speed**: Policy lookups during generation are instant from Redis
+- **Real-time Updates**: Orchestration progress is updated without database writes
+
+**Redis Service Location**: `backend/app/redis_service.py`
+
+### Browserbase — Web Automation Platform
+
+Browserbase provides headless browser automation capabilities for future expansion:
+
+**Current Integration:**
+- API key testing and validation through Settings dropdown
+- Foundation for future features like screenshot comparison and web-based reference gathering
+
+**Future Use Cases:**
+- Automated screenshot capture for design references
+- Web scraping of furniture catalogs for style matching
+- Browser-based testing of generated visualization galleries
+
+**Configuration:**
+```bash
+BROWSERBASE_API_KEY=bb_live_...
+BROWSERBASE_PROJECT_ID=your-project-id
+```
+
+---
+
 ## 👥 Team
 
 Built for **WeaveHacks 3: Self-Improving Agents Hackathon**
