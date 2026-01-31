@@ -1,20 +1,21 @@
+import React from "react";
 import type { Metadata } from "next";
-import { ToastProvider } from "@/components/Providers";
+import { Inter } from "next/font/google";
 import "./globals.css";
+import { ToastProvider } from "@/components/Providers";
+
+const inter = Inter({ 
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
-  title: "Continuity - Self-Improving Design Visualization",
-  description:
-    "Transform raw photographs of spaces into realistic, professionally staged renovation visualizations using self-improving AI agents.",
-  keywords: [
-    "AI",
-    "design visualization",
-    "architecture",
-    "interior design",
-    "renovation",
-    "self-improving agents",
-    "Weave",
-  ],
+  title: "Continuity - AI Space Visualization",
+  description: "Transform raw space photos into realistic renovation visualizations with self-improving AI agents",
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({
@@ -23,9 +24,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className="antialiased bg-slate-950 text-white min-h-screen">
-        <ToastProvider>{children}</ToastProvider>
+    <html lang="en" className={inter.variable}>
+      <body className="font-sans antialiased">
+        <ToastProvider>
+          {children}
+        </ToastProvider>
       </body>
     </html>
   );

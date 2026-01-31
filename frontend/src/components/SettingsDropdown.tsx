@@ -24,10 +24,10 @@ import {
 } from "@/lib/api";
 
 interface SettingsDropdownProps {
-  onTestResult: (type: "success" | "error", title: string, message?: string) => void;
+  onTestResult?: (type: "success" | "error", title: string, message?: string) => void;
 }
 
-export function SettingsDropdown({ onTestResult }: SettingsDropdownProps) {
+export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, APITestResult>>({});
@@ -55,13 +55,13 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps) {
       setResults((prev) => ({ ...prev, [service]: result }));
 
       if (result.success) {
-        onTestResult("success", `${getServiceLabel(service)} Connected`, result.message);
+        onTestResult?.("success", `${getServiceLabel(service)} Connected`, result.message);
       } else {
-        onTestResult("error", `${getServiceLabel(service)} Failed`, result.message);
+        onTestResult?.("error", `${getServiceLabel(service)} Failed`, result.message);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Test failed";
-      onTestResult("error", `${getServiceLabel(service)} Error`, message);
+      onTestResult?.("error", `${getServiceLabel(service)} Error`, message);
       setResults((prev) => ({
         ...prev,
         [service]: {
@@ -98,9 +98,9 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps) {
       ].filter((r) => r.success).length;
 
       if (passed === 5) {
-        onTestResult("success", "All APIs Connected", "All 5 services are working");
+        onTestResult?.("success", "All APIs Connected", "All 5 services are working");
       } else {
-        onTestResult(
+        onTestResult?.(
           "error",
           `${passed}/5 APIs Connected`,
           `${5 - passed} service(s) failed`
@@ -108,7 +108,7 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps) {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Test failed";
-      onTestResult("error", "API Test Failed", message);
+      onTestResult?.("error", "API Test Failed", message);
     } finally {
       setTesting(null);
     }

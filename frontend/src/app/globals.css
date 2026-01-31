@@ -2,191 +2,92 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ============================================
-   Continuity - Global Styles
-   Modern Wireframe Design System
-   ============================================ */
-
-@layer base {
-  :root {
-    --background: 2 6% 9%;
-    --foreground: 0 0% 100%;
-    --muted: 215 14% 34%;
-    --accent: 199 89% 48%;
-  }
-
-  body {
-    @apply bg-slate-950 text-white antialiased;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-  }
-
-  /* Improved typography */
-  h1, h2, h3, h4, h5, h6 {
-    @apply tracking-tight;
-  }
-
-  /* Selection color */
-  ::selection {
-    @apply bg-continuity-500/30 text-white;
-  }
+:root {
+  --background: #fafafa;
+  --foreground: #171717;
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --popover: #ffffff;
+  --popover-foreground: #171717;
+  --primary: #ec4899;
+  --primary-foreground: #fafafa;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #171717;
+  --muted: #f5f5f5;
+  --muted-foreground: #737373;
+  --accent: #06b6d4;
+  --accent-foreground: #fafafa;
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #ec4899;
+  --radius: 0.625rem;
 }
 
-@layer components {
-  /* Primary Button - Refined */
-  .btn-primary {
-    @apply px-6 py-3 bg-continuity-500 hover:bg-continuity-400 
-           text-white font-semibold rounded-xl
-           transition-all duration-200 ease-out
-           focus:outline-none focus:ring-2 focus:ring-continuity-400/50 focus:ring-offset-2 focus:ring-offset-slate-950
-           disabled:opacity-50 disabled:cursor-not-allowed
-           shadow-lg shadow-continuity-500/20 hover:shadow-xl hover:shadow-continuity-400/30
-           active:scale-[0.98];
-  }
+.dark {
+  --background: #f8fafc;
+  --foreground: #1e293b;
+  --card: #ffffff;
+  --card-foreground: #1e293b;
+  --popover: #ffffff;
+  --popover-foreground: #1e293b;
+  --primary: #ec4899;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #1e293b;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #06b6d4;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #ec4899;
+}
 
-  /* Secondary Button - Refined */
-  .btn-secondary {
-    @apply px-6 py-3 bg-slate-800/80 hover:bg-slate-700/80 
-           text-white font-semibold rounded-xl border border-slate-700/50
-           transition-all duration-200 ease-out
-           focus:outline-none focus:ring-2 focus:ring-slate-500/50 focus:ring-offset-2 focus:ring-offset-slate-950
-           backdrop-blur-sm active:scale-[0.98];
+@layer base {
+  * {
+    border-color: var(--border);
   }
-
-  /* Ghost Button */
-  .btn-ghost {
-    @apply px-4 py-2 text-slate-400 hover:text-white hover:bg-slate-800/50
-           font-medium rounded-lg transition-all duration-200
-           focus:outline-none focus:ring-2 focus:ring-slate-500/30;
-  }
-
-  /* Card Container - Enhanced */
-  .card {
-    @apply bg-slate-900/60 backdrop-blur-md border border-slate-800/80 
-           rounded-2xl p-6 shadow-xl shadow-black/20
-           transition-all duration-300;
-  }
-
-  /* Interactive Card */
-  .card-interactive {
-    @apply card hover:border-slate-700/80 hover:bg-slate-900/80
-           hover:shadow-2xl hover:shadow-black/30 cursor-pointer;
-  }
-
-  /* Status Badge */
-  .badge {
-    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold tracking-wide;
-  }
-
-  .badge-success {
-    @apply badge bg-emerald-500/10 text-emerald-400 border border-emerald-500/20;
-  }
-
-  .badge-warning {
-    @apply badge bg-amber-500/10 text-amber-400 border border-amber-500/20;
-  }
-
-  .badge-error {
-    @apply badge bg-red-500/10 text-red-400 border border-red-500/20;
-  }
-
-  .badge-info {
-    @apply badge bg-continuity-500/10 text-continuity-400 border border-continuity-500/20;
-  }
-
-  /* Input Field */
-  .input-field {
-    @apply w-full px-4 py-3 bg-slate-800/50 border border-slate-700/50 
-           rounded-xl text-white placeholder:text-slate-500
-           focus:outline-none focus:ring-2 focus:ring-continuity-500/50 focus:border-continuity-500/50
-           transition-all duration-200;
-  }
-
-  /* Step Indicator */
-  .step-indicator {
-    @apply flex items-center gap-2;
-  }
-
-  .step-dot {
-    @apply w-2.5 h-2.5 rounded-full bg-slate-700 transition-all duration-300;
-  }
-
-  .step-dot.active {
-    @apply bg-continuity-500 ring-4 ring-continuity-500/20;
-  }
-
-  .step-dot.completed {
-    @apply bg-emerald-500;
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
 
 @layer utilities {
-  /* Gradient Text */
-  .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-continuity-400 via-cyan-400 to-emerald-400;
-  }
-
-  /* Subtle gradient background */
-  .bg-gradient-subtle {
-    @apply bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900;
-  }
-
-  /* Glass effect */
-  .glass {
-    @apply bg-white/5 backdrop-blur-xl border border-white/10;
-  }
-
-  /* Glow Effect */
-  .glow {
-    box-shadow: 0 0 30px rgba(14, 165, 233, 0.4);
-  }
-
-  .glow-subtle {
-    box-shadow: 0 0 60px rgba(14, 165, 233, 0.15);
-  }
-
-  /* Subtle Animation */
-  .animate-float {
-    animation: float 6s ease-in-out infinite;
-  }
-
-  /* Fade in animation */
-  .animate-fade-in {
-    animation: fadeIn 0.5s ease-out;
-  }
-
-  /* Slide up animation */
-  .animate-slide-up {
-    animation: slideUp 0.5s ease-out;
-  }
-
-  /* Slide in animation (for toasts) */
-  .animate-slide-in {
-    animation: slideIn 0.3s ease-out;
+  .text-balance {
+    text-wrap: balance;
   }
 }
 
-@keyframes float {
-  0%, 100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* Animation keyframes */
 @keyframes fadeIn {
   from {
     opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -197,7 +98,7 @@
 @keyframes slideIn {
   from {
     opacity: 0;
-    transform: translateX(100%);
+    transform: translateX(-20px);
   }
   to {
     opacity: 1;
@@ -205,25 +106,52 @@
   }
 }
 
-/* Scrollbar Styling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+@keyframes pulse-subtle {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
-::-webkit-scrollbar-track {
-  @apply bg-transparent;
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
 }
 
-::-webkit-scrollbar-thumb {
-  @apply bg-slate-700/50 rounded-full;
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out forwards;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-slate-600/50;
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
 }
 
-/* Focus visible improvements */
-*:focus-visible {
-  @apply outline-none ring-2 ring-continuity-500/50 ring-offset-2 ring-offset-slate-950;
+/* Glass morphism utilities */
+.glass {
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
+}
+
+.glass-hover:hover {
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.7);
+  transition: all 0.3s ease;
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(to right, var(--primary), var(--accent), var(--primary));
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-size: 200% auto;
+}
+
+/* Focus ring */
+.focus-ring:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
 }
