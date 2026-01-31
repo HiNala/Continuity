@@ -49,6 +49,9 @@ import {
 } from "@/lib/api";
 import { SettingsDropdown } from "@/components/SettingsDropdown";
 import { useToastContext } from "@/components/Providers";
+import { ImageUpload } from "@/components/ImageUpload";
+import { ResultsTimeline } from "@/components/ResultsTimeline";
+import { ImprovementStory } from "@/components/ImprovementStory";
 
 // ============================================
 // Types
@@ -83,7 +86,6 @@ export default function ProjectPage() {
   // Project data
   const [goal, setGoal] = useState("");
   const [imageUrls, setImageUrls] = useState<string[]>([]);
-  const [imageUrlInput, setImageUrlInput] = useState("");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [questions, setQuestions] = useState<ClarifyingQuestion[]>([]);
   const [identified, setIdentified] = useState<Record<string, string | boolean | number | string[]>>({});
@@ -108,20 +110,6 @@ export default function ProjectPage() {
   const [isPolling, setIsPolling] = useState(false);
 
   // ==========================================
-  // Image URL handling
-  // ==========================================
-  const addImageUrl = () => {
-    const url = imageUrlInput.trim();
-    if (url && !imageUrls.includes(url)) {
-      setImageUrls([...imageUrls, url]);
-      setImageUrlInput("");
-    }
-  };
-
-  const removeImageUrl = (urlToRemove: string) => {
-    setImageUrls(imageUrls.filter((url) => url !== urlToRemove));
-  };
-
   // ==========================================
   // Step 1: Create project and analyze goal
   // ==========================================
@@ -503,53 +491,18 @@ export default function ProjectPage() {
                 />
               </div>
 
-              {/* Image URL Input */}
+              {/* Image Upload */}
               <div className="card">
-                <div className="flex items-center gap-2 mb-3">
+                <div className="flex items-center gap-2 mb-4">
                   <Upload className="w-5 h-5 text-slate-400" />
-                  <span className="font-medium text-slate-300">Add Image URLs</span>
+                  <span className="font-medium text-slate-300">Add Images</span>
                   <span className="text-xs text-slate-500">(optional)</span>
                 </div>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={imageUrlInput}
-                    onChange={(e) => setImageUrlInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addImageUrl()}
-                    placeholder="https://example.com/room-photo.jpg"
-                    className="flex-1 px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-continuity-500/50 focus:border-continuity-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={addImageUrl}
-                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium transition-colors"
-                  >
-                    Add
-                  </button>
-                </div>
-                {imageUrls.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {imageUrls.map((url, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg text-sm"
-                      >
-                        <span className="text-slate-300 truncate max-w-[200px]">
-                          {url.split("/").pop() || `Image ${index + 1}`}
-                        </span>
-                        <button
-                          onClick={() => removeImageUrl(url)}
-                          className="text-slate-500 hover:text-red-400 transition-colors"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <p className="mt-2 text-xs text-slate-500">
-                  Add URLs to images of your space for AI spatial analysis
-                </p>
+                <ImageUpload
+                  images={imageUrls}
+                  onImagesChange={setImageUrls}
+                  maxImages={5}
+                />
               </div>
 
               <button
@@ -814,7 +767,6 @@ export default function ProjectPage() {
                   setStep("input");
                   setGoal("");
                   setImageUrls([]);
-                  setImageUrlInput("");
                   setProjectId(null);
                   setQuestions([]);
                   setIdentified({});
@@ -1003,7 +955,6 @@ export default function ProjectPage() {
                   setStep("input");
                   setGoal("");
                   setImageUrls([]);
-                  setImageUrlInput("");
                   setProjectId(null);
                   setQuestions([]);
                   setIdentified({});
@@ -1171,39 +1122,50 @@ export default function ProjectPage() {
               </div>
             </div>
 
-            {/* Style Variations */}
-            {generationResult.style_variations.length > 0 && (
+            {/* Visual Timeline */}
+            {imageUrls.length > 0 && (
               <div className="card">
-                <h3 className="font-semibold mb-4">Style Variations</h3>
-                <div className="grid md:grid-cols-3 gap-4">
-                  {generationResult.style_variations.map((variation, i) => (
-                    <div
-                      key={i}
-                      className={`p-4 rounded-lg border ${
-                        variation.success
-                          ? "bg-slate-800/50 border-slate-700"
-                          : "bg-red-500/10 border-red-500/20"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-2">
-                        <Palette className="w-4 h-4 text-continuity-400" />
-                        <span className="font-medium capitalize">
-                          {variation.style || `Style ${i + 1}`}
-                        </span>
-                      </div>
-                      {variation.success ? (
-                        <p className="text-xs text-emerald-400">
-                          Generated in {(variation.latency_ms || 0) / 1000}s
-                        </p>
-                      ) : (
-                        <p className="text-xs text-red-400">
-                          {variation.error || "Generation failed"}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                <ResultsTimeline
+                  originalImage={imageUrls[0]}
+                  phases={generationResult.phases
+                    .filter(p => p.success)
+                    .map(p => ({
+                      phase: p.phase,
+                      imagePath: p.output_path || imageUrls[0],
+                      iterationId: p.iteration_id,
+                    }))}
+                  styleVariations={generationResult.style_variations
+                    .filter(v => v.success)
+                    .map(v => ({
+                      phase: v.style || "styled",
+                      imagePath: v.output_path || imageUrls[0],
+                    }))}
+                  onViewWeaveTrace={(traceId) => {
+                    window.open(`https://wandb.ai/traces/${traceId}`, "_blank");
+                  }}
+                />
               </div>
+            )}
+
+            {/* Improvement Story (if retries occurred) */}
+            {orchestrationStatus && orchestrationStatus.retry_count > 0 && (
+              <ImprovementStory
+                retries={[{
+                  phase: orchestrationStatus.current_phase || "generation",
+                  attemptNumber: orchestrationStatus.retry_count + 1,
+                  failureReason: "Quality check detected improvement opportunities",
+                  policyChanges: qcResult?.policy_update?.changes_applied?.map((change: Record<string, unknown>) => ({
+                    field: String(change.field || "policy"),
+                    oldValue: String(change.old_value || "default"),
+                    newValue: String(change.new_value || "optimized"),
+                    reason: String(change.reason || "AI-driven optimization"),
+                  })) || [],
+                  improved: true,
+                }]}
+                onViewWeaveTrace={(traceId) => {
+                  window.open(`https://wandb.ai/traces/${traceId}`, "_blank");
+                }}
+              />
             )}
 
             {/* Quality Control Section (Mission 05) */}
@@ -1342,7 +1304,6 @@ export default function ProjectPage() {
                   setStep("input");
                   setGoal("");
                   setImageUrls([]);
-                  setImageUrlInput("");
                   setProjectId(null);
                   setQuestions([]);
                   setIdentified({});
