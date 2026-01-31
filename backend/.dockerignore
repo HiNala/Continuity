@@ -1,0 +1,12 @@
+# Backend Docker Ignore
+__pycache__
+*.py[cod]
+.git
+*.md
+.env*
+.pytest_cache
+.coverage
+htmlcov
+.mypy_cache
+venv
+.venv
