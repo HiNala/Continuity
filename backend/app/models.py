@@ -32,6 +32,61 @@ class ProjectStatus:
 
 
 # ============================================
+# Orchestration State Enum (Mission 06)
+# ============================================
+class OrchestrationState:
+    """Orchestration state machine states."""
+    # Initial states
+    CREATED = "created"
+    
+    # Requirements phase
+    GATHERING_REQUIREMENTS = "gathering_requirements"
+    AWAITING_CLARIFICATION = "awaiting_clarification"
+    
+    # Analysis phase
+    ANALYZING_SPACE = "analyzing_space"
+    
+    # Cleanup phase
+    GENERATING_CLEANUP = "generating_cleanup"
+    EVALUATING_CLEANUP = "evaluating_cleanup"
+    RETRYING_CLEANUP = "retrying_cleanup"
+    
+    # Structural phase
+    GENERATING_STRUCTURAL = "generating_structural"
+    EVALUATING_STRUCTURAL = "evaluating_structural"
+    RETRYING_STRUCTURAL = "retrying_structural"
+    
+    # Fixture phase
+    GENERATING_FIXTURE = "generating_fixture"
+    EVALUATING_FIXTURE = "evaluating_fixture"
+    RETRYING_FIXTURE = "retrying_fixture"
+    
+    # Style phase
+    GENERATING_STYLE = "generating_style"
+    EVALUATING_STYLE = "evaluating_style"
+    RETRYING_STYLE = "retrying_style"
+    
+    # Terminal states
+    COMPLETED = "completed"
+    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
+    FAILED = "failed"
+
+
+# ============================================
+# Orchestration Trigger Enum
+# ============================================
+class OrchestrationTrigger:
+    """What caused a state transition."""
+    START = "start"
+    SUCCESS = "success"
+    FAILURE = "failure"
+    TIMEOUT = "timeout"
+    USER_ACTION = "user_action"
+    MAX_RETRIES = "max_retries"
+    SKIP = "skip"
+
+
+# ============================================
 # Projects Table
 # ============================================
 class Project(Base):
@@ -50,6 +105,15 @@ class Project(Base):
     goal = Column(Text, nullable=True)  # Original user goal text
     images = Column(JSON, default=list)  # Array of image paths/URLs
     
+    # Orchestration fields (Mission 06)
+    orchestration_state = Column(String(50), default=OrchestrationState.CREATED, index=True)
+    current_phase = Column(String(50), nullable=True)  # Current generation phase
+    retry_count = Column(Integer, default=0)  # Retries for current phase
+    started_at = Column(DateTime(timezone=True), nullable=True)  # Processing start time
+    completed_at = Column(DateTime(timezone=True), nullable=True)  # Processing end time
+    has_warnings = Column(Boolean, default=False)  # Any phases had issues
+    warning_details = Column(JSON, default=list)  # Details of any warnings
+    
     # Metadata
     metadata_ = Column("metadata", JSON, default=dict)
     
@@ -58,6 +122,34 @@ class Project(Base):
     analysis = relationship("ProjectAnalysis", back_populates="project", uselist=False, cascade="all, delete-orphan")
     iterations = relationship("Iteration", back_populates="project", cascade="all, delete-orphan")
     constraints = relationship("Constraint", back_populates="project", cascade="all, delete-orphan")
+    orchestration_logs = relationship("OrchestrationLog", back_populates="project", cascade="all, delete-orphan")
+
+
+# ============================================
+# Orchestration Log Table (Mission 06)
+# ============================================
+class OrchestrationLog(Base):
+    """
+    OrchestrationLog table - Tracks all state transitions for a project.
+    Provides complete visibility into how a project progressed through the pipeline.
+    """
+    __tablename__ = "orchestration_logs"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    
+    # State transition
+    from_state = Column(String(50), nullable=False)
+    to_state = Column(String(50), nullable=False)
+    trigger = Column(String(50), nullable=False)  # success, failure, timeout, user_action
+    
+    # Additional context
+    details = Column(JSON, default=dict)  # Extra information about the transition
+    duration_ms = Column(Integer, nullable=True)  # Time spent in from_state
+    
+    # Relationship
+    project = relationship("Project", back_populates="orchestration_logs")
 
 
 # ============================================

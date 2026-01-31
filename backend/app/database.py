@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from app.config import settings
 from app.models import (
     Base, SystemStatus, Project, Requirements, Iteration, Constraint, Policy, 
-    ProjectAnalysis, EvaluationDetail, PolicyChange
+    ProjectAnalysis, EvaluationDetail, PolicyChange, OrchestrationLog
 )
 
 # ============================================
@@ -117,6 +117,9 @@ __all__ = [
     "Constraint",
     "Policy",
     "ProjectAnalysis",
+    "EvaluationDetail",
+    "PolicyChange",
+    "OrchestrationLog",
     "async_engine",
     "sync_engine",
     "AsyncSessionLocal",
