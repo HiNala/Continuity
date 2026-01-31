@@ -1,0 +1,125 @@
+# ============================================
+# Continuity - Docker Compose Configuration
+# ============================================
+# Self-Improving Agent System for Design Visualization
+# WeaveHacks 3 - January 31-February 1, 2026
+# ============================================
+#
+# Usage:
+#   docker compose up --build -d    # Build and start all services
+#   docker compose down              # Stop all services
+#   docker compose logs -f           # View logs
+#   docker compose logs -f backend   # View backend logs only
+#
+# ============================================
+
+services:
+  # ==========================================
+  # Frontend - Next.js 15
+  # ==========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    volumes:
+      # Mount source for hot reloading in development
+      - ./frontend/src:/app/src:ro
+      - ./frontend/public:/app/public:ro
+    networks:
+      - continuity-network
+    restart: unless-stopped
+
+  # ==========================================
+  # Backend - FastAPI + Python
+  # ==========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - DATABASE_URL=postgresql://continuity:continuity_dev_password@postgres:5432/continuity
+      - REDIS_URL=redis://redis:6379/0
+      - FRONTEND_URL=http://localhost:3000
+      - WEAVE_PROJECT_NAME=continuity
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Mount source for hot reloading in development
+      - ./backend/app:/app/app:ro
+    networks:
+      - continuity-network
+    restart: unless-stopped
+
+  # ==========================================
+  # PostgreSQL Database
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=continuity
+      - POSTGRES_PASSWORD=continuity_dev_password
+      - POSTGRES_DB=continuity
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - continuity-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U continuity -d continuity"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ==========================================
+  # Redis - Caching & Vector Storage
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - continuity-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  continuity-network:
+    driver: bridge
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
