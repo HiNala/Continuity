@@ -119,6 +119,28 @@ class IterationStatus:
 
 
 # ============================================
+# Evaluation Status Enum
+# ============================================
+class EvaluationStatus:
+    """Evaluation status values."""
+    PENDING = "pending"
+    PASSED = "passed"
+    FAILED = "failed"
+
+
+# ============================================
+# Evaluation Criterion Enum
+# ============================================
+class EvaluationCriterion:
+    """Evaluation criteria types."""
+    CONSTRAINT_COMPLIANCE = "constraint_compliance"
+    GEOMETRY_PRESERVATION = "geometry_preservation"
+    HALLUCINATION_DETECTION = "hallucination_detection"
+    STYLE_EXECUTION = "style_execution"
+    PHASE_COMPLETION = "phase_completion"
+
+
+# ============================================
 # Iterations Table (for Mission 04+)
 # ============================================
 class Iteration(Base):
@@ -147,10 +169,17 @@ class Iteration(Base):
     # Policy tracking
     policy_version = Column(Integer, nullable=True)
     
-    # Status and evaluation
+    # Status
     status = Column(String(20), default=IterationStatus.PENDING)  # pending, in_progress, completed, failed
-    evaluation_result = Column(String(20), nullable=True)  # accepted, rejected
     error_message = Column(Text, nullable=True)
+    
+    # Evaluation fields (Mission 05)
+    evaluation_status = Column(String(20), default=EvaluationStatus.PENDING)  # pending, passed, failed
+    evaluation_score = Column(Float, nullable=True)  # 0.0 to 1.0 overall score
+    evaluation_result = Column(String(20), nullable=True)  # accepted, rejected
+    evaluation_reasons = Column(JSON, default=list)  # Array of pass/fail reasons
+    evaluated_at = Column(DateTime(timezone=True), nullable=True)
+    evaluator_weave_trace_id = Column(String(255), nullable=True)
     failure_reasons = Column(JSON, default=list)
     
     # Weave tracking
@@ -159,8 +188,39 @@ class Iteration(Base):
     # Metadata
     metadata_ = Column("metadata", JSON, default=dict)
     
-    # Relationship
+    # Relationships
     project = relationship("Project", back_populates="iterations")
+    evaluation_details = relationship("EvaluationDetail", back_populates="iteration", cascade="all, delete-orphan")
+
+
+# ============================================
+# Evaluation Details Table (Mission 05)
+# ============================================
+class EvaluationDetail(Base):
+    """
+    EvaluationDetails table - Granular evaluation feedback per criterion.
+    Each row represents evaluation of one criterion for one iteration.
+    """
+    __tablename__ = "evaluation_details"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    iteration_id = Column(UUID(as_uuid=True), ForeignKey("iterations.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    
+    # Criterion info
+    criterion = Column(String(50), nullable=False)  # constraint_compliance, geometry_preservation, etc.
+    weight = Column(Float, default=1.0)  # Weight in overall score calculation
+    
+    # Evaluation result
+    passed = Column(Boolean, nullable=False)
+    score = Column(Float, nullable=False)  # 0.0 to 1.0
+    
+    # Detailed feedback
+    details = Column(Text, nullable=True)  # Human-readable explanation
+    evidence = Column(JSON, default=dict)  # Specific findings
+    
+    # Relationship
+    iteration = relationship("Iteration", back_populates="evaluation_details")
 
 
 # ============================================
@@ -343,6 +403,39 @@ class Policy(Base):
     
     # Whether this is the active policy
     is_active = Column(Boolean, default=True)
+
+
+# ============================================
+# Policy Changes Table (Mission 05)
+# ============================================
+class PolicyChange(Base):
+    """
+    PolicyChanges table - Tracks policy modifications made by QC agent.
+    Provides audit trail of how policies evolved through self-improvement.
+    """
+    __tablename__ = "policy_changes"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    
+    # Project and policy references
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    old_policy_id = Column(Integer, ForeignKey("policies.id"), nullable=False)
+    new_policy_id = Column(Integer, ForeignKey("policies.id"), nullable=False)
+    
+    # Trigger information
+    trigger_iteration_id = Column(UUID(as_uuid=True), ForeignKey("iterations.id"), nullable=True)
+    trigger_reason = Column(String(100), nullable=True)  # constraint_violation, hallucination, style_mismatch
+    
+    # Change details
+    changes_made = Column(JSON, nullable=False)  # Detailed description of what changed
+    rationale = Column(Text, nullable=True)  # Explanation of why changes were made
+    
+    # Effectiveness tracking
+    improvement_observed = Column(Boolean, nullable=True)  # Did it help?
+    
+    # Weave tracking
+    weave_run_id = Column(String(255), nullable=True)
 
 
 # ============================================

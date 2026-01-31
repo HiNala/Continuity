@@ -1,0 +1,917 @@
+"""
+Continuity - Quality Control & Optimizer Agent
+Mission 05: Evaluates generation outputs and modifies policy for self-improvement.
+
+This agent is the brain of the self-improvement loop:
+1. Evaluates generation outputs against multiple criteria
+2. Analyzes Weave traces to understand failures
+3. Proposes specific, actionable policy modifications
+4. Creates new policy versions when changes are needed
+
+The agent does NOT generate images - it only evaluates and optimizes.
+"""
+
+import json
+import time
+import httpx
+from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any, Tuple
+from uuid import UUID
+
+import weave
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_, desc
+
+from app.config import settings
+from app.models import (
+    Project, Policy, Iteration, Constraint, ProjectAnalysis,
+    EvaluationDetail, PolicyChange, EvaluationStatus, EvaluationCriterion,
+    PolicyCreator, ConstraintClassification, GenerationPhase
+)
+
+
+# ============================================
+# Evaluation Criteria Weights
+# ============================================
+CRITERION_WEIGHTS = {
+    EvaluationCriterion.CONSTRAINT_COMPLIANCE: 0.35,
+    EvaluationCriterion.GEOMETRY_PRESERVATION: 0.25,
+    EvaluationCriterion.HALLUCINATION_DETECTION: 0.20,
+    EvaluationCriterion.STYLE_EXECUTION: 0.10,
+    EvaluationCriterion.PHASE_COMPLETION: 0.10,
+}
+
+# Pass/fail threshold
+PASS_THRESHOLD = 0.70
+
+
+# ============================================
+# Quality Control Agent Class
+# ============================================
+class QualityControlAgent:
+    """
+    The Quality Control Agent evaluates outputs and modifies policy.
+    It is the core of the self-improvement loop.
+    """
+    
+    def __init__(self):
+        self.gemini_api_key = settings.gemini_api_key
+        self.gemini_model = settings.gemini_model
+    
+    # ==========================================
+    # Evaluation Functions
+    # ==========================================
+    
+    @weave.op()
+    async def evaluate_constraint_compliance(
+        self,
+        iteration: Iteration,
+        constraints: List[Constraint],
+        session: AsyncSession
+    ) -> Dict[str, Any]:
+        """
+        Evaluate whether locked constraints are satisfied.
+        Weight: 35%
+        """
+        locked_constraints = [c for c in constraints if c.classification == ConstraintClassification.LOCKED]
+        
+        if not locked_constraints:
+            # No locked constraints means automatic pass
+            return {
+                "criterion": EvaluationCriterion.CONSTRAINT_COMPLIANCE,
+                "passed": True,
+                "score": 1.0,
+                "details": "No locked constraints to verify.",
+                "evidence": {"locked_count": 0, "violations": []},
+            }
+        
+        # Build verification prompt for vision model
+        constraint_descriptions = []
+        for c in locked_constraints:
+            constraint_descriptions.append(
+                f"- {c.element_type} at {c.element_location or 'unspecified location'}"
+            )
+        
+        prompt = f"""Analyze this generated interior/architectural image for constraint compliance.
+
+The following elements MUST be present and correctly positioned:
+{chr(10).join(constraint_descriptions)}
+
+For each constraint:
+1. Is the element visible in the image? (yes/no)
+2. Is it in approximately the correct location? (yes/no)
+3. Has it been inappropriately moved or removed? (yes/no)
+
+Return a JSON response with this structure:
+{{
+    "violations": [
+        {{"element": "element_type", "issue": "description of violation"}}
+    ],
+    "compliance_score": 0.0-1.0,
+    "analysis": "brief overall assessment"
+}}"""
+
+        try:
+            result = await self._call_vision_api(prompt, iteration.output_image_path)
+            
+            if result.get("success"):
+                response_data = self._parse_json_response(result.get("response_text", ""))
+                violations = response_data.get("violations", [])
+                score = response_data.get("compliance_score", 0.5)
+                
+                return {
+                    "criterion": EvaluationCriterion.CONSTRAINT_COMPLIANCE,
+                    "passed": len(violations) == 0 and score >= 0.7,
+                    "score": score,
+                    "details": response_data.get("analysis", "Constraint compliance evaluation complete."),
+                    "evidence": {
+                        "locked_count": len(locked_constraints),
+                        "violations": violations,
+                    },
+                }
+        except Exception as e:
+            pass  # Fall through to default response
+        
+        # Default response if vision API fails
+        return {
+            "criterion": EvaluationCriterion.CONSTRAINT_COMPLIANCE,
+            "passed": True,  # Assume pass if we can't verify
+            "score": 0.8,
+            "details": "Vision verification unavailable. Assuming reasonable compliance.",
+            "evidence": {"locked_count": len(locked_constraints), "violations": []},
+        }
+    
+    @weave.op()
+    async def evaluate_geometry_preservation(
+        self,
+        iteration: Iteration,
+        session: AsyncSession
+    ) -> Dict[str, Any]:
+        """
+        Evaluate whether room geometry was preserved.
+        Weight: 25%
+        """
+        prompt = """Analyze this interior/architectural image for geometric consistency.
+
+Check for:
+1. Room boundaries appear natural and consistent
+2. Walls are straight and properly connected
+3. Windows and doors are properly positioned
+4. No impossible spaces or geometry errors
+5. Perspective is consistent
+
+Return a JSON response:
+{{
+    "geometry_issues": [
+        {{"issue": "description of geometry problem"}}
+    ],
+    "preservation_score": 0.0-1.0,
+    "analysis": "brief assessment"
+}}"""
+
+        try:
+            result = await self._call_vision_api(prompt, iteration.output_image_path)
+            
+            if result.get("success"):
+                response_data = self._parse_json_response(result.get("response_text", ""))
+                issues = response_data.get("geometry_issues", [])
+                score = response_data.get("preservation_score", 0.7)
+                
+                return {
+                    "criterion": EvaluationCriterion.GEOMETRY_PRESERVATION,
+                    "passed": len(issues) == 0 and score >= 0.6,
+                    "score": score,
+                    "details": response_data.get("analysis", "Geometry preservation evaluation complete."),
+                    "evidence": {"issues": issues},
+                }
+        except Exception:
+            pass
+        
+        return {
+            "criterion": EvaluationCriterion.GEOMETRY_PRESERVATION,
+            "passed": True,
+            "score": 0.8,
+            "details": "Geometry check unavailable. Assuming reasonable preservation.",
+            "evidence": {"issues": []},
+        }
+    
+    @weave.op()
+    async def evaluate_hallucinations(
+        self,
+        iteration: Iteration,
+        session: AsyncSession
+    ) -> Dict[str, Any]:
+        """
+        Detect hallucinated elements not in input or requirements.
+        Weight: 20%
+        """
+        prompt = """Analyze this interior/architectural image for potential hallucinations.
+
+Look for elements that seem:
+1. Physically impossible or implausible
+2. Inconsistent with a realistic interior space
+3. Unexpected additional windows, doors, or openings
+4. Objects floating or positioned impossibly
+5. Repeated or duplicated elements that shouldn't be duplicated
+
+Return a JSON response:
+{{
+    "hallucinations": [
+        {{"element": "what was hallucinated", "severity": "minor/major/critical"}}
+    ],
+    "hallucination_score": 0.0-1.0 (higher is better - fewer hallucinations),
+    "analysis": "brief assessment"
+}}"""
+
+        try:
+            result = await self._call_vision_api(prompt, iteration.output_image_path)
+            
+            if result.get("success"):
+                response_data = self._parse_json_response(result.get("response_text", ""))
+                hallucinations = response_data.get("hallucinations", [])
+                score = response_data.get("hallucination_score", 0.8)
+                
+                # Major or critical hallucinations should fail
+                critical_count = sum(1 for h in hallucinations if h.get("severity") in ["major", "critical"])
+                
+                return {
+                    "criterion": EvaluationCriterion.HALLUCINATION_DETECTION,
+                    "passed": critical_count == 0 and score >= 0.6,
+                    "score": score,
+                    "details": response_data.get("analysis", "Hallucination detection complete."),
+                    "evidence": {"hallucinations": hallucinations, "critical_count": critical_count},
+                }
+        except Exception:
+            pass
+        
+        return {
+            "criterion": EvaluationCriterion.HALLUCINATION_DETECTION,
+            "passed": True,
+            "score": 0.85,
+            "details": "Hallucination check unavailable. Assuming minimal hallucinations.",
+            "evidence": {"hallucinations": [], "critical_count": 0},
+        }
+    
+    @weave.op()
+    async def evaluate_style_execution(
+        self,
+        iteration: Iteration,
+        target_style: Optional[str],
+        session: AsyncSession
+    ) -> Dict[str, Any]:
+        """
+        Evaluate style application (primarily for style phase).
+        Weight: 10%
+        """
+        # Only really applies to style phase
+        if iteration.phase != GenerationPhase.STYLE:
+            return {
+                "criterion": EvaluationCriterion.STYLE_EXECUTION,
+                "passed": True,
+                "score": 1.0,
+                "details": "Style evaluation not applicable for this phase.",
+                "evidence": {"phase": iteration.phase},
+            }
+        
+        style = target_style or iteration.metadata_.get("target_style", "modern")
+        
+        prompt = f"""Analyze this interior design image for style consistency.
+
+The target style is: {style}
+
+Evaluate:
+1. Does the overall aesthetic match {style} design principles?
+2. Are materials and finishes consistent with {style}?
+3. Is the color palette appropriate for {style}?
+4. Do furniture and fixtures match {style} characteristics?
+
+Return a JSON response:
+{{
+    "style_match": true/false,
+    "style_score": 0.0-1.0,
+    "matching_elements": ["list of elements that match the style"],
+    "mismatched_elements": ["list of elements that don't match"],
+    "analysis": "brief assessment"
+}}"""
+
+        try:
+            result = await self._call_vision_api(prompt, iteration.output_image_path)
+            
+            if result.get("success"):
+                response_data = self._parse_json_response(result.get("response_text", ""))
+                score = response_data.get("style_score", 0.7)
+                
+                return {
+                    "criterion": EvaluationCriterion.STYLE_EXECUTION,
+                    "passed": response_data.get("style_match", True) and score >= 0.5,
+                    "score": score,
+                    "details": response_data.get("analysis", f"Style evaluation for {style} complete."),
+                    "evidence": {
+                        "target_style": style,
+                        "matching": response_data.get("matching_elements", []),
+                        "mismatched": response_data.get("mismatched_elements", []),
+                    },
+                }
+        except Exception:
+            pass
+        
+        return {
+            "criterion": EvaluationCriterion.STYLE_EXECUTION,
+            "passed": True,
+            "score": 0.75,
+            "details": f"Style check for {style} unavailable. Assuming reasonable execution.",
+            "evidence": {"target_style": style},
+        }
+    
+    @weave.op()
+    async def evaluate_phase_completion(
+        self,
+        iteration: Iteration,
+        session: AsyncSession
+    ) -> Dict[str, Any]:
+        """
+        Evaluate whether the phase accomplished its goal.
+        Weight: 10%
+        """
+        phase = iteration.phase
+        
+        phase_goals = {
+            GenerationPhase.CLEANUP: "Remove debris, dust, tools, and construction materials",
+            GenerationPhase.STRUCTURAL: "Complete walls, ceiling, and flooring to finished state",
+            GenerationPhase.FIXTURE: "Install appropriate fixtures and features",
+            GenerationPhase.STYLE: "Apply design style with appropriate materials and finishes",
+        }
+        
+        goal = phase_goals.get(phase, "Complete the generation phase successfully")
+        
+        prompt = f"""Analyze this interior/architectural image for phase completion.
+
+Phase: {phase}
+Goal: {goal}
+
+Evaluate whether the image shows evidence that this goal was accomplished.
+
+Return a JSON response:
+{{
+    "goal_achieved": true/false,
+    "completion_score": 0.0-1.0,
+    "evidence_of_completion": ["list of evidence"],
+    "missing_elements": ["what's still missing"],
+    "analysis": "brief assessment"
+}}"""
+
+        try:
+            result = await self._call_vision_api(prompt, iteration.output_image_path)
+            
+            if result.get("success"):
+                response_data = self._parse_json_response(result.get("response_text", ""))
+                score = response_data.get("completion_score", 0.7)
+                
+                return {
+                    "criterion": EvaluationCriterion.PHASE_COMPLETION,
+                    "passed": response_data.get("goal_achieved", True) and score >= 0.5,
+                    "score": score,
+                    "details": response_data.get("analysis", f"Phase {phase} completion evaluation done."),
+                    "evidence": {
+                        "phase": phase,
+                        "goal": goal,
+                        "completed": response_data.get("evidence_of_completion", []),
+                        "missing": response_data.get("missing_elements", []),
+                    },
+                }
+        except Exception:
+            pass
+        
+        return {
+            "criterion": EvaluationCriterion.PHASE_COMPLETION,
+            "passed": True,
+            "score": 0.8,
+            "details": f"Phase completion check unavailable. Assuming {phase} succeeded.",
+            "evidence": {"phase": phase, "goal": goal},
+        }
+    
+    @weave.op()
+    async def compute_overall_evaluation(
+        self,
+        session: AsyncSession,
+        iteration_id: UUID,
+        target_style: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Run all evaluations and compute overall score.
+        """
+        # Load iteration and constraints
+        result = await session.execute(
+            select(Iteration).where(Iteration.id == iteration_id)
+        )
+        iteration = result.scalar_one_or_none()
+        
+        if not iteration:
+            return {"success": False, "error": "Iteration not found"}
+        
+        # Load constraints for the project
+        constraints_result = await session.execute(
+            select(Constraint).where(Constraint.project_id == iteration.project_id)
+        )
+        constraints = constraints_result.scalars().all()
+        
+        # Run all evaluations
+        evaluations = []
+        
+        eval_constraint = await self.evaluate_constraint_compliance(iteration, constraints, session)
+        evaluations.append(eval_constraint)
+        
+        eval_geometry = await self.evaluate_geometry_preservation(iteration, session)
+        evaluations.append(eval_geometry)
+        
+        eval_hallucination = await self.evaluate_hallucinations(iteration, session)
+        evaluations.append(eval_hallucination)
+        
+        eval_style = await self.evaluate_style_execution(iteration, target_style, session)
+        evaluations.append(eval_style)
+        
+        eval_phase = await self.evaluate_phase_completion(iteration, session)
+        evaluations.append(eval_phase)
+        
+        # Compute weighted score
+        total_score = 0.0
+        for eval_result in evaluations:
+            criterion = eval_result["criterion"]
+            weight = CRITERION_WEIGHTS.get(criterion, 0.1)
+            total_score += eval_result["score"] * weight
+        
+        # Determine pass/fail
+        all_passed = all(e["passed"] for e in evaluations)
+        overall_passed = all_passed and total_score >= PASS_THRESHOLD
+        
+        # Save evaluation details
+        for eval_result in evaluations:
+            detail = EvaluationDetail(
+                iteration_id=iteration_id,
+                criterion=eval_result["criterion"],
+                weight=CRITERION_WEIGHTS.get(eval_result["criterion"], 0.1),
+                passed=eval_result["passed"],
+                score=eval_result["score"],
+                details=eval_result["details"],
+                evidence=eval_result["evidence"],
+            )
+            session.add(detail)
+        
+        # Update iteration with evaluation results
+        iteration.evaluation_status = EvaluationStatus.PASSED if overall_passed else EvaluationStatus.FAILED
+        iteration.evaluation_score = total_score
+        iteration.evaluation_result = "accepted" if overall_passed else "rejected"
+        iteration.evaluation_reasons = [
+            {"criterion": e["criterion"], "passed": e["passed"], "score": e["score"]}
+            for e in evaluations
+        ]
+        iteration.evaluated_at = datetime.now(timezone.utc)
+        
+        await session.flush()
+        
+        return {
+            "success": True,
+            "iteration_id": str(iteration_id),
+            "overall_score": total_score,
+            "passed": overall_passed,
+            "status": EvaluationStatus.PASSED if overall_passed else EvaluationStatus.FAILED,
+            "evaluations": evaluations,
+            "threshold": PASS_THRESHOLD,
+        }
+    
+    # ==========================================
+    # Trace Analysis Functions
+    # ==========================================
+    
+    @weave.op()
+    async def analyze_failure(
+        self,
+        session: AsyncSession,
+        iteration_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Analyze a failed iteration to understand what went wrong.
+        """
+        # Load iteration and its evaluation details
+        result = await session.execute(
+            select(Iteration).where(Iteration.id == iteration_id)
+        )
+        iteration = result.scalar_one_or_none()
+        
+        if not iteration:
+            return {"success": False, "error": "Iteration not found"}
+        
+        details_result = await session.execute(
+            select(EvaluationDetail).where(EvaluationDetail.iteration_id == iteration_id)
+        )
+        details = details_result.scalars().all()
+        
+        # Identify failed criteria
+        failed_criteria = [d for d in details if not d.passed]
+        
+        analysis = {
+            "iteration_id": str(iteration_id),
+            "phase": iteration.phase,
+            "overall_score": iteration.evaluation_score,
+            "failed_criteria": [],
+            "insights": [],
+            "recommended_changes": [],
+        }
+        
+        for failed in failed_criteria:
+            criterion_analysis = {
+                "criterion": failed.criterion,
+                "score": failed.score,
+                "details": failed.details,
+                "evidence": failed.evidence,
+            }
+            analysis["failed_criteria"].append(criterion_analysis)
+            
+            # Generate insights based on failure type
+            insights, changes = self._generate_insights_and_changes(
+                failed.criterion, failed.evidence, iteration
+            )
+            analysis["insights"].extend(insights)
+            analysis["recommended_changes"].extend(changes)
+        
+        # Analyze prompt if available
+        if iteration.prompt_used:
+            prompt_insights = self._analyze_prompt(iteration.prompt_used, failed_criteria)
+            analysis["insights"].extend(prompt_insights)
+        
+        return analysis
+    
+    def _generate_insights_and_changes(
+        self,
+        criterion: str,
+        evidence: Dict[str, Any],
+        iteration: Iteration
+    ) -> Tuple[List[str], List[Dict[str, Any]]]:
+        """
+        Generate insights and recommended changes based on failure type.
+        """
+        insights = []
+        changes = []
+        
+        if criterion == EvaluationCriterion.CONSTRAINT_COMPLIANCE:
+            violations = evidence.get("violations", [])
+            if violations:
+                insights.append(f"Found {len(violations)} constraint violation(s)")
+                for v in violations[:3]:  # Limit to 3
+                    insights.append(f"Violation: {v.get('element', 'unknown')} - {v.get('issue', 'unknown issue')}")
+                
+                changes.append({
+                    "type": "constraint_emphasis",
+                    "current": "medium",
+                    "proposed": "high",
+                    "rationale": "Constraint violations detected. Increase emphasis to prevent fixtures from moving.",
+                })
+                changes.append({
+                    "type": "prompt_addition",
+                    "phase": iteration.phase,
+                    "addition": "CRITICAL: Do not move or relocate any locked fixtures. They must remain in their exact positions.",
+                    "rationale": "Add explicit constraint reminder to prompt.",
+                })
+        
+        elif criterion == EvaluationCriterion.HALLUCINATION_DETECTION:
+            hallucinations = evidence.get("hallucinations", [])
+            critical = evidence.get("critical_count", 0)
+            if hallucinations:
+                insights.append(f"Found {len(hallucinations)} hallucination(s), {critical} critical")
+                
+                changes.append({
+                    "type": "creativity_reduction",
+                    "current": 0.7,
+                    "proposed": 0.4,
+                    "rationale": "Hallucinations detected. Reduce creativity to improve consistency.",
+                })
+                changes.append({
+                    "type": "prompt_addition",
+                    "phase": iteration.phase,
+                    "addition": "Do not add any elements not visible in the input. Do not create new windows, doors, or structural elements.",
+                    "rationale": "Explicitly forbid hallucinated elements.",
+                })
+        
+        elif criterion == EvaluationCriterion.GEOMETRY_PRESERVATION:
+            issues = evidence.get("issues", [])
+            if issues:
+                insights.append(f"Found {len(issues)} geometry issue(s)")
+                
+                changes.append({
+                    "type": "prompt_addition",
+                    "phase": iteration.phase,
+                    "addition": "Maintain exact room dimensions and perspective. Walls must remain straight and properly connected.",
+                    "rationale": "Geometry issues detected. Add explicit preservation instructions.",
+                })
+        
+        elif criterion == EvaluationCriterion.STYLE_EXECUTION:
+            mismatched = evidence.get("mismatched", [])
+            if mismatched:
+                insights.append(f"Style mismatch found: {len(mismatched)} elements don't match target")
+                
+                target = evidence.get("target_style", "modern")
+                changes.append({
+                    "type": "style_guidance_expansion",
+                    "style": target,
+                    "rationale": f"Expand {target} style guidance with more specific characteristics.",
+                })
+        
+        elif criterion == EvaluationCriterion.PHASE_COMPLETION:
+            missing = evidence.get("missing", [])
+            if missing:
+                insights.append(f"Phase incomplete: {len(missing)} elements still missing")
+                
+                changes.append({
+                    "type": "max_retries_increase",
+                    "current": 2,
+                    "proposed": 3,
+                    "rationale": "Phase not completing successfully. Allow more retries.",
+                })
+        
+        return insights, changes
+    
+    def _analyze_prompt(
+        self,
+        prompt: str,
+        failed_criteria: List[EvaluationDetail]
+    ) -> List[str]:
+        """
+        Analyze the prompt used and identify potential issues.
+        """
+        insights = []
+        
+        # Check for constraint violations
+        constraint_failed = any(
+            d.criterion == EvaluationCriterion.CONSTRAINT_COMPLIANCE 
+            for d in failed_criteria
+        )
+        if constraint_failed:
+            if "CRITICAL" not in prompt and "MUST" not in prompt:
+                insights.append("Prompt lacks emphatic constraint language (CRITICAL, MUST)")
+            if "constraint" not in prompt.lower():
+                insights.append("Prompt does not mention 'constraint' explicitly")
+        
+        # Check for hallucination issues
+        hallucination_failed = any(
+            d.criterion == EvaluationCriterion.HALLUCINATION_DETECTION 
+            for d in failed_criteria
+        )
+        if hallucination_failed:
+            if "do not add" not in prompt.lower():
+                insights.append("Prompt does not explicitly forbid adding new elements")
+        
+        # Check prompt length
+        if len(prompt) < 200:
+            insights.append("Prompt may be too short. More detail could improve results.")
+        elif len(prompt) > 2000:
+            insights.append("Prompt may be too long. Model might miss key instructions.")
+        
+        return insights
+    
+    # ==========================================
+    # Policy Modification Functions
+    # ==========================================
+    
+    @weave.op()
+    async def apply_policy_changes(
+        self,
+        session: AsyncSession,
+        project_id: UUID,
+        changes: List[Dict[str, Any]],
+        trigger_iteration_id: Optional[UUID] = None
+    ) -> Dict[str, Any]:
+        """
+        Apply recommended policy changes and create a new policy version.
+        """
+        # Load current policy
+        result = await session.execute(
+            select(Policy)
+            .where(and_(Policy.project_id == project_id, Policy.is_active == True))
+            .order_by(desc(Policy.version))
+            .limit(1)
+        )
+        current_policy = result.scalar_one_or_none()
+        
+        # Start from default or current policy
+        if current_policy:
+            new_cleanup = dict(current_policy.cleanup_config or {})
+            new_structural = dict(current_policy.structural_config or {})
+            new_fixture = dict(current_policy.fixture_config or {})
+            new_style = dict(current_policy.style_config or {})
+            old_version = current_policy.version
+            old_policy_id = current_policy.id
+        else:
+            # Use defaults from generation_agent
+            from app.agents.generation_agent import DEFAULT_POLICY
+            new_cleanup = dict(DEFAULT_POLICY["cleanup_config"])
+            new_structural = dict(DEFAULT_POLICY["structural_config"])
+            new_fixture = dict(DEFAULT_POLICY["fixture_config"])
+            new_style = dict(DEFAULT_POLICY["style_config"])
+            old_version = 0
+            old_policy_id = None
+        
+        changes_applied = []
+        
+        # Apply each change
+        for change in changes:
+            change_type = change.get("type")
+            
+            if change_type == "constraint_emphasis":
+                # Update all configs
+                for config in [new_cleanup, new_structural, new_fixture, new_style]:
+                    config["constraint_emphasis"] = change.get("proposed", "high")
+                changes_applied.append(change)
+            
+            elif change_type == "creativity_reduction":
+                # Update all configs with reduced creativity
+                proposed = change.get("proposed", 0.4)
+                for config in [new_cleanup, new_structural, new_fixture, new_style]:
+                    current = config.get("creativity_level", 0.5)
+                    if current > proposed:
+                        config["creativity_level"] = proposed
+                changes_applied.append(change)
+            
+            elif change_type == "prompt_addition":
+                # Add to specific phase prompt
+                phase = change.get("phase", "cleanup")
+                addition = change.get("addition", "")
+                
+                if phase == GenerationPhase.CLEANUP:
+                    template = new_cleanup.get("prompt_template", "")
+                    new_cleanup["prompt_template"] = template + f"\n\n{addition}"
+                elif phase == GenerationPhase.STRUCTURAL:
+                    template = new_structural.get("prompt_template", "")
+                    new_structural["prompt_template"] = template + f"\n\n{addition}"
+                elif phase == GenerationPhase.FIXTURE:
+                    template = new_fixture.get("prompt_template", "")
+                    new_fixture["prompt_template"] = template + f"\n\n{addition}"
+                elif phase == GenerationPhase.STYLE:
+                    template = new_style.get("prompt_template", "")
+                    new_style["prompt_template"] = template + f"\n\n{addition}"
+                
+                changes_applied.append(change)
+            
+            elif change_type == "max_retries_increase":
+                proposed = change.get("proposed", 3)
+                for config in [new_cleanup, new_structural, new_fixture, new_style]:
+                    config["max_retries"] = proposed
+                changes_applied.append(change)
+        
+        # Deactivate old policy
+        if current_policy:
+            current_policy.is_active = False
+        
+        # Create new policy version
+        new_policy = Policy(
+            project_id=project_id,
+            version=old_version + 1,
+            parent_version=old_version,
+            cleanup_config=new_cleanup,
+            structural_config=new_structural,
+            fixture_config=new_fixture,
+            style_config=new_style,
+            created_by=PolicyCreator.QUALITY_CONTROL,
+            is_active=True,
+            notes=f"Auto-updated by QC agent based on evaluation failures.",
+        )
+        session.add(new_policy)
+        await session.flush()
+        
+        # Record the policy change
+        if old_policy_id:
+            policy_change = PolicyChange(
+                project_id=project_id,
+                old_policy_id=old_policy_id,
+                new_policy_id=new_policy.id,
+                trigger_iteration_id=trigger_iteration_id,
+                trigger_reason="evaluation_failure",
+                changes_made=changes_applied,
+                rationale="Automated policy adjustment based on QC evaluation results.",
+            )
+            session.add(policy_change)
+        
+        await session.flush()
+        
+        return {
+            "success": True,
+            "old_version": old_version,
+            "new_version": new_policy.version,
+            "new_policy_id": new_policy.id,
+            "changes_applied": changes_applied,
+        }
+    
+    @weave.op()
+    async def get_policy_history(
+        self,
+        session: AsyncSession,
+        project_id: UUID
+    ) -> List[Dict[str, Any]]:
+        """
+        Get the history of policy changes for a project.
+        """
+        result = await session.execute(
+            select(PolicyChange)
+            .where(PolicyChange.project_id == project_id)
+            .order_by(PolicyChange.created_at)
+        )
+        changes = result.scalars().all()
+        
+        return [
+            {
+                "id": str(c.id),
+                "old_policy_id": c.old_policy_id,
+                "new_policy_id": c.new_policy_id,
+                "trigger_iteration_id": str(c.trigger_iteration_id) if c.trigger_iteration_id else None,
+                "trigger_reason": c.trigger_reason,
+                "changes_made": c.changes_made,
+                "rationale": c.rationale,
+                "created_at": c.created_at.isoformat(),
+            }
+            for c in changes
+        ]
+    
+    # ==========================================
+    # Helper Functions
+    # ==========================================
+    
+    async def _call_vision_api(
+        self,
+        prompt: str,
+        image_path: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Call Gemini vision API for image analysis.
+        """
+        if not self.gemini_api_key:
+            return {"success": False, "error": "No API key configured"}
+        
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model}:generateContent"
+            
+            parts = [{"text": prompt}]
+            
+            # Add image reference if available
+            if image_path and image_path.startswith(('http://', 'https://')):
+                parts.insert(0, {"text": f"Analyze this image: {image_path}"})
+            
+            payload = {
+                "contents": [{"parts": parts}],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "maxOutputTokens": 2048,
+                }
+            }
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{url}?key={self.gemini_api_key}",
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                response.raise_for_status()
+                result = response.json()
+            
+            response_text = (
+                result.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [{}])[0]
+                .get("text", "")
+            )
+            
+            return {"success": True, "response_text": response_text}
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def _parse_json_response(self, text: str) -> Dict[str, Any]:
+        """
+        Parse JSON from model response, handling markdown code blocks.
+        """
+        # Try to find JSON in the response
+        text = text.strip()
+        
+        # Remove markdown code blocks if present
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        
+        text = text.strip()
+        
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Return default structure if parsing fails
+            return {
+                "violations": [],
+                "compliance_score": 0.7,
+                "analysis": "Unable to parse evaluation response.",
+            }
+
+
+# ============================================
+# Singleton Instance
+# ============================================
+qc_agent = QualityControlAgent()

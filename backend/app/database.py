@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
-from app.models import Base, SystemStatus, Project, Requirements, Iteration, Constraint, Policy, ProjectAnalysis
+from app.models import (
+    Base, SystemStatus, Project, Requirements, Iteration, Constraint, Policy, 
+    ProjectAnalysis, EvaluationDetail, PolicyChange
+)
 
 # ============================================
 # Database Configuration
