@@ -17,6 +17,7 @@ from app.config import settings
 from app.database import init_db, get_db_status
 from app.weave_ops import test_weave_operation
 from app.routes.projects import router as projects_router
+from app.routes.settings import router as settings_router
 
 
 # ============================================
@@ -205,3 +206,6 @@ async def weave_test(request: WeaveTestRequest):
 # ============================================
 # Include the projects router (Mission 02)
 app.include_router(projects_router)
+
+# Include the settings router (API key testing)
+app.include_router(settings_router)
