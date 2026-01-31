@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.config import settings
+from app.redis_service import redis_service
 
 router = APIRouter(prefix="/api/settings", tags=["Settings"])
 
@@ -33,6 +34,7 @@ class AllAPITestsResult(BaseModel):
     weave: APITestResult
     gemini: APITestResult
     browserbase: APITestResult
+    redis: APITestResult
     database: APITestResult
 
 
@@ -41,6 +43,7 @@ class SettingsStatusResponse(BaseModel):
     weave_configured: bool
     gemini_configured: bool
     browserbase_configured: bool
+    redis_configured: bool
     database_configured: bool
     environment: str
 
@@ -241,6 +244,36 @@ async def test_database() -> APITestResult:
         )
 
 
+async def test_redis() -> APITestResult:
+    """Test Redis connectivity."""
+    service = "redis"
+    timestamp = datetime.now(timezone.utc).isoformat()
+    
+    try:
+        if await redis_service.health_check():
+            return APITestResult(
+                service=service,
+                success=True,
+                message="Redis connected",
+                timestamp=timestamp,
+                details={"url": settings.redis_url.split("@")[-1] if "@" in settings.redis_url else settings.redis_url},
+            )
+        else:
+            return APITestResult(
+                service=service,
+                success=False,
+                message="Redis ping failed",
+                timestamp=timestamp,
+            )
+    except Exception as e:
+        return APITestResult(
+            service=service,
+            success=False,
+            message=f"Redis error: {str(e)}",
+            timestamp=timestamp,
+        )
+
+
 # ============================================
 # Endpoints
 # ============================================
@@ -254,6 +287,7 @@ async def get_settings_status():
         weave_configured=bool(settings.wandb_api_key),
         gemini_configured=bool(settings.gemini_api_key),
         browserbase_configured=bool(settings.browserbase_api_key),
+        redis_configured=bool(settings.redis_url),
         database_configured=bool(settings.database_url),
         environment=settings.environment,
     )
@@ -283,6 +317,12 @@ async def test_database_endpoint():
     return await test_database()
 
 
+@router.post("/test/redis", response_model=APITestResult)
+async def test_redis_endpoint():
+    """Test Redis connectivity."""
+    return await test_redis()
+
+
 @router.post("/test/all", response_model=AllAPITestsResult)
 async def test_all_apis():
     """
@@ -290,10 +330,11 @@ async def test_all_apis():
     Returns results for each service.
     """
     # Run all tests in parallel for speed
-    weave_result, gemini_result, browserbase_result, database_result = await asyncio.gather(
+    weave_result, gemini_result, browserbase_result, redis_result, database_result = await asyncio.gather(
         test_weave_api(),
         test_gemini_api(),
         test_browserbase_api(),
+        test_redis(),
         test_database(),
     )
     
@@ -301,5 +342,6 @@ async def test_all_apis():
         weave=weave_result,
         gemini=gemini_result,
         browserbase=browserbase_result,
+        redis=redis_result,
         database=database_result,
     )

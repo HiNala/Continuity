@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.database import init_db, get_db_status
 from app.weave_ops import test_weave_operation
+from app.redis_service import redis_service
 from app.routes.projects import router as projects_router
 from app.routes.settings import router as settings_router
 
@@ -26,7 +27,7 @@ from app.routes.settings import router as settings_router
 async def lifespan(app: FastAPI):
     """
     Manage application startup and shutdown.
-    Initialize Weave, database connections, etc.
+    Initialize Weave, database connections, Redis, etc.
     """
     # Startup
     print("🚀 Starting Continuity Backend...")
@@ -42,10 +43,21 @@ async def lifespan(app: FastAPI):
     await init_db()
     print("✅ Database initialized")
     
+    # Initialize Redis for caching
+    try:
+        await redis_service.connect()
+        if await redis_service.health_check():
+            print("✅ Redis connected")
+        else:
+            print("⚠️  Redis connection failed - caching disabled")
+    except Exception as e:
+        print(f"⚠️  Redis initialization error: {e}")
+    
     yield
     
     # Shutdown
     print("👋 Shutting down Continuity Backend...")
+    await redis_service.disconnect()
 
 
 # ============================================
