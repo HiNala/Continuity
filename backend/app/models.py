@@ -97,11 +97,34 @@ class Requirements(Base):
 
 
 # ============================================
+# Generation Phase Enum
+# ============================================
+class GenerationPhase:
+    """Generation phase values."""
+    CLEANUP = "cleanup"
+    STRUCTURAL = "structural"
+    FIXTURE = "fixture"
+    STYLE = "style"
+
+
+# ============================================
+# Iteration Status Enum
+# ============================================
+class IterationStatus:
+    """Iteration status values."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+# ============================================
 # Iterations Table (for Mission 04+)
 # ============================================
 class Iteration(Base):
     """
     Iterations table - Tracks each generation attempt.
+    Each row represents one call to the generation model.
     """
     __tablename__ = "iterations"
     
@@ -109,20 +132,32 @@ class Iteration(Base):
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
-    # Iteration data
+    # Phase and iteration tracking
     phase = Column(String(50), nullable=False)  # cleanup, structural, fixture, style
-    iteration_number = Column(Integer, nullable=False)
-    input_reference = Column(Text, nullable=True)
-    output_reference = Column(Text, nullable=True)
+    iteration_number = Column(Integer, nullable=False, default=1)
     
-    # Policy and evaluation
+    # Input/Output references
+    input_image_path = Column(Text, nullable=True)  # Path to input image
+    output_image_path = Column(Text, nullable=True)  # Path to generated output
+    
+    # Generation details
+    prompt_used = Column(Text, nullable=True)  # Full prompt sent to model
+    generation_latency_ms = Column(Integer, nullable=True)  # Time taken in milliseconds
+    
+    # Policy tracking
     policy_version = Column(Integer, nullable=True)
+    
+    # Status and evaluation
+    status = Column(String(20), default=IterationStatus.PENDING)  # pending, in_progress, completed, failed
     evaluation_result = Column(String(20), nullable=True)  # accepted, rejected
+    error_message = Column(Text, nullable=True)
     failure_reasons = Column(JSON, default=list)
+    
+    # Weave tracking
+    weave_run_id = Column(String(255), nullable=True)
     
     # Metadata
     metadata_ = Column("metadata", JSON, default=dict)
-    weave_run_id = Column(String(255), nullable=True)
     
     # Relationship
     project = relationship("Project", back_populates="iterations")
@@ -264,22 +299,50 @@ class ProjectAnalysis(Base):
 # ============================================
 # Policies Table (for Mission 05+)
 # ============================================
+# ============================================
+# Policy Creator Enum
+# ============================================
+class PolicyCreator:
+    """Who created the policy."""
+    SYSTEM = "system"  # Default/initial policy
+    QUALITY_CONTROL = "quality_control"  # Modified by QC agent
+    USER = "user"  # User override
+
+
 class Policy(Base):
     """
     Policies table - Versioned generation policies.
+    Contains configuration for each generation phase.
+    The Generation Agent reads policy, Quality Control Agent modifies it.
     """
     __tablename__ = "policies"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
-    version = Column(Integer, nullable=False, index=True)
-    parent_version = Column(Integer, nullable=True)
-    configuration = Column(JSON, nullable=False)
+    # Project association (null for default global policies)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    
+    # Version tracking
+    version = Column(Integer, nullable=False, index=True, default=1)
+    parent_version = Column(Integer, nullable=True)  # For evolution tracking
+    
+    # Phase configurations (JSON with prompt_template, creativity_level, constraint_emphasis, max_retries)
+    cleanup_config = Column(JSON, default=dict)
+    structural_config = Column(JSON, default=dict)
+    fixture_config = Column(JSON, default=dict)
+    style_config = Column(JSON, default=dict)
+    
+    # Legacy field for backwards compatibility
+    configuration = Column(JSON, default=dict)
     
     # Tracking
+    created_by = Column(String(50), default=PolicyCreator.SYSTEM)  # system, quality_control, user
     weave_run_id = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
+    
+    # Whether this is the active policy
+    is_active = Column(Boolean, default=True)
 
 
 # ============================================

@@ -1,0 +1,794 @@
+"""
+Continuity - Main Generation Agent
+Mission 04: Phased image generation that respects spatial constraints.
+
+This agent transforms input spaces through four phases:
+1. Cleanup - Remove debris and distractions
+2. Structural - Complete walls, ceiling, flooring
+3. Fixture - Place fixtures according to constraints
+4. Style - Apply target design styles
+
+The agent follows policy configuration but does NOT modify it.
+Quality Control Agent (Mission 05) handles policy modification.
+"""
+
+import os
+import json
+import base64
+import httpx
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional, List, Dict, Any, Tuple
+from uuid import UUID, uuid4
+
+import weave
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_
+
+from app.config import settings
+from app.models import (
+    Project, Policy, Iteration, Constraint, ProjectAnalysis, Requirements,
+    ProjectStatus, GenerationPhase, IterationStatus, ConstraintClassification,
+    PolicyCreator
+)
+
+
+# ============================================
+# Default Policy Configuration
+# ============================================
+DEFAULT_CLEANUP_CONFIG = {
+    "prompt_template": """You are tasked with cleaning up a construction/renovation space image.
+
+TASK: Remove all construction debris, temporary items, tools, and visual distractions from this image while preserving the underlying structure.
+
+PRESERVE:
+- All walls, floors, ceilings
+- All structural elements (columns, beams)
+- All plumbing indicators (drains, stubs)
+- All electrical indicators (panels, outlets)
+- The overall room geometry and perspective
+
+REMOVE:
+- Construction debris and waste
+- Temporary scaffolding or supports
+- Tools and equipment
+- Dust and dirt
+- Plastic sheeting or tarps
+
+{constraint_instructions}
+
+Output a clean version of this space with all distractions removed but all structural and constraint elements visible.""",
+    "creativity_level": 0.3,
+    "constraint_emphasis": "high",
+    "max_retries": 2,
+}
+
+DEFAULT_STRUCTURAL_CONFIG = {
+    "prompt_template": """You are completing the structural elements of an unfinished or partially complete space.
+
+TASK: Complete all unfinished structural elements to create a clean, ready-for-finishing space.
+
+COMPLETE:
+- Finish all walls with smooth surfaces
+- Complete the ceiling with appropriate finish
+- Install finished flooring
+- Ensure all doors and windows are properly framed
+
+PRESERVE:
+{constraint_instructions}
+
+The space should look structurally complete and ready for fixtures and finishes.
+Maintain the exact room dimensions and perspective from the input image.""",
+    "creativity_level": 0.4,
+    "constraint_emphasis": "high",
+    "max_retries": 2,
+}
+
+DEFAULT_FIXTURE_CONFIG = {
+    "prompt_template": """You are placing fixtures in a {space_type} according to the spatial constraints identified.
+
+TASK: Install appropriate fixtures in their correct positions based on the constraint map.
+
+FIXTURE PLACEMENT RULES:
+{constraint_instructions}
+
+INSTALL:
+- Primary fixtures appropriate for a {space_type}
+- Standard supporting fixtures (mirrors, towel bars, etc. for bathroom; cabinets, appliances for kitchen)
+- Lighting fixtures
+
+Ensure all fixtures are positioned correctly according to the locked constraints.
+The space should look functional and properly equipped.""",
+    "creativity_level": 0.5,
+    "constraint_emphasis": "high",
+    "max_retries": 2,
+}
+
+DEFAULT_STYLE_CONFIG = {
+    "prompt_template": """You are applying {target_style} design style to this {space_type}.
+
+TASK: Transform this space into a beautiful {target_style} design while maintaining all fixture positions and constraints.
+
+STYLE CHARACTERISTICS:
+{style_guidance}
+
+REQUIREMENTS:
+- Apply the {target_style} aesthetic throughout
+- Maintain all fixture positions exactly as shown
+- Respect accessibility requirements: {accessibility}
+- Target budget tier: {budget_tier}
+
+{constraint_instructions}
+
+Create a professionally designed, photorealistic visualization that could be presented to clients.""",
+    "creativity_level": 0.7,
+    "constraint_emphasis": "medium",
+    "max_retries": 3,
+    "style_guidance": {
+        "modern": "Clean lines, minimalist aesthetic, neutral colors with bold accents, sleek materials like glass and metal",
+        "minimalist": "Extremely simple, uncluttered, monochromatic palette, functional beauty, hidden storage",
+        "industrial": "Exposed materials, metal fixtures, concrete, raw textures, warehouse aesthetic",
+        "japandi": "Japanese minimalism meets Scandinavian warmth, natural materials, neutral palette, wabi-sabi elements",
+        "scandinavian": "Light wood, white walls, cozy textiles, functional simplicity, hygge atmosphere",
+        "mid_century": "Retro 1950s-60s aesthetic, organic curves, warm wood tones, iconic furniture silhouettes",
+        "traditional": "Classic elegance, rich materials, ornate details, symmetry, timeless quality",
+        "luxury": "High-end materials, statement fixtures, sophisticated palette, attention to detail",
+        "rustic": "Natural materials, warm wood, stone elements, cozy farmhouse aesthetic",
+        "coastal": "Beach-inspired, light blues and whites, natural textures, relaxed atmosphere",
+    },
+}
+
+DEFAULT_POLICY = {
+    "cleanup_config": DEFAULT_CLEANUP_CONFIG,
+    "structural_config": DEFAULT_STRUCTURAL_CONFIG,
+    "fixture_config": DEFAULT_FIXTURE_CONFIG,
+    "style_config": DEFAULT_STYLE_CONFIG,
+}
+
+
+# ============================================
+# Generation Agent Class
+# ============================================
+class GenerationAgent:
+    """
+    The Generation Agent executes phased image generation.
+    It follows policy configuration but does not modify it.
+    """
+    
+    def __init__(self):
+        self.gemini_api_key = settings.gemini_api_key
+        self.gemini_model = settings.gemini_model
+        self.output_dir = Path("generated_images")
+        self.output_dir.mkdir(exist_ok=True)
+    
+    @weave.op()
+    async def load_policy(
+        self,
+        session: AsyncSession,
+        project_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Load the current policy configuration for a project.
+        Falls back to default policy if none exists.
+        """
+        # First try to find project-specific policy
+        result = await session.execute(
+            select(Policy)
+            .where(and_(Policy.project_id == project_id, Policy.is_active == True))
+            .order_by(Policy.version.desc())
+            .limit(1)
+        )
+        policy = result.scalar_one_or_none()
+        
+        if policy:
+            return {
+                "id": policy.id,
+                "version": policy.version,
+                "cleanup_config": policy.cleanup_config or DEFAULT_CLEANUP_CONFIG,
+                "structural_config": policy.structural_config or DEFAULT_STRUCTURAL_CONFIG,
+                "fixture_config": policy.fixture_config or DEFAULT_FIXTURE_CONFIG,
+                "style_config": policy.style_config or DEFAULT_STYLE_CONFIG,
+            }
+        
+        # Fall back to default policy
+        return {
+            "id": None,
+            "version": 1,
+            **DEFAULT_POLICY,
+        }
+    
+    @weave.op()
+    async def load_constraints(
+        self,
+        session: AsyncSession,
+        project_id: UUID
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Load spatial constraints and analysis for a project.
+        Returns (constraints_list, analysis_summary)
+        """
+        # Load constraints
+        result = await session.execute(
+            select(Constraint).where(Constraint.project_id == project_id)
+        )
+        constraints = result.scalars().all()
+        
+        constraints_list = [
+            {
+                "element_type": c.element_type,
+                "location": c.element_location,
+                "classification": c.classification,
+                "confidence": c.confidence_score,
+                "notes": c.notes,
+            }
+            for c in constraints
+        ]
+        
+        # Load analysis summary
+        result = await session.execute(
+            select(ProjectAnalysis).where(ProjectAnalysis.project_id == project_id)
+        )
+        analysis = result.scalar_one_or_none()
+        
+        analysis_summary = {
+            "construction_state": analysis.construction_state if analysis else None,
+            "locked_count": analysis.locked_count if analysis else 0,
+            "preferred_count": analysis.preferred_count if analysis else 0,
+            "flexible_count": analysis.flexible_count if analysis else 0,
+        }
+        
+        return constraints_list, analysis_summary
+    
+    @weave.op()
+    async def load_requirements(
+        self,
+        session: AsyncSession,
+        project_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Load requirements for a project.
+        """
+        result = await session.execute(
+            select(Requirements).where(Requirements.project_id == project_id)
+        )
+        req = result.scalar_one_or_none()
+        
+        if req:
+            return {
+                "space_type": req.space_type or "room",
+                "style_targets": req.style_targets or ["modern"],
+                "accessibility_required": req.accessibility_required,
+                "budget_tier": req.budget_tier or "mid_range",
+                "intended_use": req.intended_use,
+            }
+        
+        return {
+            "space_type": "room",
+            "style_targets": ["modern"],
+            "accessibility_required": False,
+            "budget_tier": "mid_range",
+            "intended_use": "personal",
+        }
+    
+    def _build_constraint_instructions(
+        self,
+        constraints: List[Dict[str, Any]],
+        emphasis: str = "high"
+    ) -> str:
+        """
+        Build constraint instructions for prompts.
+        """
+        if not constraints:
+            return "No specific spatial constraints identified."
+        
+        locked = [c for c in constraints if c["classification"] == ConstraintClassification.LOCKED]
+        preferred = [c for c in constraints if c["classification"] == ConstraintClassification.PREFERRED]
+        flexible = [c for c in constraints if c["classification"] == ConstraintClassification.FLEXIBLE]
+        
+        instructions = []
+        
+        if locked:
+            instructions.append("LOCKED CONSTRAINTS (DO NOT CHANGE):")
+            for c in locked:
+                instructions.append(f"  - {c['element_type']} at {c['location']}: {c.get('notes', 'must remain fixed')}")
+        
+        if preferred and emphasis in ["medium", "high"]:
+            instructions.append("\nPREFERRED ELEMENTS (preserve if possible):")
+            for c in preferred:
+                instructions.append(f"  - {c['element_type']} at {c['location']}")
+        
+        if flexible and emphasis == "high":
+            instructions.append("\nFLEXIBLE ITEMS (can be changed/removed):")
+            for c in flexible:
+                instructions.append(f"  - {c['element_type']} at {c['location']}")
+        
+        return "\n".join(instructions)
+    
+    @weave.op()
+    async def generate_image(
+        self,
+        prompt: str,
+        input_image_path: Optional[str] = None,
+        creativity: float = 0.5
+    ) -> Dict[str, Any]:
+        """
+        Call Gemini to generate/modify an image.
+        Returns dict with output_path or error.
+        """
+        if not self.gemini_api_key:
+            return {
+                "success": False,
+                "error": "GEMINI_API_KEY not configured",
+            }
+        
+        start_time = time.time()
+        
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model}:generateContent"
+            
+            # Build request parts
+            parts = [{"text": prompt}]
+            
+            # Add input image if provided
+            if input_image_path:
+                if input_image_path.startswith(('http://', 'https://')):
+                    # For URL images, instruct model to reference them
+                    parts.insert(0, {
+                        "text": f"Reference image URL: {input_image_path}\n\nBased on this reference:"
+                    })
+                elif Path(input_image_path).exists():
+                    # Load and encode local file
+                    with open(input_image_path, "rb") as f:
+                        image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+                    
+                    suffix = Path(input_image_path).suffix.lower()
+                    mime_type = {
+                        ".jpg": "image/jpeg",
+                        ".jpeg": "image/jpeg",
+                        ".png": "image/png",
+                        ".webp": "image/webp",
+                    }.get(suffix, "image/jpeg")
+                    
+                    parts.insert(0, {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": image_data
+                        }
+                    })
+            
+            payload = {
+                "contents": [{"parts": parts}],
+                "generationConfig": {
+                    "temperature": creativity,
+                    "topP": 0.9,
+                    "maxOutputTokens": 8192,
+                }
+            }
+            
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    f"{url}?key={self.gemini_api_key}",
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                response.raise_for_status()
+                result = response.json()
+            
+            latency_ms = int((time.time() - start_time) * 1000)
+            
+            # Extract response text (Gemini doesn't actually generate images yet,
+            # but we'll structure this for when it does or for image editing APIs)
+            response_text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            
+            # For now, return the prompt response (in production, this would be image data)
+            return {
+                "success": True,
+                "response_text": response_text,
+                "latency_ms": latency_ms,
+                "model": self.gemini_model,
+            }
+            
+        except httpx.HTTPStatusError as e:
+            return {
+                "success": False,
+                "error": f"Gemini API error: {e.response.status_code}",
+                "latency_ms": int((time.time() - start_time) * 1000),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "latency_ms": int((time.time() - start_time) * 1000),
+            }
+    
+    @weave.op()
+    async def execute_cleanup_phase(
+        self,
+        session: AsyncSession,
+        project_id: UUID,
+        input_image: str,
+        policy: Dict[str, Any],
+        constraints: List[Dict[str, Any]],
+        iteration_number: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Execute the cleanup phase - remove debris and distractions.
+        """
+        config = policy["cleanup_config"]
+        
+        # Build the prompt
+        constraint_instructions = self._build_constraint_instructions(
+            constraints, config.get("constraint_emphasis", "high")
+        )
+        
+        prompt = config["prompt_template"].format(
+            constraint_instructions=constraint_instructions
+        )
+        
+        # Create iteration record
+        iteration = Iteration(
+            project_id=project_id,
+            phase=GenerationPhase.CLEANUP,
+            iteration_number=iteration_number,
+            input_image_path=input_image,
+            prompt_used=prompt,
+            policy_version=policy.get("version", 1),
+            status=IterationStatus.IN_PROGRESS,
+        )
+        session.add(iteration)
+        await session.flush()
+        
+        # Generate
+        result = await self.generate_image(
+            prompt=prompt,
+            input_image_path=input_image,
+            creativity=config.get("creativity_level", 0.3)
+        )
+        
+        # Update iteration
+        iteration.generation_latency_ms = result.get("latency_ms")
+        
+        if result["success"]:
+            # In production, save actual generated image
+            output_path = str(self.output_dir / f"{project_id}/{GenerationPhase.CLEANUP}_{iteration_number}_{int(time.time())}.png")
+            iteration.output_image_path = output_path
+            iteration.status = IterationStatus.COMPLETED
+            iteration.metadata_ = {"response": result.get("response_text", "")[:500]}
+        else:
+            iteration.status = IterationStatus.FAILED
+            iteration.error_message = result.get("error")
+        
+        await session.flush()
+        
+        return {
+            "phase": GenerationPhase.CLEANUP,
+            "iteration_id": str(iteration.id),
+            "input_path": input_image,
+            "output_path": iteration.output_image_path,
+            "success": result["success"],
+            "error": result.get("error"),
+            "latency_ms": result.get("latency_ms"),
+        }
+    
+    @weave.op()
+    async def execute_structural_phase(
+        self,
+        session: AsyncSession,
+        project_id: UUID,
+        input_image: str,
+        policy: Dict[str, Any],
+        constraints: List[Dict[str, Any]],
+        iteration_number: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Execute the structural completion phase.
+        """
+        config = policy["structural_config"]
+        
+        constraint_instructions = self._build_constraint_instructions(
+            constraints, config.get("constraint_emphasis", "high")
+        )
+        
+        prompt = config["prompt_template"].format(
+            constraint_instructions=constraint_instructions
+        )
+        
+        iteration = Iteration(
+            project_id=project_id,
+            phase=GenerationPhase.STRUCTURAL,
+            iteration_number=iteration_number,
+            input_image_path=input_image,
+            prompt_used=prompt,
+            policy_version=policy.get("version", 1),
+            status=IterationStatus.IN_PROGRESS,
+        )
+        session.add(iteration)
+        await session.flush()
+        
+        result = await self.generate_image(
+            prompt=prompt,
+            input_image_path=input_image,
+            creativity=config.get("creativity_level", 0.4)
+        )
+        
+        iteration.generation_latency_ms = result.get("latency_ms")
+        
+        if result["success"]:
+            output_path = str(self.output_dir / f"{project_id}/{GenerationPhase.STRUCTURAL}_{iteration_number}_{int(time.time())}.png")
+            iteration.output_image_path = output_path
+            iteration.status = IterationStatus.COMPLETED
+            iteration.metadata_ = {"response": result.get("response_text", "")[:500]}
+        else:
+            iteration.status = IterationStatus.FAILED
+            iteration.error_message = result.get("error")
+        
+        await session.flush()
+        
+        return {
+            "phase": GenerationPhase.STRUCTURAL,
+            "iteration_id": str(iteration.id),
+            "input_path": input_image,
+            "output_path": iteration.output_image_path,
+            "success": result["success"],
+            "error": result.get("error"),
+            "latency_ms": result.get("latency_ms"),
+        }
+    
+    @weave.op()
+    async def execute_fixture_phase(
+        self,
+        session: AsyncSession,
+        project_id: UUID,
+        input_image: str,
+        policy: Dict[str, Any],
+        constraints: List[Dict[str, Any]],
+        requirements: Dict[str, Any],
+        iteration_number: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Execute the fixture placement phase.
+        """
+        config = policy["fixture_config"]
+        
+        constraint_instructions = self._build_constraint_instructions(
+            constraints, config.get("constraint_emphasis", "high")
+        )
+        
+        prompt = config["prompt_template"].format(
+            space_type=requirements.get("space_type", "room"),
+            constraint_instructions=constraint_instructions
+        )
+        
+        iteration = Iteration(
+            project_id=project_id,
+            phase=GenerationPhase.FIXTURE,
+            iteration_number=iteration_number,
+            input_image_path=input_image,
+            prompt_used=prompt,
+            policy_version=policy.get("version", 1),
+            status=IterationStatus.IN_PROGRESS,
+        )
+        session.add(iteration)
+        await session.flush()
+        
+        result = await self.generate_image(
+            prompt=prompt,
+            input_image_path=input_image,
+            creativity=config.get("creativity_level", 0.5)
+        )
+        
+        iteration.generation_latency_ms = result.get("latency_ms")
+        
+        if result["success"]:
+            output_path = str(self.output_dir / f"{project_id}/{GenerationPhase.FIXTURE}_{iteration_number}_{int(time.time())}.png")
+            iteration.output_image_path = output_path
+            iteration.status = IterationStatus.COMPLETED
+            iteration.metadata_ = {"response": result.get("response_text", "")[:500]}
+        else:
+            iteration.status = IterationStatus.FAILED
+            iteration.error_message = result.get("error")
+        
+        await session.flush()
+        
+        return {
+            "phase": GenerationPhase.FIXTURE,
+            "iteration_id": str(iteration.id),
+            "input_path": input_image,
+            "output_path": iteration.output_image_path,
+            "success": result["success"],
+            "error": result.get("error"),
+            "latency_ms": result.get("latency_ms"),
+        }
+    
+    @weave.op()
+    async def execute_style_phase(
+        self,
+        session: AsyncSession,
+        project_id: UUID,
+        input_image: str,
+        policy: Dict[str, Any],
+        constraints: List[Dict[str, Any]],
+        requirements: Dict[str, Any],
+        target_style: str,
+        iteration_number: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Execute the style application phase for a specific style.
+        """
+        config = policy["style_config"]
+        
+        constraint_instructions = self._build_constraint_instructions(
+            constraints, config.get("constraint_emphasis", "medium")
+        )
+        
+        # Get style-specific guidance
+        style_guidance_map = config.get("style_guidance", DEFAULT_STYLE_CONFIG["style_guidance"])
+        style_guidance = style_guidance_map.get(
+            target_style.lower(),
+            f"Apply {target_style} design principles throughout the space."
+        )
+        
+        prompt = config["prompt_template"].format(
+            space_type=requirements.get("space_type", "room"),
+            target_style=target_style,
+            style_guidance=style_guidance,
+            accessibility="Required - ensure ADA compliance" if requirements.get("accessibility_required") else "Standard design",
+            budget_tier=requirements.get("budget_tier", "mid_range"),
+            constraint_instructions=constraint_instructions
+        )
+        
+        iteration = Iteration(
+            project_id=project_id,
+            phase=GenerationPhase.STYLE,
+            iteration_number=iteration_number,
+            input_image_path=input_image,
+            prompt_used=prompt,
+            policy_version=policy.get("version", 1),
+            status=IterationStatus.IN_PROGRESS,
+            metadata_={"target_style": target_style}
+        )
+        session.add(iteration)
+        await session.flush()
+        
+        result = await self.generate_image(
+            prompt=prompt,
+            input_image_path=input_image,
+            creativity=config.get("creativity_level", 0.7)
+        )
+        
+        iteration.generation_latency_ms = result.get("latency_ms")
+        
+        if result["success"]:
+            output_path = str(self.output_dir / f"{project_id}/{GenerationPhase.STYLE}_{target_style}_{iteration_number}_{int(time.time())}.png")
+            iteration.output_image_path = output_path
+            iteration.status = IterationStatus.COMPLETED
+            iteration.metadata_ = {
+                "target_style": target_style,
+                "response": result.get("response_text", "")[:500]
+            }
+        else:
+            iteration.status = IterationStatus.FAILED
+            iteration.error_message = result.get("error")
+        
+        await session.flush()
+        
+        return {
+            "phase": GenerationPhase.STYLE,
+            "style": target_style,
+            "iteration_id": str(iteration.id),
+            "input_path": input_image,
+            "output_path": iteration.output_image_path,
+            "success": result["success"],
+            "error": result.get("error"),
+            "latency_ms": result.get("latency_ms"),
+        }
+    
+    @weave.op()
+    async def run_full_pipeline(
+        self,
+        session: AsyncSession,
+        project_id: UUID,
+        input_image: str
+    ) -> Dict[str, Any]:
+        """
+        Run the complete four-phase generation pipeline.
+        
+        Returns a dict with results from each phase.
+        """
+        results = {
+            "project_id": str(project_id),
+            "input_image": input_image,
+            "phases": [],
+            "style_variations": [],
+            "total_latency_ms": 0,
+            "success": True,
+        }
+        
+        # Load policy, constraints, and requirements
+        policy = await self.load_policy(session, project_id)
+        constraints, analysis = await self.load_constraints(session, project_id)
+        requirements = await self.load_requirements(session, project_id)
+        
+        results["policy_version"] = policy.get("version", 1)
+        results["construction_state"] = analysis.get("construction_state")
+        
+        current_image = input_image
+        
+        # Update project status
+        proj_result = await session.execute(
+            select(Project).where(Project.id == project_id)
+        )
+        project = proj_result.scalar_one_or_none()
+        if project:
+            project.status = ProjectStatus.GENERATING
+            await session.flush()
+        
+        # Phase 1: Cleanup
+        cleanup_result = await self.execute_cleanup_phase(
+            session, project_id, current_image, policy, constraints
+        )
+        results["phases"].append(cleanup_result)
+        results["total_latency_ms"] += cleanup_result.get("latency_ms", 0)
+        
+        if cleanup_result["success"] and cleanup_result.get("output_path"):
+            current_image = cleanup_result["output_path"]
+        elif not cleanup_result["success"]:
+            results["success"] = False
+            results["error"] = f"Cleanup phase failed: {cleanup_result.get('error')}"
+            return results
+        
+        # Phase 2: Structural
+        structural_result = await self.execute_structural_phase(
+            session, project_id, current_image, policy, constraints
+        )
+        results["phases"].append(structural_result)
+        results["total_latency_ms"] += structural_result.get("latency_ms", 0)
+        
+        if structural_result["success"] and structural_result.get("output_path"):
+            current_image = structural_result["output_path"]
+        elif not structural_result["success"]:
+            results["success"] = False
+            results["error"] = f"Structural phase failed: {structural_result.get('error')}"
+            return results
+        
+        # Phase 3: Fixture
+        fixture_result = await self.execute_fixture_phase(
+            session, project_id, current_image, policy, constraints, requirements
+        )
+        results["phases"].append(fixture_result)
+        results["total_latency_ms"] += fixture_result.get("latency_ms", 0)
+        
+        if fixture_result["success"] and fixture_result.get("output_path"):
+            current_image = fixture_result["output_path"]
+        elif not fixture_result["success"]:
+            results["success"] = False
+            results["error"] = f"Fixture phase failed: {fixture_result.get('error')}"
+            return results
+        
+        # Phase 4: Style (run for each target style)
+        style_targets = requirements.get("style_targets", ["modern"])
+        for i, style in enumerate(style_targets[:3]):  # Limit to 3 styles
+            style_result = await self.execute_style_phase(
+                session, project_id, current_image, policy, constraints,
+                requirements, style, iteration_number=i + 1
+            )
+            results["style_variations"].append(style_result)
+            results["total_latency_ms"] += style_result.get("latency_ms", 0)
+            
+            if not style_result["success"]:
+                # Continue with other styles even if one fails
+                pass
+        
+        # Update project status
+        if project:
+            project.status = ProjectStatus.COMPLETED if results["success"] else ProjectStatus.FAILED
+            await session.flush()
+        
+        return results
+
+
+# ============================================
+# Singleton Instance
+# ============================================
+generation_agent = GenerationAgent()
