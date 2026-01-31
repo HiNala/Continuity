@@ -304,6 +304,8 @@ After this call, check your [Weave Dashboard](https://wandb.ai/home) to see the 
 
 ## 🔧 API Endpoints
 
+### System Endpoints
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | API information |
@@ -313,14 +315,27 @@ After this call, check your [Weave Dashboard](https://wandb.ai/home) to see the 
 | `/docs` | GET | Swagger API documentation |
 | `/redoc` | GET | ReDoc API documentation |
 
-### Coming in Future Missions
+### Project Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/projects` | POST | Create a new project |
-| `/api/projects/{id}` | GET | Get project status |
-| `/api/projects/{id}/requirements` | POST | Submit clarifications |
-| `/api/projects/{id}/iterations` | GET | Get iteration history |
+| `/api/projects/{id}` | GET | Get project details |
+| `/api/projects/{id}/analyze-goal` | POST | Analyze goal and get clarifying questions |
+| `/api/projects/{id}/submit-answers` | POST | Submit answers to clarifying questions |
+| `/api/projects/{id}/analyze-space` | POST | Run spatial analysis on project images |
+| `/api/projects/{id}/generate` | POST | Run full generation pipeline |
+| `/api/projects/{id}/evaluate-and-improve` | POST | Evaluate iteration and apply QC improvements |
+
+### Orchestration Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/projects/{id}/start` | POST | Start full orchestrated pipeline |
+| `/api/projects/{id}/status` | GET | Get orchestration status (for polling) |
+| `/api/projects/{id}/submit-clarification` | POST | Submit clarification during orchestration |
+| `/api/projects/{id}/retry` | POST | Retry failed orchestration |
+| `/api/projects/{id}/log` | GET | Get orchestration log |
 
 ---
 
@@ -331,11 +346,11 @@ This project is organized into missions for the hackathon:
 | Mission | Status | Description |
 |---------|--------|-------------|
 | 01 | ✅ Complete | System Foundation & Skeleton |
-| 02 | ⏳ Pending | Requirements & Clarification Agent |
-| 03 | ⏳ Pending | Spatial Analysis Agent |
-| 04 | ⏳ Pending | Main Generation Agent |
-| 05 | ⏳ Pending | Quality Control & Optimizer Agent |
-| 06 | ⏳ Pending | Orchestration & Control Loop |
+| 02 | ✅ Complete | Requirements & Clarification Agent |
+| 03 | ✅ Complete | Spatial Analysis Agent |
+| 04 | ✅ Complete | Main Generation Agent |
+| 05 | ✅ Complete | Quality Control & Optimizer Agent |
+| 06 | ✅ Complete | Orchestration & Control Loop |
 | 07 | ⏳ Pending | Weave Integration |
 | 08 | ⏳ Pending | Frontend User Experience |
 | 09 | ⏳ Pending | Demo Readiness |
