@@ -1,0 +1,7 @@
+"""
+Continuity - API Routes
+"""
+
+from app.routes.projects import router as projects_router
+
+__all__ = ["projects_router"]
