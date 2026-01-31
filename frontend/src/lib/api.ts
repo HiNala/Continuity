@@ -804,6 +804,7 @@ export interface AllAPITestsResult {
   weave: APITestResult;
   gemini: APITestResult;
   browserbase: APITestResult;
+  redis: APITestResult;
   database: APITestResult;
 }
 
@@ -811,6 +812,7 @@ export interface SettingsStatus {
   weave_configured: boolean;
   gemini_configured: boolean;
   browserbase_configured: boolean;
+  redis_configured: boolean;
   database_configured: boolean;
   environment: string;
 }
@@ -892,6 +894,22 @@ export async function testDatabaseAPI(): Promise<APITestResult> {
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.detail || "Failed to test database");
+  }
+
+  return response.json();
+}
+
+/**
+ * Test Redis connectivity.
+ */
+export async function testRedisAPI(): Promise<APITestResult> {
+  const response = await fetch(`${API_URL}/api/settings/test/redis`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to test Redis");
   }
 
   return response.json();

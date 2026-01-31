@@ -17,6 +17,7 @@ import {
   testWeaveAPI,
   testGeminiAPI,
   testBrowserbaseAPI,
+  testRedisAPI,
   testDatabaseAPI,
   testAllAPIs,
   APITestResult,
@@ -83,6 +84,7 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps) {
         weave: allResults.weave,
         gemini: allResults.gemini,
         browserbase: allResults.browserbase,
+        redis: allResults.redis,
         database: allResults.database,
       });
 
@@ -91,16 +93,17 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps) {
         allResults.weave,
         allResults.gemini,
         allResults.browserbase,
+        allResults.redis,
         allResults.database,
       ].filter((r) => r.success).length;
 
-      if (passed === 4) {
-        onTestResult("success", "All APIs Connected", "All 4 services are working");
+      if (passed === 5) {
+        onTestResult("success", "All APIs Connected", "All 5 services are working");
       } else {
         onTestResult(
           "error",
-          `${passed}/4 APIs Connected`,
-          `${4 - passed} service(s) failed`
+          `${passed}/5 APIs Connected`,
+          `${5 - passed} service(s) failed`
         );
       }
     } catch (err) {
@@ -116,6 +119,7 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps) {
       weave: "Weave/W&B",
       gemini: "Google Gemini",
       browserbase: "Browserbase",
+      redis: "Redis",
       database: "Database",
     };
     return labels[service] || service;
@@ -126,6 +130,7 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps) {
       weave: <Activity className="w-4 h-4" />,
       gemini: <Sparkles className="w-4 h-4" />,
       browserbase: <Globe className="w-4 h-4" />,
+      redis: <Database className="w-4 h-4 text-red-400" />,
       database: <Database className="w-4 h-4" />,
     };
     return icons[service] || <Settings className="w-4 h-4" />;
@@ -144,6 +149,7 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps) {
     { key: "weave", testFn: testWeaveAPI },
     { key: "gemini", testFn: testGeminiAPI },
     { key: "browserbase", testFn: testBrowserbaseAPI },
+    { key: "redis", testFn: testRedisAPI },
     { key: "database", testFn: testDatabaseAPI },
   ];
 
