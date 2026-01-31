@@ -23,21 +23,29 @@ import {
   Zap,
   Wind,
   Trash2,
+  Play,
+  ImageIcon,
+  Wand2,
+  Layers,
+  Clock,
 } from "lucide-react";
 import {
   createProject,
   analyzeGoal,
   submitAnswers,
   analyzeSpace,
+  generateImages,
   ClarifyingQuestion,
   RequirementsResponse,
   AnalysisSummaryResponse,
+  GenerationResponse,
+  PhaseResult,
 } from "@/lib/api";
 
 // ============================================
 // Types
 // ============================================
-type Step = "input" | "questions" | "complete" | "analyzing" | "constraints";
+type Step = "input" | "questions" | "complete" | "analyzing" | "constraints" | "generating" | "results";
 
 interface Answers {
   [questionId: string]: string | string[];
@@ -77,6 +85,10 @@ export default function ProjectPage() {
   
   // Spatial Analysis (Mission 03)
   const [analysisSummary, setAnalysisSummary] = useState<AnalysisSummaryResponse | null>(null);
+  
+  // Generation (Mission 04)
+  const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
+  const [currentPhase, setCurrentPhase] = useState<string | null>(null);
 
   // ==========================================
   // Image URL handling
@@ -254,6 +266,51 @@ export default function ProjectPage() {
   };
 
   // ==========================================
+  // Step 5: Generate Images (Mission 04)
+  // ==========================================
+  const handleGenerate = async () => {
+    if (!projectId) return;
+
+    setLoading(true);
+    setError(null);
+    setStep("generating");
+    setCurrentPhase("cleanup");
+
+    try {
+      // Use the first image URL if available
+      const inputImage = imageUrls.length > 0 ? imageUrls[0] : undefined;
+      const result = await generateImages(projectId, inputImage);
+      setGenerationResult(result);
+      setStep("results");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Generation failed");
+      setStep("constraints"); // Go back to constraints on error
+    } finally {
+      setLoading(false);
+      setCurrentPhase(null);
+    }
+  };
+
+  const getPhaseIcon = (phase: string) => {
+    switch (phase) {
+      case "cleanup":
+        return <Trash2 className="w-5 h-5" />;
+      case "structural":
+        return <Building2 className="w-5 h-5" />;
+      case "fixture":
+        return <Droplets className="w-5 h-5" />;
+      case "style":
+        return <Palette className="w-5 h-5" />;
+      default:
+        return <Layers className="w-5 h-5" />;
+    }
+  };
+
+  const getPhaseName = (phase: string) => {
+    return phase.charAt(0).toUpperCase() + phase.slice(1);
+  };
+
+  // ==========================================
   // Render
   // ==========================================
   return (
@@ -275,14 +332,17 @@ export default function ProjectPage() {
               {step === "complete" && "Requirements complete"}
               {step === "analyzing" && "Analyzing your space..."}
               {step === "constraints" && "Spatial analysis complete"}
+              {step === "generating" && "Generating visualizations..."}
+              {step === "results" && "Generation complete"}
             </p>
           </div>
           {/* Step indicator */}
           <div className="hidden md:flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${step === "input" ? "bg-continuity-500" : "bg-emerald-500"}`} />
             <div className={`w-2 h-2 rounded-full ${step === "questions" ? "bg-continuity-500" : step === "input" ? "bg-slate-600" : "bg-emerald-500"}`} />
-            <div className={`w-2 h-2 rounded-full ${step === "complete" ? "bg-continuity-500" : ["analyzing", "constraints"].includes(step) ? "bg-emerald-500" : "bg-slate-600"}`} />
-            <div className={`w-2 h-2 rounded-full ${step === "analyzing" ? "bg-continuity-500 animate-pulse" : step === "constraints" ? "bg-emerald-500" : "bg-slate-600"}`} />
+            <div className={`w-2 h-2 rounded-full ${step === "complete" ? "bg-continuity-500" : ["analyzing", "constraints", "generating", "results"].includes(step) ? "bg-emerald-500" : "bg-slate-600"}`} />
+            <div className={`w-2 h-2 rounded-full ${step === "analyzing" ? "bg-continuity-500 animate-pulse" : ["constraints", "generating", "results"].includes(step) ? "bg-emerald-500" : "bg-slate-600"}`} />
+            <div className={`w-2 h-2 rounded-full ${step === "generating" ? "bg-continuity-500 animate-pulse" : step === "results" ? "bg-emerald-500" : "bg-slate-600"}`} />
           </div>
         </div>
       </header>
@@ -770,16 +830,33 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {/* Next Steps */}
-            <div className="card bg-amber-500/5 border-amber-500/20">
+            {/* Generate Button */}
+            <div className="card bg-continuity-500/5 border-continuity-500/20">
               <div className="flex items-start gap-3">
-                <Sparkles className="w-5 h-5 text-amber-400 mt-0.5" />
-                <div>
-                  <p className="font-medium text-amber-400 mb-1">Next Steps</p>
-                  <p className="text-sm text-slate-300">
-                    Image generation will be available in Mission 04. Your spatial 
-                    constraints are saved and ready to guide the generation process!
+                <Wand2 className="w-5 h-5 text-continuity-400 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-medium text-continuity-400 mb-1">Ready to Generate</p>
+                  <p className="text-sm text-slate-300 mb-4">
+                    All constraints are captured. Generate visualizations through our 
+                    4-phase process: Cleanup → Structural → Fixture → Style.
                   </p>
+                  <button
+                    onClick={handleGenerate}
+                    disabled={loading}
+                    className="btn-primary flex items-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-5 h-5" />
+                        Generate Visualizations
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
@@ -803,6 +880,223 @@ export default function ProjectPage() {
                   setAnswers({});
                   setRequirements(null);
                   setAnalysisSummary(null);
+                  setGenerationResult(null);
+                }}
+                className="btn-primary flex-1"
+              >
+                Create Another Project
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 6: Generating (Loading State) */}
+        {step === "generating" && (
+          <div className="space-y-8 animate-fade-in">
+            <div className="text-center space-y-4">
+              <div className="w-20 h-20 rounded-full bg-continuity-500/20 border border-continuity-500/30 flex items-center justify-center mx-auto">
+                <Wand2 className="w-10 h-10 text-continuity-400 animate-pulse" />
+              </div>
+              <h2 className="text-2xl font-bold">Generating Visualizations</h2>
+              <p className="text-slate-400 max-w-lg mx-auto">
+                Creating your design visualizations through our 4-phase transformation process.
+              </p>
+            </div>
+
+            {/* Phase Progress */}
+            <div className="max-w-md mx-auto">
+              <div className="card">
+                <div className="space-y-4">
+                  {["cleanup", "structural", "fixture", "style"].map((phase, i) => {
+                    const isActive = currentPhase === phase;
+                    const isComplete = 
+                      currentPhase === null ? false :
+                      ["cleanup", "structural", "fixture", "style"].indexOf(currentPhase) > i;
+                    
+                    return (
+                      <div key={phase} className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                          isComplete ? "bg-emerald-500" : 
+                          isActive ? "bg-continuity-500" : 
+                          "bg-slate-800"
+                        }`}>
+                          {isComplete ? (
+                            <CheckCircle2 className="w-4 h-4 text-white" />
+                          ) : isActive ? (
+                            <Loader2 className="w-4 h-4 text-white animate-spin" />
+                          ) : (
+                            getPhaseIcon(phase)
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <span className={`font-medium ${
+                            isActive ? "text-white" : "text-slate-400"
+                          }`}>
+                            {getPhaseName(phase)}
+                          </span>
+                          <p className="text-xs text-slate-500">
+                            {phase === "cleanup" && "Removing debris and distractions"}
+                            {phase === "structural" && "Completing walls and floors"}
+                            {phase === "fixture" && "Placing fixtures and features"}
+                            {phase === "style" && "Applying design styles"}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 7: Results Display */}
+        {step === "results" && generationResult && (
+          <div className="space-y-8 animate-fade-in">
+            <div className="text-center space-y-4">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+              </div>
+              <h2 className="text-2xl font-bold">Generation Complete!</h2>
+              <p className="text-slate-400 max-w-lg mx-auto">
+                Your design visualizations have been generated through all 4 phases.
+              </p>
+            </div>
+
+            {/* Summary Stats */}
+            <div className="grid md:grid-cols-3 gap-4">
+              <div className="card text-center">
+                <Clock className="w-6 h-6 text-continuity-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">
+                  {(generationResult.total_latency_ms / 1000).toFixed(1)}s
+                </p>
+                <p className="text-xs text-slate-400">Total Time</p>
+              </div>
+              <div className="card text-center">
+                <Layers className="w-6 h-6 text-continuity-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">
+                  {generationResult.phases.length}
+                </p>
+                <p className="text-xs text-slate-400">Phases Completed</p>
+              </div>
+              <div className="card text-center">
+                <Palette className="w-6 h-6 text-continuity-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-white">
+                  {generationResult.style_variations.length}
+                </p>
+                <p className="text-xs text-slate-400">Style Variations</p>
+              </div>
+            </div>
+
+            {/* Phase Results */}
+            <div className="card">
+              <h3 className="font-semibold mb-4">Generation Timeline</h3>
+              <div className="space-y-4">
+                {generationResult.phases.map((phase, i) => (
+                  <div key={i} className="flex items-center gap-4">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      phase.success ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                    }`}>
+                      {phase.success ? <CheckCircle2 className="w-5 h-5" /> : getPhaseIcon(phase.phase)}
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium capitalize">{phase.phase}</p>
+                      <p className="text-xs text-slate-400">
+                        {phase.latency_ms ? `${(phase.latency_ms / 1000).toFixed(1)}s` : "N/A"}
+                        {phase.error && ` • Error: ${phase.error}`}
+                      </p>
+                    </div>
+                    {phase.success && (
+                      <span className="badge-success">Complete</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Style Variations */}
+            {generationResult.style_variations.length > 0 && (
+              <div className="card">
+                <h3 className="font-semibold mb-4">Style Variations</h3>
+                <div className="grid md:grid-cols-3 gap-4">
+                  {generationResult.style_variations.map((variation, i) => (
+                    <div
+                      key={i}
+                      className={`p-4 rounded-lg border ${
+                        variation.success
+                          ? "bg-slate-800/50 border-slate-700"
+                          : "bg-red-500/10 border-red-500/20"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Palette className="w-4 h-4 text-continuity-400" />
+                        <span className="font-medium capitalize">
+                          {variation.style || `Style ${i + 1}`}
+                        </span>
+                      </div>
+                      {variation.success ? (
+                        <p className="text-xs text-emerald-400">
+                          Generated in {(variation.latency_ms || 0) / 1000}s
+                        </p>
+                      ) : (
+                        <p className="text-xs text-red-400">
+                          {variation.error || "Generation failed"}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Success/Error Message */}
+            {generationResult.success ? (
+              <div className="card bg-emerald-500/5 border-emerald-500/20">
+                <div className="flex items-start gap-3">
+                  <Sparkles className="w-5 h-5 text-emerald-400 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-emerald-400 mb-1">Success!</p>
+                    <p className="text-sm text-slate-300">
+                      All phases completed successfully. Your visualizations are ready!
+                      In a full implementation, the generated images would be displayed here.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="card bg-red-500/5 border-red-500/20">
+                <div className="flex items-start gap-3">
+                  <Zap className="w-5 h-5 text-red-400 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-red-400 mb-1">Generation Issue</p>
+                    <p className="text-sm text-slate-300">
+                      {generationResult.error || "Some phases may have failed. Check the details above."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-4">
+              <button
+                onClick={() => router.push("/")}
+                className="btn-secondary flex-1"
+              >
+                Back to Home
+              </button>
+              <button
+                onClick={() => {
+                  setStep("input");
+                  setGoal("");
+                  setImageUrls([]);
+                  setImageUrlInput("");
+                  setProjectId(null);
+                  setQuestions([]);
+                  setIdentified({});
+                  setAnswers({});
+                  setRequirements(null);
+                  setAnalysisSummary(null);
+                  setGenerationResult(null);
                 }}
                 className="btn-primary flex-1"
               >

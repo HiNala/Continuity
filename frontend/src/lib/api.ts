@@ -302,3 +302,142 @@ export async function getAnalysisSummary(
 
   return response.json();
 }
+
+// ============================================
+// Generation Types (Mission 04)
+// ============================================
+export interface PhaseResult {
+  phase: string;
+  iteration_id: string;
+  input_path: string | null;
+  output_path: string | null;
+  success: boolean;
+  error: string | null;
+  latency_ms: number | null;
+  style?: string;
+}
+
+export interface GenerationResponse {
+  project_id: string;
+  input_image: string;
+  policy_version: number;
+  construction_state: string | null;
+  phases: PhaseResult[];
+  style_variations: PhaseResult[];
+  total_latency_ms: number;
+  success: boolean;
+  error: string | null;
+}
+
+export interface IterationResponse {
+  id: string;
+  phase: string;
+  iteration_number: number;
+  input_image_path: string | null;
+  output_image_path: string | null;
+  prompt_used: string | null;
+  generation_latency_ms: number | null;
+  policy_version: number | null;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+  metadata: Record<string, any> | null;
+}
+
+export interface PolicyResponse {
+  id: number | null;
+  version: number;
+  cleanup_config: Record<string, any>;
+  structural_config: Record<string, any>;
+  fixture_config: Record<string, any>;
+  style_config: Record<string, any>;
+}
+
+// ============================================
+// Generation Functions (Mission 04)
+// ============================================
+
+/**
+ * Trigger full generation pipeline.
+ */
+export async function generateImages(
+  projectId: string,
+  inputImageUrl?: string
+): Promise<GenerationResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(inputImageUrl ? { input_image_url: inputImageUrl } : {}),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Generation failed");
+  }
+
+  return response.json();
+}
+
+/**
+ * Trigger a single generation phase.
+ */
+export async function generatePhase(
+  projectId: string,
+  phase: "cleanup" | "structural" | "fixture" | "style",
+  inputImageUrl?: string
+): Promise<PhaseResult> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/generate/${phase}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(inputImageUrl ? { input_image_url: inputImageUrl } : {}),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || `${phase} generation failed`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Get all iterations for a project.
+ */
+export async function getIterations(
+  projectId: string
+): Promise<IterationResponse[]> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/iterations`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get iterations");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get policy for a project.
+ */
+export async function getPolicy(
+  projectId: string
+): Promise<PolicyResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/policy`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get policy");
+  }
+
+  return response.json();
+}
