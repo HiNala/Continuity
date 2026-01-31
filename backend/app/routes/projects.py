@@ -17,12 +17,13 @@ from app.database import get_async_session
 from app.models import (
     Project, Requirements, ProjectStatus, Constraint, ProjectAnalysis,
     Iteration, Policy, GenerationPhase, IterationStatus, EvaluationDetail,
-    PolicyChange, EvaluationStatus
+    PolicyChange, EvaluationStatus, OrchestrationState, OrchestrationLog
 )
 from app.agents.requirements_agent import requirements_agent
 from app.agents.spatial_agent import spatial_agent
 from app.agents.generation_agent import generation_agent
 from app.agents.qc_agent import qc_agent
+from app.orchestrator import Orchestrator, OrchestrationConfig
 
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -1108,3 +1109,210 @@ async def evaluate_and_improve(
     await session.commit()
     
     return response
+
+
+# ============================================
+# Orchestration Models (Mission 06)
+# ============================================
+class StartOrchestrationRequest(BaseModel):
+    """Request to start orchestration."""
+    skip_requirements: bool = False  # Skip to spatial analysis if requirements exist
+
+
+class ClarificationSubmitRequest(BaseModel):
+    """Request to submit clarification answers."""
+    answers: Dict[str, str]
+
+
+class RetryRequest(BaseModel):
+    """Request to retry orchestration."""
+    from_phase: Optional[str] = None  # If None, restart from beginning
+
+
+class OrchestrationStatusResponse(BaseModel):
+    """Response for orchestration status."""
+    project_id: str
+    state: str
+    status: str
+    current_phase: Optional[str]
+    retry_count: int
+    has_warnings: bool
+    warning_details: Optional[List[Dict[str, Any]]]
+    started_at: Optional[str]
+    completed_at: Optional[str]
+    recent_transitions: List[Dict[str, Any]]
+
+
+class OrchestrationLogEntry(BaseModel):
+    """Single log entry."""
+    id: str
+    from_state: str
+    to_state: str
+    trigger: str
+    details: Dict[str, Any]
+    duration_ms: Optional[int]
+    created_at: str
+
+
+# ============================================
+# Orchestration Endpoints (Mission 06)
+# ============================================
+@router.post("/{project_id}/start")
+async def start_orchestration(
+    project_id: UUID,
+    request: Optional[StartOrchestrationRequest] = None,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Start orchestration for a project.
+    
+    Begins the full pipeline: Requirements → Spatial Analysis → Generation → QC Loop
+    """
+    # Verify project exists
+    result = await session.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Check state
+    if project.orchestration_state not in [OrchestrationState.CREATED, OrchestrationState.FAILED]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot start from state: {project.orchestration_state}"
+        )
+    
+    # Reset to CREATED if retrying from FAILED
+    if project.orchestration_state == OrchestrationState.FAILED:
+        project.orchestration_state = OrchestrationState.CREATED
+        project.retry_count = 0
+        project.has_warnings = False
+        project.warning_details = []
+        project.started_at = None
+        project.completed_at = None
+    
+    # Create and run orchestrator
+    orchestrator = Orchestrator(session, project_id)
+    result = await orchestrator.run()
+    
+    return result
+
+
+@router.post("/{project_id}/submit-clarification")
+async def submit_clarification(
+    project_id: UUID,
+    request: ClarificationSubmitRequest,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Submit clarification answers during orchestration.
+    
+    Must be in AWAITING_CLARIFICATION state.
+    """
+    orchestrator = Orchestrator(session, project_id)
+    
+    try:
+        result = await orchestrator.submit_clarification(request.answers)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{project_id}/status", response_model=OrchestrationStatusResponse)
+async def get_orchestration_status(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Get current orchestration status.
+    
+    Use for polling to track progress.
+    """
+    orchestrator = Orchestrator(session, project_id)
+    
+    try:
+        status = await orchestrator.get_status()
+        return OrchestrationStatusResponse(**status)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{project_id}/retry")
+async def retry_orchestration(
+    project_id: UUID,
+    request: Optional[RetryRequest] = None,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Retry a failed or completed-with-warnings project.
+    
+    Can restart from beginning or from a specific phase.
+    """
+    # Get project
+    result = await session.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Can only retry from terminal states
+    terminal_states = {
+        OrchestrationState.FAILED,
+        OrchestrationState.COMPLETED,
+        OrchestrationState.COMPLETED_WITH_WARNINGS,
+    }
+    
+    if project.orchestration_state not in terminal_states:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot retry from state: {project.orchestration_state}"
+        )
+    
+    # Reset state
+    from_phase = request.from_phase if request else None
+    
+    if from_phase:
+        # Resume from specific phase
+        project.orchestration_state = f"generating_{from_phase}"
+        project.current_phase = from_phase
+    else:
+        # Full restart
+        project.orchestration_state = OrchestrationState.CREATED
+        project.current_phase = None
+    
+    project.retry_count = 0
+    project.has_warnings = False
+    project.warning_details = []
+    project.started_at = None
+    project.completed_at = None
+    
+    await session.flush()
+    
+    # Run orchestrator
+    orchestrator = Orchestrator(session, project_id)
+    result = await orchestrator.run()
+    
+    return result
+
+
+@router.get("/{project_id}/log", response_model=List[OrchestrationLogEntry])
+async def get_orchestration_log(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Get complete orchestration log for a project.
+    
+    Shows all state transitions with timestamps.
+    """
+    orchestrator = Orchestrator(session, project_id)
+    
+    try:
+        log = await orchestrator.get_log()
+        return [OrchestrationLogEntry(**entry) for entry in log]
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
