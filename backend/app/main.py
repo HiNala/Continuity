@@ -4,7 +4,6 @@ Self-Improving Agent System for Design Visualization
 WeaveHacks 3 - January 31-February 1, 2026
 """
 
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 

@@ -6,8 +6,6 @@ This agent is the gatekeeper of the entire system. It ensures that
 user goals are well-defined before any expensive processing begins.
 """
 
-import json
-import re
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from uuid import UUID
@@ -16,7 +14,6 @@ import weave
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.config import settings
 from app.models import Project, Requirements, ProjectStatus
 
 

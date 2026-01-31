@@ -4,11 +4,10 @@ PostgreSQL connection and operations using SQLAlchemy.
 """
 
 from datetime import datetime, timezone
-from typing import Optional, AsyncGenerator
+from typing import AsyncGenerator
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
 from app.models import (

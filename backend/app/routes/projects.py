@@ -16,14 +16,14 @@ from sqlalchemy.orm import selectinload
 from app.database import get_async_session
 from app.models import (
     Project, Requirements, ProjectStatus, Constraint, ProjectAnalysis,
-    Iteration, Policy, GenerationPhase, IterationStatus, EvaluationDetail,
-    PolicyChange, EvaluationStatus, OrchestrationState, OrchestrationLog
+    Iteration, EvaluationDetail,
+    EvaluationStatus, OrchestrationState
 )
 from app.agents.requirements_agent import requirements_agent
 from app.agents.spatial_agent import spatial_agent
 from app.agents.generation_agent import generation_agent
 from app.agents.qc_agent import qc_agent
-from app.orchestrator import Orchestrator, OrchestrationConfig
+from app.orchestrator import Orchestrator
 
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])

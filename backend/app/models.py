@@ -4,12 +4,11 @@ SQLAlchemy models for all database tables.
 """
 
 from datetime import datetime, timezone
-from typing import Optional, List
 from uuid import uuid4
 
 from sqlalchemy import (
     Column, String, Text, Boolean, Float, Integer,
-    DateTime, ForeignKey, JSON, Enum as SQLEnum
+    DateTime, ForeignKey, JSON
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship

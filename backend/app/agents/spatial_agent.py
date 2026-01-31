@@ -16,7 +16,7 @@ from pathlib import Path
 
 import weave
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 from app.config import settings
 from app.models import (
