@@ -55,6 +55,7 @@ class Project(Base):
     
     # Relationships
     requirements = relationship("Requirements", back_populates="project", uselist=False, cascade="all, delete-orphan")
+    analysis = relationship("ProjectAnalysis", back_populates="project", uselist=False, cascade="all, delete-orphan")
     iterations = relationship("Iteration", back_populates="project", cascade="all, delete-orphan")
     constraints = relationship("Constraint", back_populates="project", cascade="all, delete-orphan")
 
@@ -128,11 +129,74 @@ class Iteration(Base):
 
 
 # ============================================
+# Constraint Classification Enum
+# ============================================
+class ConstraintClassification:
+    """Constraint classification values."""
+    LOCKED = "locked"       # Cannot change under any circumstances
+    PREFERRED = "preferred"  # Should be preserved but could theoretically change
+    FLEXIBLE = "flexible"    # Can be freely modified or removed
+
+
+# ============================================
+# Construction State Enum
+# ============================================
+class ConstructionState:
+    """Construction state values."""
+    UNFINISHED = "unfinished"           # Exposed studs, no finishes
+    PARTIALLY_COMPLETE = "partially_complete"  # Some finishes, missing fixtures
+    EXISTING_FINISH = "existing_finish"  # Currently usable space being redesigned
+
+
+# ============================================
+# Element Types - Spatial Analysis Taxonomy
+# ============================================
+class ElementType:
+    """Element types for spatial analysis."""
+    # Structural elements
+    EXTERIOR_WALL = "exterior_wall"
+    INTERIOR_WALL = "interior_wall"
+    FLOOR = "floor"
+    CEILING = "ceiling"
+    DOOR = "door"
+    WINDOW = "window"
+    STRUCTURAL_COLUMN = "structural_column"
+    BEAM = "beam"
+    
+    # Plumbing indicators
+    FLOOR_DRAIN = "floor_drain"
+    TOILET_FLANGE = "toilet_flange"
+    SINK_PLUMBING_STUB = "sink_plumbing_stub"
+    SHOWER_DRAIN = "shower_drain"
+    WATER_HEATER_CONNECTION = "water_heater_connection"
+    PIPE_CHASE = "pipe_chase"
+    
+    # Electrical indicators
+    ELECTRICAL_PANEL = "electrical_panel"
+    OUTLET_LOCATION = "outlet_location"
+    LIGHT_FIXTURE_JUNCTION = "light_fixture_junction"
+    SWITCH_LOCATION = "switch_location"
+    
+    # HVAC indicators
+    VENT_LOCATION = "vent_location"
+    HVAC_UNIT = "hvac_unit"
+    DUCTWORK = "ductwork"
+    
+    # Movable items
+    CONSTRUCTION_DEBRIS = "construction_debris"
+    TEMPORARY_FIXTURE = "temporary_fixture"
+    FURNITURE = "furniture"
+    EQUIPMENT = "equipment"
+    STAGING_ITEMS = "staging_items"
+
+
+# ============================================
 # Constraints Table (for Mission 03+)
 # ============================================
 class Constraint(Base):
     """
     Constraints table - Spatial constraints from analysis.
+    Each row represents one identified element in the space.
     """
     __tablename__ = "constraints"
     
@@ -140,17 +204,61 @@ class Constraint(Base):
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
-    # Constraint data
+    # Element identification
     element_type = Column(String(100), nullable=False)  # floor_drain, plumbing_wall, column, etc.
-    location = Column(JSON, nullable=True)  # Position data
-    classification = Column(String(20), nullable=False)  # locked, preferred, flexible
-    confidence = Column(Float, default=1.0)
+    element_location = Column(Text, nullable=True)  # Description of where in the image
+    
+    # Classification
+    classification = Column(String(20), nullable=False, default=ConstraintClassification.FLEXIBLE)
+    confidence_score = Column(Float, default=1.0)  # 0.0 to 1.0
+    
+    # Source tracking
+    source_image = Column(String(255), nullable=True)  # Which uploaded image
+    notes = Column(Text, nullable=True)  # Additional notes about the element
     
     # Metadata
     metadata_ = Column("metadata", JSON, default=dict)
     
     # Relationship
     project = relationship("Project", back_populates="constraints")
+
+
+# ============================================
+# Project Analysis Table (for Mission 03+)
+# ============================================
+class ProjectAnalysis(Base):
+    """
+    ProjectAnalysis table - Overall spatial analysis results.
+    One record per project containing high-level findings.
+    """
+    __tablename__ = "project_analysis"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
+    # Construction state assessment
+    construction_state = Column(String(50), nullable=True)  # unfinished, partially_complete, existing_finish
+    
+    # Analysis summary
+    analysis_summary = Column(JSON, default=dict)  # High-level findings
+    recommended_phase_sequence = Column(JSON, default=list)  # Recommended generation phases
+    
+    # Counts for quick reference
+    locked_count = Column(Integer, default=0)
+    preferred_count = Column(Integer, default=0)
+    flexible_count = Column(Integer, default=0)
+    
+    # Quality indicators
+    image_quality_assessment = Column(String(50), nullable=True)  # good, fair, poor
+    confidence_overall = Column(Float, default=1.0)
+    
+    # Weave tracking
+    weave_run_id = Column(String(255), nullable=True)
+    
+    # Relationship
+    project = relationship("Project", back_populates="analysis")
 
 
 # ============================================
