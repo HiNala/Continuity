@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   Brain, 
   Eye, 
@@ -17,12 +17,23 @@ import {
   Settings2,
   MessageSquare,
   Zap,
-  ChevronDown,
-  ChevronUp
+  ChevronDown
 } from "lucide-react";
 
 const cn = (...classes: (string | undefined | null | false)[]) =>
   classes.filter(Boolean).join(" ");
+
+// Smooth animation transitions
+const smoothTransition = {
+  duration: 0.3,
+  ease: [0.25, 0.1, 0.25, 1] as const,
+};
+
+const springTransition = {
+  type: "spring" as const,
+  stiffness: 400,
+  damping: 30,
+};
 
 export type AgentType = 
   | "requirements" 
@@ -145,10 +156,10 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
 
   return (
     <motion.div
-      layout
+      initial={false}
       className={cn(
-        "relative rounded-2xl border border-white/40 bg-white/30 backdrop-blur-xl overflow-hidden shadow-sm transition-all duration-300",
-        "hover:bg-white/40 hover:border-white/50 hover:shadow-md",
+        "relative rounded-2xl border border-white/40 bg-white/30 backdrop-blur-xl overflow-hidden shadow-sm",
+        "hover:bg-white/40 hover:border-white/50 hover:shadow-md transition-colors duration-200",
         getStatusStyles()
       )}
     >
@@ -157,12 +168,17 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3 min-w-0 flex-1">
             {/* Agent icon with gradient background */}
-            <div className={cn(
-              "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br shadow-sm",
-              agentInfo.gradient
-            )}>
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={springTransition}
+              className={cn(
+                "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br shadow-sm",
+                agentInfo.gradient
+              )}
+            >
               <AgentIcon className="w-5 h-5 text-white" />
-            </div>
+            </motion.div>
             
             <div className="min-w-0 flex-1">
               {/* Agent label and action */}
@@ -171,10 +187,14 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
                   {agentInfo.label}
                 </span>
                 <span className="text-muted-foreground/30">•</span>
-                <span className="text-[11px] text-muted-foreground/50 flex items-center gap-1">
+                <motion.span
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-[11px] text-muted-foreground/50 flex items-center gap-1"
+                >
                   <ActionIcon className="w-3 h-3" />
                   {actionInfo.label}
-                </span>
+                </motion.span>
               </div>
               
               {/* Title */}
@@ -198,73 +218,109 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
       </div>
 
       {/* Content */}
-      <div className="px-4 pb-3">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.1 }}
+        className="px-4 pb-3"
+      >
         <p className="text-sm text-muted-foreground/70 leading-relaxed">
           {content}
         </p>
-      </div>
+      </motion.div>
 
       {/* Image preview */}
-      {imageUrl && (
-        <div className="px-4 pb-3">
-          <div className="relative rounded-xl overflow-hidden border border-white/30 bg-white/10">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imageUrl}
-              alt="Generated"
-              className="w-full h-auto max-h-48 object-cover"
-            />
-            <div className="absolute top-2 right-2 px-2 py-1 rounded-lg bg-black/40 backdrop-blur-sm flex items-center gap-1">
-              <ImageIcon className="w-3 h-3 text-white/80" />
-              <span className="text-[10px] text-white/80">Preview</span>
+      <AnimatePresence>
+        {imageUrl && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={smoothTransition}
+            className="px-4 pb-3"
+          >
+            <div className="relative rounded-xl overflow-hidden border border-white/30 bg-white/10">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imageUrl}
+                alt="Generated"
+                className="w-full h-auto max-h-48 object-cover"
+              />
+              <div className="absolute top-2 right-2 px-2 py-1 rounded-lg bg-black/40 backdrop-blur-sm flex items-center gap-1">
+                <ImageIcon className="w-3 h-3 text-white/80" />
+                <span className="text-[10px] text-white/80">Preview</span>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Expandable details */}
+      {/* Expandable details - using AnimatePresence for smooth open/close */}
       {hasExpandableContent && (
         <>
-          <button
+          <motion.button
             onClick={() => setIsExpanded(!isExpanded)}
+            whileHover={{ backgroundColor: "rgba(255,255,255,0.1)" }}
+            whileTap={{ scale: 0.99 }}
             className="w-full px-4 py-2 flex items-center justify-center gap-1 text-xs text-muted-foreground/50 hover:text-muted-foreground/70 transition-colors border-t border-white/20"
           >
-            {isExpanded ? (
-              <>
-                <ChevronUp className="w-3.5 h-3.5" />
-                Hide details
-              </>
-            ) : (
-              <>
-                <ChevronDown className="w-3.5 h-3.5" />
-                Show details ({Object.keys(details).length})
-              </>
-            )}
-          </button>
-          
-          {isExpanded && (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="px-4 pb-4"
+              animate={{ rotate: isExpanded ? 180 : 0 }}
+              transition={smoothTransition}
             >
-              <div className="rounded-xl bg-white/20 border border-white/30 p-3">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                  {Object.entries(details).map(([key, value]) => (
-                    <div key={key} className="flex flex-col">
-                      <span className="text-muted-foreground/50 capitalize text-[10px] uppercase tracking-wider">
-                        {key.replace(/_/g, ' ')}
-                      </span>
-                      <span className="text-foreground/70 font-medium truncate">
-                        {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <ChevronDown className="w-3.5 h-3.5" />
             </motion.div>
-          )}
+            {isExpanded ? "Hide details" : `Show details (${Object.keys(details).length})`}
+          </motion.button>
+          
+          <AnimatePresence initial={false}>
+            {isExpanded && (
+              <motion.div
+                key="details"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ 
+                  height: "auto", 
+                  opacity: 1,
+                  transition: {
+                    height: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] },
+                    opacity: { duration: 0.2, delay: 0.1 }
+                  }
+                }}
+                exit={{ 
+                  height: 0, 
+                  opacity: 0,
+                  transition: {
+                    height: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] },
+                    opacity: { duration: 0.15 }
+                  }
+                }}
+                className="overflow-hidden"
+              >
+                <div className="px-4 pb-4">
+                  <div className="rounded-xl bg-white/20 border border-white/30 p-3">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                      {Object.entries(details).map(([key, value], index) => (
+                        <motion.div
+                          key={key}
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="flex flex-col"
+                        >
+                          <span className="text-muted-foreground/50 capitalize text-[10px] uppercase tracking-wider">
+                            {key.replace(/_/g, ' ')}
+                          </span>
+                          <span className="text-foreground/70 font-medium truncate">
+                            {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                          </span>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </>
       )}
 
@@ -272,25 +328,37 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
       {children && <div className="px-4 pb-4">{children}</div>}
 
       {/* Loading spinner overlay for running status */}
-      {status === "running" && (
-        <div className="absolute bottom-3 right-3">
-          <div className="relative">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-              className="w-6 h-6 rounded-full border-2 border-primary/20 border-t-primary"
-            />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-2 h-2 rounded-full bg-primary/60 animate-pulse" />
+      <AnimatePresence>
+        {status === "running" && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={springTransition}
+            className="absolute bottom-3 right-3"
+          >
+            <div className="relative">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                className="w-6 h-6 rounded-full border-2 border-primary/20 border-t-primary"
+              />
+              <motion.div
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ duration: 1, repeat: Infinity }}
+                className="absolute inset-0 flex items-center justify-center"
+              >
+                <div className="w-2 h-2 rounded-full bg-primary/60" />
+              </motion.div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };
 
-// Status Badge Component
+// Status Badge Component with animations
 function StatusBadge({ status }: { status: CardStatus }) {
   const getStyles = () => {
     switch (status) {
@@ -321,13 +389,18 @@ function StatusBadge({ status }: { status: CardStatus }) {
   };
 
   return (
-    <span className={cn(
-      "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border",
-      getStyles()
-    )}>
+    <motion.span
+      initial={{ scale: 0.9, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      transition={springTransition}
+      className={cn(
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border",
+        getStyles()
+      )}
+    >
       {getIcon()}
       <span className="capitalize">{status}</span>
-    </span>
+    </motion.span>
   );
 }
 
@@ -374,6 +447,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
+      transition={smoothTransition}
       className="rounded-2xl border border-white/40 bg-white/30 backdrop-blur-xl p-4"
     >
       <p className="text-sm font-medium text-foreground/90 mb-1">{question.question_text}</p>
@@ -381,22 +455,27 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
         <p className="text-[11px] text-muted-foreground/50 mb-3">Select all that apply</p>
       )}
       <div className="flex flex-wrap gap-2">
-        {question.possible_answers.map((answer) => (
-          <button
+        {question.possible_answers.map((answer, index) => (
+          <motion.button
             key={answer.answer_id}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: index * 0.05 }}
+            whileHover={!disabled ? { scale: 1.03 } : {}}
+            whileTap={!disabled ? { scale: 0.97 } : {}}
             onClick={() => handleSelect(answer.answer_id)}
             disabled={disabled}
             className={cn(
-              "px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200",
-              "border hover:scale-[1.02]",
+              "px-3 py-2 rounded-xl text-sm font-medium transition-colors duration-200",
+              "border",
               selected.includes(answer.answer_id)
                 ? "bg-gradient-to-br from-primary/20 to-accent/20 border-primary/30 text-foreground shadow-sm"
                 : "bg-white/30 border-white/40 text-muted-foreground/70 hover:bg-white/50 hover:border-white/60",
-              disabled && "opacity-50 cursor-not-allowed hover:scale-100"
+              disabled && "opacity-50 cursor-not-allowed"
             )}
           >
             {answer.answer_text}
-          </button>
+          </motion.button>
         ))}
       </div>
     </motion.div>
@@ -419,6 +498,8 @@ export const ImageDisplayCard: React.FC<ImageDisplayCardProps> = ({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      transition={smoothTransition}
       className="rounded-2xl border border-white/40 bg-white/30 backdrop-blur-xl p-4"
     >
       <p className="text-sm font-medium text-foreground/80 mb-3 flex items-center gap-2">
@@ -430,9 +511,13 @@ export const ImageDisplayCard: React.FC<ImageDisplayCardProps> = ({
         images.length === 1 ? "grid-cols-1" : "grid-cols-2"
       )}>
         {images.map((img, index) => (
-          <div
+          <motion.div
             key={index}
-            className="relative rounded-xl overflow-hidden border border-white/30 aspect-video bg-white/10 group"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: index * 0.1 }}
+            whileHover={{ scale: 1.02 }}
+            className="relative rounded-xl overflow-hidden border border-white/30 aspect-video bg-white/10 group cursor-pointer"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -440,8 +525,12 @@ export const ImageDisplayCard: React.FC<ImageDisplayCardProps> = ({
               alt={`Image ${index + 1}`}
               className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
+            <motion.div
+              initial={{ opacity: 0 }}
+              whileHover={{ opacity: 1 }}
+              className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent"
+            />
+          </motion.div>
         ))}
       </div>
     </motion.div>

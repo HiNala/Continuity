@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import { RotateCcw, ChevronRight, Sparkles } from "lucide-react";
 import { AnimatedBackground } from "@/components/ui/animated-background";
 import { PromptInputBox } from "@/components/ui/ai-prompt-box";
@@ -20,6 +20,31 @@ import {
 
 const cn = (...classes: (string | undefined | null | false)[]) =>
   classes.filter(Boolean).join(" ");
+
+// Animation variants for consistent timing
+const slideInLeft = {
+  initial: { opacity: 0, x: -30 },
+  animate: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: -20 },
+};
+
+const slideInRight = {
+  initial: { opacity: 0, x: 30 },
+  animate: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: 20 },
+};
+
+// Spring transition for natural feel
+const springTransition = {
+  type: "spring" as const,
+  stiffness: 300,
+  damping: 30,
+};
+
+const smoothTransition = {
+  duration: 0.4,
+  ease: [0.25, 0.1, 0.25, 1] as const,
+};
 
 type AppState = "welcome" | "active";
 
@@ -51,18 +76,20 @@ export default function ContinuityApp() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto-scroll to latest card
+  // Auto-scroll to latest card with slight delay for animation
   useEffect(() => {
-    if (cardsEndRef.current) {
-      cardsEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    const timer = setTimeout(() => {
+      cardsEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, 100);
+    return () => clearTimeout(timer);
   }, [agentCards]);
 
   // Auto-scroll chat
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    const timer = setTimeout(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, 100);
+    return () => clearTimeout(timer);
   }, [chatMessages]);
 
   // Cleanup polling on unmount
@@ -304,7 +331,6 @@ export default function ContinuityApp() {
         const status = await getOrchestrationStatus(pId);
         setOrchestrationStatus(status);
 
-        // Only add cards on state changes
         if (status.state !== lastState) {
           lastState = status.state;
 
@@ -339,7 +365,6 @@ export default function ContinuityApp() {
           }
         }
 
-        // Check for terminal states
         if (status.state === "completed" || status.state === "completed_with_warnings" || status.state === "failed") {
           if (pollingRef.current) {
             clearInterval(pollingRef.current);
@@ -399,143 +424,168 @@ export default function ContinuityApp() {
     : false;
 
   return (
-    <div className="min-h-screen text-foreground dark">
-      <AnimatedBackground isActive={appState === "active"} intensity={appState === "active" ? "intense" : "normal"} />
+    <LayoutGroup>
+      <div className="min-h-screen text-foreground dark">
+        <AnimatedBackground isActive={appState === "active"} intensity={appState === "active" ? "intense" : "normal"} />
 
-      <div className="relative z-10 min-h-screen flex flex-col">
-        {/* Header */}
-        <Header appState={appState} onReset={resetAll} />
-
-        {/* Main Content */}
-        <main className="flex-1 flex overflow-hidden">
-          <AnimatePresence mode="wait">
-            {appState === "welcome" ? (
-              <WelcomeView key="welcome" onSend={handleSend} isLoading={isLoading} />
-            ) : (
-              <SplitView
-                key="split"
-                agentCards={agentCards}
-                uploadedImages={uploadedImages}
-                questions={questions}
-                answers={answers}
-                onQuestionAnswer={handleQuestionAnswer}
-                onSubmitAnswers={handleSubmitAnswers}
-                allQuestionsAnswered={allQuestionsAnswered}
-                orchestrationStatus={orchestrationStatus}
-                isLoading={isLoading}
-                cardsEndRef={cardsEndRef}
-                chatEndRef={chatEndRef}
-                chatMessages={chatMessages}
-                error={error}
-                onSend={handleSend}
-              />
-            )}
-          </AnimatePresence>
-        </main>
-
-        {/* Footer */}
-        <Footer appState={appState} />
-      </div>
-    </div>
-  );
-}
-
-// Header Component
-interface HeaderProps {
-  appState: AppState;
-  onReset: () => void;
-}
-
-function Header({ appState, onReset }: HeaderProps) {
-  return (
-    <header className="sticky top-0 z-50 shrink-0">
-      <div className="mx-4 mt-4">
-        <div className={cn(
-          "mx-auto px-5 h-14 flex items-center justify-between rounded-2xl border border-white/60 bg-white/40 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.8)] transition-all duration-500",
-          appState === "welcome" ? "max-w-3xl" : "max-w-7xl"
-        )}>
-          <div className="flex items-center gap-2.5">
-            <ContinuityLogo size={26} />
-            <span className="font-medium text-[15px] tracking-tight text-foreground/90">Continuity</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {appState !== "welcome" && (
-              <motion.button
-                initial={{ opacity: 0, x: 10 }}
-                animate={{ opacity: 1, x: 0 }}
-                onClick={onReset}
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-white/50"
+        <div className="relative z-10 min-h-screen flex flex-col">
+          {/* Animated Header */}
+          <motion.header
+            layout
+            transition={springTransition}
+            className="sticky top-0 z-50 shrink-0"
+          >
+            <div className="mx-4 mt-4">
+              <motion.div
+                layout
+                transition={springTransition}
+                className={cn(
+                  "mx-auto px-5 h-14 flex items-center justify-between rounded-2xl border border-white/60 bg-white/40 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.8)]",
+                  appState === "welcome" ? "max-w-3xl" : "max-w-7xl"
+                )}
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                New project
-              </motion.button>
-            )}
-            <SettingsDropdown />
-          </div>
+                <motion.div layout className="flex items-center gap-2.5">
+                  <ContinuityLogo size={26} />
+                  <span className="font-medium text-[15px] tracking-tight text-foreground/90">Continuity</span>
+                </motion.div>
+                <motion.div layout className="flex items-center gap-2">
+                  <AnimatePresence mode="wait">
+                    {appState !== "welcome" && (
+                      <motion.button
+                        key="reset-btn"
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        transition={smoothTransition}
+                        onClick={resetAll}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-white/50"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        New project
+                      </motion.button>
+                    )}
+                  </AnimatePresence>
+                  <SettingsDropdown />
+                </motion.div>
+              </motion.div>
+            </div>
+          </motion.header>
+
+          {/* Main Content with smooth transitions */}
+          <main className="flex-1 flex overflow-hidden">
+            <AnimatePresence mode="wait">
+              {appState === "welcome" ? (
+                <WelcomeView key="welcome" onSend={handleSend} isLoading={isLoading} />
+              ) : (
+                <SplitView
+                  key="split"
+                  agentCards={agentCards}
+                  uploadedImages={uploadedImages}
+                  questions={questions}
+                  answers={answers}
+                  onQuestionAnswer={handleQuestionAnswer}
+                  onSubmitAnswers={handleSubmitAnswers}
+                  allQuestionsAnswered={allQuestionsAnswered}
+                  orchestrationStatus={orchestrationStatus}
+                  isLoading={isLoading}
+                  cardsEndRef={cardsEndRef}
+                  chatEndRef={chatEndRef}
+                  chatMessages={chatMessages}
+                  error={error}
+                  onSend={handleSend}
+                />
+              )}
+            </AnimatePresence>
+          </main>
+
+          {/* Animated Footer */}
+          <motion.footer
+            layout
+            transition={springTransition}
+            className="relative z-10 shrink-0"
+          >
+            <div className="mx-4 mb-4">
+              <motion.div
+                layout
+                transition={springTransition}
+                className={cn(
+                  "mx-auto px-5 h-11 flex items-center justify-between rounded-2xl border border-white/40 bg-white/25 backdrop-blur-xl text-xs text-muted-foreground",
+                  appState === "welcome" ? "max-w-3xl" : "max-w-7xl"
+                )}
+              >
+                <span className="flex items-center gap-2">
+                  <Sparkles className="w-3 h-3" />
+                  WeaveHacks 3
+                </span>
+                <span>Self-improving AI agents</span>
+              </motion.div>
+            </div>
+          </motion.footer>
         </div>
       </div>
-    </header>
+    </LayoutGroup>
   );
 }
 
-// Footer Component
-function Footer({ appState }: { appState: AppState }) {
-  return (
-    <footer className="relative z-10 shrink-0">
-      <div className="mx-4 mb-4">
-        <div className={cn(
-          "mx-auto px-5 h-11 flex items-center justify-between rounded-2xl border border-white/40 bg-white/25 backdrop-blur-xl text-xs text-muted-foreground transition-all duration-500",
-          appState === "welcome" ? "max-w-3xl" : "max-w-7xl"
-        )}>
-          <span className="flex items-center gap-2">
-            <Sparkles className="w-3 h-3" />
-            WeaveHacks 3
-          </span>
-          <span>Self-improving AI agents</span>
-        </div>
-      </div>
-    </footer>
-  );
-}
+// Welcome View with staggered animations
+function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: File[]) => void; isLoading: boolean }) {
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.08,
+        delayChildren: 0.1,
+      },
+    },
+    exit: {
+      opacity: 0,
+      scale: 0.98,
+      transition: { duration: 0.3 },
+    },
+  };
 
-// Welcome View Component
-interface WelcomeViewProps {
-  onSend: (message: string, files?: File[]) => void;
-  isLoading: boolean;
-}
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { 
+      opacity: 1, 
+      y: 0,
+      transition: smoothTransition,
+    },
+  };
 
-function WelcomeView({ onSend, isLoading }: WelcomeViewProps) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ duration: 0.4 }}
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
       className="flex-1 flex items-center justify-center px-6 py-16"
     >
       <div className="w-full max-w-xl">
         {/* Hero */}
         <div className="text-center mb-10">
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
+            variants={itemVariants}
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/60 bg-white/50 backdrop-blur-xl text-xs font-medium text-primary mb-5 shadow-sm"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+            <motion.span
+              animate={{ scale: [1, 1.2, 1] }}
+              transition={{ duration: 2, repeat: Infinity }}
+              className="w-1.5 h-1.5 rounded-full bg-primary"
+            />
             WeaveHacks 3
           </motion.div>
           <motion.h1
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05 }}
+            variants={itemVariants}
             className="text-4xl md:text-5xl font-semibold tracking-tight text-balance bg-gradient-to-b from-foreground via-foreground/90 to-foreground/70 bg-clip-text text-transparent"
           >
             Transform any space
           </motion.h1>
           <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.1 }}
+            variants={itemVariants}
             className="text-muted-foreground mt-4 text-base"
           >
             Upload photos and describe your ideal renovation
@@ -543,11 +593,7 @@ function WelcomeView({ onSend, isLoading }: WelcomeViewProps) {
         </div>
 
         {/* Prompt input */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-        >
+        <motion.div variants={itemVariants}>
           <PromptInputBox 
             onSend={onSend} 
             isLoading={isLoading}
@@ -557,9 +603,7 @@ function WelcomeView({ onSend, isLoading }: WelcomeViewProps) {
 
         {/* Hints */}
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.25 }}
+          variants={itemVariants}
           className="mt-6 flex items-center justify-center gap-6 text-xs text-muted-foreground/70"
         >
           <span className="flex items-center gap-2">
@@ -574,24 +618,26 @@ function WelcomeView({ onSend, isLoading }: WelcomeViewProps) {
 
         {/* Features */}
         <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35 }}
+          variants={itemVariants}
           className="mt-14 grid grid-cols-3 gap-3"
         >
           {[
             { label: "Spatial analysis", desc: "Constraint detection", gradient: "from-pink-500/20 to-rose-500/10" },
             { label: "Multi-agent", desc: "Progressive refinement", gradient: "from-cyan-500/20 to-sky-500/10" },
             { label: "Photorealistic", desc: "High-fidelity renders", gradient: "from-violet-500/20 to-purple-500/10" },
-          ].map((item, index) => (
+          ].map((item) => (
             <motion.div
               key={item.label}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 + index * 0.05 }}
-              className="group relative p-4 rounded-2xl border border-white/50 bg-white/30 backdrop-blur-xl hover:bg-white/40 hover:border-white/70 transition-all duration-300 cursor-default overflow-hidden shadow-sm"
+              whileHover={{ scale: 1.02, y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              className="group relative p-4 rounded-2xl border border-white/50 bg-white/30 backdrop-blur-xl transition-colors duration-300 cursor-default overflow-hidden shadow-sm hover:bg-white/40 hover:border-white/70"
             >
-              <div className={cn("absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-100 transition-opacity duration-500", item.gradient)} />
+              <motion.div
+                initial={{ opacity: 0 }}
+                whileHover={{ opacity: 1 }}
+                transition={{ duration: 0.3 }}
+                className={cn("absolute inset-0 bg-gradient-to-br", item.gradient)}
+              />
               <div className="relative">
                 <p className="text-sm font-medium text-foreground/90">{item.label}</p>
                 <p className="text-xs text-muted-foreground/70 mt-0.5">{item.desc}</p>
@@ -604,7 +650,7 @@ function WelcomeView({ onSend, isLoading }: WelcomeViewProps) {
   );
 }
 
-// Split View Component
+// Split View with coordinated panel animations
 interface SplitViewProps {
   agentCards: AgentCard[];
   uploadedImages: string[];
@@ -643,140 +689,185 @@ function SplitView({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.4 }}
+      transition={{ duration: 0.3 }}
       className="flex-1 flex overflow-hidden"
     >
       {/* Left Panel - Chat Interface */}
       <motion.div
-        initial={{ x: -20, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        transition={{ delay: 0.1, duration: 0.4 }}
+        {...slideInLeft}
+        transition={{ ...smoothTransition, delay: 0.1 }}
         className="w-[420px] min-w-[380px] border-r border-white/20 flex flex-col bg-gradient-to-b from-white/5 to-white/10 backdrop-blur-sm"
       >
         {/* Chat header */}
-        <div className="px-5 py-4 border-b border-white/10">
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="px-5 py-4 border-b border-white/10"
+        >
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.3, type: "spring", stiffness: 400 }}
+              className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center"
+            >
               <ContinuityIcon size={16} />
-            </div>
+            </motion.div>
             <div>
               <h2 className="text-sm font-medium text-foreground/90">Design Assistant</h2>
               <p className="text-xs text-muted-foreground/60">Interactive workspace</p>
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* Chat messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
           {/* Uploaded Images */}
-          {uploadedImages.length > 0 && (
-            <ImageDisplayCard images={uploadedImages} title="Your space" />
-          )}
+          <AnimatePresence>
+            {uploadedImages.length > 0 && (
+              <ImageDisplayCard images={uploadedImages} title="Your space" />
+            )}
+          </AnimatePresence>
 
           {/* Chat messages */}
-          {chatMessages.map((msg) => (
-            <ChatBubble key={msg.id} message={msg} />
-          ))}
+          <AnimatePresence mode="popLayout">
+            {chatMessages.map((msg, index) => (
+              <ChatBubble key={msg.id} message={msg} index={index} />
+            ))}
+          </AnimatePresence>
 
           {/* Questions */}
-          {questions && (
-            <div className="space-y-3">
-              {questions.questions.map((q) => (
-                <QuestionCard
-                  key={q.question_id}
-                  question={q}
-                  onAnswer={onQuestionAnswer}
-                  selectedAnswer={answers[q.question_id]}
-                  disabled={isLoading}
-                />
-              ))}
-              
-              {/* Submit button */}
-              <motion.button
-                initial={{ opacity: 0, y: 10 }}
+          <AnimatePresence>
+            {questions && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                onClick={onSubmitAnswers}
-                disabled={!allQuestionsAnswered || isLoading}
-                className={cn(
-                  "w-full py-3 rounded-xl font-medium text-sm transition-all duration-300 flex items-center justify-center gap-2",
-                  allQuestionsAnswered && !isLoading
-                    ? "bg-gradient-to-br from-primary to-accent text-white shadow-lg hover:shadow-xl hover:scale-[1.02]"
-                    : "bg-white/20 text-muted-foreground/40 cursor-not-allowed"
-                )}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-3"
               >
-                {isLoading ? (
-                  <>
-                    <motion.div
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                      className="w-4 h-4 border-2 border-current border-t-transparent rounded-full"
+                {questions.questions.map((q, index) => (
+                  <motion.div
+                    key={q.question_id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                  >
+                    <QuestionCard
+                      question={q}
+                      onAnswer={onQuestionAnswer}
+                      selectedAnswer={answers[q.question_id]}
+                      disabled={isLoading}
                     />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    Continue
-                    <ChevronRight className="w-4 h-4" />
-                  </>
-                )}
-              </motion.button>
-            </div>
-          )}
+                  </motion.div>
+                ))}
+                
+                {/* Submit button */}
+                <motion.button
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  whileHover={allQuestionsAnswered && !isLoading ? { scale: 1.02 } : {}}
+                  whileTap={allQuestionsAnswered && !isLoading ? { scale: 0.98 } : {}}
+                  onClick={onSubmitAnswers}
+                  disabled={!allQuestionsAnswered || isLoading}
+                  className={cn(
+                    "w-full py-3 rounded-xl font-medium text-sm transition-all duration-300 flex items-center justify-center gap-2",
+                    allQuestionsAnswered && !isLoading
+                      ? "bg-gradient-to-br from-primary to-accent text-white shadow-lg hover:shadow-xl"
+                      : "bg-white/20 text-muted-foreground/40 cursor-not-allowed"
+                  )}
+                >
+                  {isLoading ? (
+                    <>
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        className="w-4 h-4 border-2 border-current border-t-transparent rounded-full"
+                      />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      Continue
+                      <ChevronRight className="w-4 h-4" />
+                    </>
+                  )}
+                </motion.button>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Status indicator */}
-          {orchestrationStatus && !questions && (
-            <StatusIndicator status={orchestrationStatus} />
-          )}
+          <AnimatePresence>
+            {orchestrationStatus && !questions && (
+              <StatusIndicator status={orchestrationStatus} />
+            )}
+          </AnimatePresence>
 
           {/* Error display */}
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4"
-            >
-              <p className="text-sm text-red-700">{error}</p>
-            </motion.div>
-          )}
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4"
+              >
+                <p className="text-sm text-red-700">{error}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <div ref={chatEndRef} />
         </div>
 
         {/* Bottom input */}
-        <div className="p-4 border-t border-white/10">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="p-4 border-t border-white/10"
+        >
           <PromptInputBox 
             onSend={onSend}
             isLoading={isLoading}
             placeholder="Ask a follow-up question..."
             compact
           />
-        </div>
+        </motion.div>
       </motion.div>
 
       {/* Right Panel - Agent Work Cards */}
       <motion.div
-        initial={{ x: 20, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        transition={{ delay: 0.2, duration: 0.4 }}
-        className="flex-1 overflow-y-auto"
+        {...slideInRight}
+        transition={{ ...smoothTransition, delay: 0.15 }}
+        className="flex-1 overflow-y-auto scrollbar-thin"
       >
         <div className="p-6">
           {/* Panel header */}
-          <div className="mb-6">
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="mb-6"
+          >
             <h2 className="text-lg font-semibold text-foreground/90">Agent Activity</h2>
             <p className="text-sm text-muted-foreground/60">Real-time pipeline progress</p>
-          </div>
+          </motion.div>
 
-          {/* Cards */}
+          {/* Cards with staggered animation */}
           <div className="max-w-2xl space-y-4">
             <AnimatePresence mode="popLayout">
               {agentCards.map((card, index) => (
                 <motion.div
                   key={card.id}
-                  initial={{ opacity: 0, y: 20, scale: 0.98 }}
+                  initial={{ opacity: 0, y: 30, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ delay: index * 0.05 }}
+                  transition={{
+                    ...smoothTransition,
+                    delay: Math.min(index * 0.05, 0.3), // Cap delay at 0.3s
+                  }}
                 >
                   <AgentWorkCard {...card} />
                 </motion.div>
@@ -790,57 +881,76 @@ function SplitView({
   );
 }
 
-// Chat Bubble Component
-function ChatBubble({ message }: { message: ChatMessage }) {
+// Chat Bubble with smooth animations
+function ChatBubble({ message, index }: { message: ChatMessage; index: number }) {
   const isUser = message.type === "user";
   const isSystem = message.type === "system";
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={{ opacity: 0, y: 15, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{
+        ...smoothTransition,
+        delay: Math.min(index * 0.05, 0.2),
+      }}
       className={cn(
         "flex gap-3",
         isUser ? "flex-row-reverse" : "flex-row"
       )}
     >
       {!isUser && (
-        <div className={cn(
-          "w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
-          isSystem ? "bg-amber-500/20" : "bg-gradient-to-br from-primary/20 to-accent/20"
-        )}>
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ delay: 0.1, type: "spring", stiffness: 400 }}
+          className={cn(
+            "w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
+            isSystem ? "bg-amber-500/20" : "bg-gradient-to-br from-primary/20 to-accent/20"
+          )}
+        >
           {isSystem ? (
             <span className="text-amber-600 text-xs">!</span>
           ) : (
             <ContinuityIcon size={14} />
           )}
-        </div>
+        </motion.div>
       )}
-      <div className={cn(
-        "rounded-2xl px-4 py-3 max-w-[85%]",
-        isUser 
-          ? "bg-gradient-to-br from-primary to-accent text-white rounded-br-md"
-          : isSystem
-            ? "bg-amber-500/10 border border-amber-500/20 text-amber-800"
-            : "bg-white/40 border border-white/50 text-foreground/80 rounded-bl-md"
-      )}>
+      <motion.div
+        whileHover={{ scale: 1.01 }}
+        className={cn(
+          "rounded-2xl px-4 py-3 max-w-[85%]",
+          isUser 
+            ? "bg-gradient-to-br from-primary to-accent text-white rounded-br-md"
+            : isSystem
+              ? "bg-amber-500/10 border border-amber-500/20 text-amber-800"
+              : "bg-white/40 border border-white/50 text-foreground/80 rounded-bl-md"
+        )}
+      >
         <p className="text-sm leading-relaxed">{message.content}</p>
         {message.images && message.images.length > 0 && (
           <div className="mt-2 grid grid-cols-2 gap-1.5">
             {message.images.map((img, i) => (
-              <div key={i} className="rounded-lg overflow-hidden aspect-video">
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: i * 0.1 }}
+                className="rounded-lg overflow-hidden aspect-video"
+              >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={img} alt="" className="w-full h-full object-cover" />
-              </div>
+              </motion.div>
             ))}
           </div>
         )}
-      </div>
+      </motion.div>
     </motion.div>
   );
 }
 
-// Status Indicator Component
+// Status Indicator with animations
 function StatusIndicator({ status }: { status: OrchestrationStatusResponse }) {
   const getStatusColor = () => {
     if (status.state === "completed") return "text-green-600 bg-green-500/10 border-green-500/20";
@@ -850,8 +960,9 @@ function StatusIndicator({ status }: { status: OrchestrationStatusResponse }) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
       className={cn(
         "rounded-2xl border p-4",
         getStatusColor()
@@ -859,9 +970,13 @@ function StatusIndicator({ status }: { status: OrchestrationStatusResponse }) {
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-medium">Pipeline Status</span>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-current/10 capitalize">
+        <motion.span
+          initial={{ scale: 0.8 }}
+          animate={{ scale: 1 }}
+          className="text-xs px-2 py-0.5 rounded-full bg-current/10 capitalize"
+        >
           {status.state.replace(/_/g, ' ')}
-        </span>
+        </motion.span>
       </div>
       {status.current_phase && (
         <p className="text-xs opacity-80">

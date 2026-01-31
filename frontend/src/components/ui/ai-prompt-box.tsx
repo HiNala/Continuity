@@ -9,6 +9,18 @@ import { AnimatePresence, motion } from "framer-motion";
 const cn = (...classes: (string | undefined | null | false)[]) =>
   classes.filter(Boolean).join(" ");
 
+// Animation constants
+const springTransition = {
+  type: "spring" as const,
+  stiffness: 400,
+  damping: 30,
+};
+
+const smoothTransition = {
+  duration: 0.3,
+  ease: [0.25, 0.1, 0.25, 1] as const,
+};
+
 interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   className?: string;
 }
@@ -17,7 +29,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ className, ...props }, ref) => (
     <textarea
       className={cn(
-        "flex w-full bg-transparent px-4 py-4 text-[15px] text-foreground placeholder:text-muted-foreground/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 min-h-[56px] resize-none leading-relaxed",
+        "flex w-full bg-transparent px-4 py-4 text-[15px] text-foreground placeholder:text-muted-foreground/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 min-h-[56px] resize-none leading-relaxed transition-colors duration-200",
         className
       )}
       ref={ref}
@@ -39,7 +51,7 @@ const TooltipContent = React.forwardRef<
     ref={ref}
     sideOffset={sideOffset}
     className={cn(
-      "z-50 rounded-lg bg-foreground/90 backdrop-blur-sm px-2.5 py-1.5 text-xs text-background shadow-lg animate-in fade-in-0 zoom-in-95",
+      "z-50 rounded-lg bg-foreground/90 backdrop-blur-sm px-2.5 py-1.5 text-xs text-background shadow-lg animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
       className
     )}
     {...props}
@@ -79,7 +91,7 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 z-10 rounded-full bg-white/[0.1] backdrop-blur-sm p-2 hover:bg-white/[0.15] transition-colors border border-white/[0.1]">
+      <DialogPrimitive.Close className="absolute right-4 top-4 z-10 rounded-full bg-white/[0.1] backdrop-blur-sm p-2 hover:bg-white/[0.15] transition-all duration-200 hover:scale-105 border border-white/[0.1]">
         <X className="h-4 w-4 text-foreground/70" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
@@ -129,6 +141,8 @@ interface PromptInputContextType {
   maxHeight: number | string;
   onSubmit?: () => void;
   disabled?: boolean;
+  isFocused: boolean;
+  setIsFocused: (focused: boolean) => void;
 }
 
 const PromptInputContext = React.createContext<PromptInputContextType>({
@@ -138,6 +152,8 @@ const PromptInputContext = React.createContext<PromptInputContextType>({
   maxHeight: 200,
   onSubmit: undefined,
   disabled: false,
+  isFocused: false,
+  setIsFocused: () => {},
 });
 
 function usePromptInput() {
@@ -178,10 +194,13 @@ const PromptInput = React.forwardRef<HTMLDivElement, PromptInputProps>(
     ref
   ) => {
     const [internalValue, setInternalValue] = React.useState(value || "");
+    const [isFocused, setIsFocused] = React.useState(false);
+    
     const handleChange = (newValue: string) => {
       setInternalValue(newValue);
       onValueChange?.(newValue);
     };
+    
     return (
       <TooltipProvider delayDuration={200}>
         <PromptInputContext.Provider
@@ -192,22 +211,40 @@ const PromptInput = React.forwardRef<HTMLDivElement, PromptInputProps>(
             maxHeight,
             onSubmit,
             disabled,
+            isFocused,
+            setIsFocused,
           }}
         >
-          <div
+          <motion.div
             ref={ref}
+            initial={false}
+            animate={{
+              scale: isFocused ? 1.005 : 1,
+              boxShadow: isFocused 
+                ? "0 8px 32px rgba(0,0,0,0.08), 0 0 48px rgba(236,72,153,0.12), inset 0 1px 0 rgba(255,255,255,0.9)"
+                : "0 8px 32px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+            }}
+            transition={springTransition}
             className={cn(
-              "relative rounded-2xl border border-white/60 bg-white/40 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] transition-all duration-300",
-              "hover:border-white/70 hover:bg-white/50",
-              "focus-within:border-primary/40 focus-within:bg-white/55 focus-within:shadow-[0_8px_32px_rgba(0,0,0,0.08),0_0_48px_rgba(236,72,153,0.1)]",
+              "relative rounded-2xl border bg-white/40 backdrop-blur-2xl transition-colors duration-300",
+              isFocused ? "border-primary/40 bg-white/55" : "border-white/60 hover:border-white/70 hover:bg-white/50",
               className
             )}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDrop}
           >
+            {/* Focus glow effect */}
+            <motion.div
+              initial={false}
+              animate={{
+                opacity: isFocused ? 1 : 0,
+              }}
+              transition={{ duration: 0.3 }}
+              className="absolute -inset-[1px] rounded-2xl bg-gradient-to-r from-primary/20 via-accent/10 to-primary/20 -z-10 blur-lg"
+            />
             {children}
-          </div>
+          </motion.div>
         </PromptInputContext.Provider>
       </TooltipProvider>
     );
@@ -223,7 +260,7 @@ interface PromptInputTextareaProps {
 const PromptInputTextarea: React.FC<
   PromptInputTextareaProps & React.ComponentProps<typeof Textarea>
 > = ({ className, onKeyDown, disableAutosize = false, placeholder, ...props }) => {
-  const { value, setValue, maxHeight, onSubmit, disabled } = usePromptInput();
+  const { value, setValue, maxHeight, onSubmit, disabled, setIsFocused } = usePromptInput();
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
@@ -249,6 +286,8 @@ const PromptInputTextarea: React.FC<
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={handleKeyDown}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
       className={className}
       disabled={disabled}
       placeholder={placeholder}
@@ -440,14 +479,17 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
+                transition={smoothTransition}
                 className={cn("flex flex-wrap gap-2.5 p-4 pb-0", compact && "p-3 pb-0")}
               >
                 {files.map((file, index) => (
                   <motion.div
                     key={file.name}
-                    initial={{ opacity: 0, scale: 0.9 }}
+                    initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={springTransition}
+                    whileHover={{ scale: 1.05 }}
                     className="relative group"
                   >
                     {filePreviews[file.name] && (
@@ -467,13 +509,16 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
                         />
                       </button>
                     )}
-                    <button
+                    <motion.button
                       type="button"
                       onClick={() => handleRemoveFile(index)}
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      whileHover={{ scale: 1.1 }}
+                      animate={{ opacity: 1, scale: 1 }}
                       className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-foreground/90 text-background flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
                     >
                       <X className="w-3 h-3" />
-                    </button>
+                    </motion.button>
                   </motion.div>
                 ))}
               </motion.div>
@@ -486,14 +531,24 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
                 className="absolute inset-0 z-10 rounded-2xl bg-primary/10 border-2 border-dashed border-primary/40 flex items-center justify-center backdrop-blur-sm"
               >
-                <div className="text-center">
-                  <div className="w-10 h-10 rounded-xl bg-white/60 border border-white/80 flex items-center justify-center mx-auto mb-2 shadow-sm">
+                <motion.div
+                  initial={{ scale: 0.9, y: 10 }}
+                  animate={{ scale: 1, y: 0 }}
+                  exit={{ scale: 0.9, y: 10 }}
+                  className="text-center"
+                >
+                  <motion.div
+                    animate={{ y: [0, -5, 0] }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                    className="w-10 h-10 rounded-xl bg-white/60 border border-white/80 flex items-center justify-center mx-auto mb-2 shadow-sm"
+                  >
                     <ImageIcon className="w-5 h-5 text-primary/80" />
-                  </div>
+                  </motion.div>
                   <p className="text-sm text-primary/80 font-medium">Drop images here</p>
-                </div>
+                </motion.div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -503,10 +558,12 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
           <PromptInputActions className={cn("flex items-center justify-between px-4 pb-4", compact && "px-3 pb-3")}>
             <div className="flex items-center gap-3">
               <PromptInputAction tooltip="Attach images">
-                <button
+                <motion.button
                   type="button"
                   onClick={() => uploadInputRef.current?.click()}
-                  className="flex h-9 w-9 text-muted-foreground items-center justify-center rounded-xl transition-all hover:bg-white/60 hover:text-foreground border border-transparent hover:border-white/70"
+                  whileHover={{ scale: 1.05, backgroundColor: "rgba(255,255,255,0.6)" }}
+                  whileTap={{ scale: 0.95 }}
+                  className="flex h-9 w-9 text-muted-foreground items-center justify-center rounded-xl transition-colors hover:text-foreground border border-transparent hover:border-white/70"
                 >
                   <Paperclip className="h-[18px] w-[18px]" />
                   <input
@@ -522,33 +579,52 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
                     accept="image/*"
                     multiple
                   />
-                </button>
+                </motion.button>
               </PromptInputAction>
-              {files.length > 0 && (
-                <span className="text-xs text-muted-foreground/60 font-medium">
-                  {files.length} image{files.length > 1 ? "s" : ""} attached
-                </span>
-              )}
+              <AnimatePresence>
+                {files.length > 0 && (
+                  <motion.span
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -10 }}
+                    className="text-xs text-muted-foreground/60 font-medium"
+                  >
+                    {files.length} image{files.length > 1 ? "s" : ""} attached
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </div>
 
             <PromptInputAction tooltip={hasContent ? "Send" : "Enter prompt or add images"}>
-              <button
+              <motion.button
                 type="button"
+                whileHover={hasContent && !isLoading ? { scale: 1.08 } : {}}
+                whileTap={hasContent && !isLoading ? { scale: 0.95 } : {}}
+                animate={{
+                  boxShadow: hasContent 
+                    ? "0 4px 14px rgba(236, 72, 153, 0.3)" 
+                    : "none",
+                }}
                 className={cn(
                   "h-9 w-9 rounded-xl flex items-center justify-center transition-all duration-300",
                   hasContent
-                    ? "bg-gradient-to-br from-primary via-primary to-accent text-primary-foreground shadow-lg shadow-primary/20 hover:shadow-primary/30 hover:scale-105"
+                    ? "bg-gradient-to-br from-primary via-primary to-accent text-primary-foreground"
                     : "bg-white/50 text-muted-foreground/50 border border-white/60"
                 )}
                 onClick={handleSubmit}
                 disabled={!hasContent || isLoading}
               >
                 {isLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  >
+                    <Loader2 className="w-4 h-4" />
+                  </motion.div>
                 ) : (
                   <ArrowUp className="h-4 w-4" />
                 )}
-              </button>
+              </motion.button>
             </PromptInputAction>
           </PromptInputActions>
         </PromptInput>
