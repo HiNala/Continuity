@@ -636,3 +636,155 @@ export async function evaluateAndImprove(
 
   return response.json();
 }
+
+// ============================================
+// Orchestration Types (Mission 06)
+// ============================================
+export interface OrchestrationStatusResponse {
+  project_id: string;
+  state: string;
+  status: string;
+  current_phase: string | null;
+  retry_count: number;
+  has_warnings: boolean;
+  warning_details: Array<Record<string, unknown>> | null;
+  started_at: string | null;
+  completed_at: string | null;
+  recent_transitions: Array<{
+    from: string;
+    to: string;
+    trigger: string;
+    at: string;
+  }>;
+}
+
+export interface OrchestrationLogEntry {
+  id: string;
+  from_state: string;
+  to_state: string;
+  trigger: string;
+  details: Record<string, unknown>;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface OrchestrationResult {
+  project_id: string;
+  state: string;
+  status: string;
+  has_warnings: boolean;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+// ============================================
+// Orchestration Functions (Mission 06)
+// ============================================
+
+/**
+ * Start orchestration for a project.
+ */
+export async function startOrchestration(
+  projectId: string,
+  skipRequirements: boolean = false
+): Promise<OrchestrationResult> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/start`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skip_requirements: skipRequirements }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to start orchestration");
+  }
+
+  return response.json();
+}
+
+/**
+ * Submit clarification answers during orchestration.
+ */
+export async function submitOrchestrationClarification(
+  projectId: string,
+  answers: Record<string, string>
+): Promise<OrchestrationResult> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/submit-clarification`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to submit clarification");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get orchestration status (use for polling).
+ */
+export async function getOrchestrationStatus(
+  projectId: string
+): Promise<OrchestrationStatusResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/status`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get status");
+  }
+
+  return response.json();
+}
+
+/**
+ * Retry orchestration from a specific phase or beginning.
+ */
+export async function retryOrchestration(
+  projectId: string,
+  fromPhase?: string
+): Promise<OrchestrationResult> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/retry`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fromPhase ? { from_phase: fromPhase } : {}),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to retry");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get complete orchestration log.
+ */
+export async function getOrchestrationLog(
+  projectId: string
+): Promise<OrchestrationLogEntry[]> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/log`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get log");
+  }
+
+  return response.json();
+}

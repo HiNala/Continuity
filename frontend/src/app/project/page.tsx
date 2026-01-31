@@ -38,11 +38,14 @@ import {
   analyzeSpace,
   generateImages,
   evaluateAndImprove,
+  startOrchestration,
+  getOrchestrationStatus,
   ClarifyingQuestion,
   RequirementsResponse,
   AnalysisSummaryResponse,
   GenerationResponse,
   EvaluateAndImproveResponse,
+  OrchestrationStatusResponse,
 } from "@/lib/api";
 
 // ============================================
@@ -96,6 +99,10 @@ export default function ProjectPage() {
   // Quality Control (Mission 05)
   const [qcResult, setQcResult] = useState<EvaluateAndImproveResponse | null>(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
+  
+  // Orchestration (Mission 06)
+  const [orchestrationStatus, setOrchestrationStatus] = useState<OrchestrationStatusResponse | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
 
   // ==========================================
   // Image URL handling
@@ -297,6 +304,98 @@ export default function ProjectPage() {
 
   const getPhaseName = (phase: string) => {
     return phase.charAt(0).toUpperCase() + phase.slice(1);
+  };
+
+  // ==========================================
+  // Orchestration Helpers (Mission 06)
+  // ==========================================
+  const formatOrchestrationState = (state: string): string => {
+    const stateLabels: Record<string, string> = {
+      created: "Ready to Start",
+      gathering_requirements: "Gathering Requirements...",
+      awaiting_clarification: "Awaiting Your Input",
+      analyzing_space: "Analyzing Your Space...",
+      generating_cleanup: "Generating Cleanup Phase...",
+      evaluating_cleanup: "Evaluating Cleanup...",
+      retrying_cleanup: "Retrying Cleanup...",
+      generating_structural: "Generating Structural Phase...",
+      evaluating_structural: "Evaluating Structural...",
+      retrying_structural: "Retrying Structural...",
+      generating_fixture: "Generating Fixture Phase...",
+      evaluating_fixture: "Evaluating Fixtures...",
+      retrying_fixture: "Retrying Fixtures...",
+      generating_style: "Generating Style Variations...",
+      evaluating_style: "Evaluating Styles...",
+      retrying_style: "Retrying Styles...",
+      completed: "Complete!",
+      completed_with_warnings: "Complete (with warnings)",
+      failed: "Failed",
+    };
+    return stateLabels[state] || state;
+  };
+
+  const isTerminalState = (state: string): boolean => {
+    return ["completed", "completed_with_warnings", "failed"].includes(state);
+  };
+
+  const pollOrchestrationStatus = async (projectId: string) => {
+    setIsPolling(true);
+    
+    const poll = async () => {
+      try {
+        const status = await getOrchestrationStatus(projectId);
+        setOrchestrationStatus(status);
+        
+        // Update step based on state
+        if (status.state.startsWith("generating_") || 
+            status.state.startsWith("evaluating_") || 
+            status.state.startsWith("retrying_")) {
+          setStep("generating");
+        } else if (status.state === "completed" || status.state === "completed_with_warnings") {
+          setStep("results");
+          setIsPolling(false);
+          return;
+        } else if (status.state === "failed") {
+          setError("Orchestration failed");
+          setStep("constraints");
+          setIsPolling(false);
+          return;
+        }
+        
+        // Continue polling if not terminal
+        if (!isTerminalState(status.state)) {
+          setTimeout(poll, 2500); // Poll every 2.5 seconds
+        } else {
+          setIsPolling(false);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to get status");
+        setIsPolling(false);
+      }
+    };
+    
+    poll();
+  };
+
+  const handleStartOrchestration = async () => {
+    if (!projectId) return;
+
+    setLoading(true);
+    setError(null);
+    setStep("generating");
+
+    try {
+      // Start orchestration (non-blocking)
+      await startOrchestration(projectId);
+      
+      // Begin polling for status
+      pollOrchestrationStatus(projectId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start orchestration");
+      setStep("constraints");
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ==========================================
@@ -846,26 +945,35 @@ export default function ProjectPage() {
                 <div className="flex-1">
                   <p className="font-medium text-continuity-400 mb-1">Ready to Generate</p>
                   <p className="text-sm text-slate-300 mb-4">
-                    All constraints are captured. Generate visualizations through our 
-                    4-phase process: Cleanup → Structural → Fixture → Style.
+                    All constraints are captured. Start the self-improving generation pipeline
+                    with automatic quality control and policy optimization.
                   </p>
-                  <button
-                    onClick={handleGenerate}
-                    disabled={loading}
-                    className="btn-primary flex items-center gap-2"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-5 h-5" />
-                        Generate Visualizations
-                      </>
-                    )}
-                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleStartOrchestration}
+                      disabled={loading || isPolling}
+                      className="btn-primary flex items-center gap-2"
+                    >
+                      {loading || isPolling ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          {isPolling ? "Running..." : "Starting..."}
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-5 h-5" />
+                          Start Pipeline
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={handleGenerate}
+                      disabled={loading || isPolling}
+                      className="btn-secondary flex items-center gap-2 text-sm"
+                    >
+                      Quick Generate
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -899,16 +1007,22 @@ export default function ProjectPage() {
           </div>
         )}
 
-        {/* Step 6: Generating (Loading State) */}
+        {/* Step 6: Generating (Loading State with Orchestration) */}
         {step === "generating" && (
           <div className="space-y-8 animate-fade-in">
             <div className="text-center space-y-4">
               <div className="w-20 h-20 rounded-full bg-continuity-500/20 border border-continuity-500/30 flex items-center justify-center mx-auto">
                 <Wand2 className="w-10 h-10 text-continuity-400 animate-pulse" />
               </div>
-              <h2 className="text-2xl font-bold">Generating Visualizations</h2>
+              <h2 className="text-2xl font-bold">
+                {orchestrationStatus 
+                  ? formatOrchestrationState(orchestrationStatus.state)
+                  : "Generating Visualizations"}
+              </h2>
               <p className="text-slate-400 max-w-lg mx-auto">
-                Creating your design visualizations through our 4-phase transformation process.
+                {orchestrationStatus && orchestrationStatus.retry_count > 0 
+                  ? `Self-improving... Retry ${orchestrationStatus.retry_count}`
+                  : "Creating your design visualizations through our 4-phase transformation process."}
               </p>
             </div>
 
@@ -917,15 +1031,25 @@ export default function ProjectPage() {
               <div className="card">
                 <div className="space-y-4">
                   {["cleanup", "structural", "fixture", "style"].map((phase, i) => {
-                    const isActive = currentPhase === phase;
-                    const isComplete = 
-                      currentPhase === null ? false :
-                      ["cleanup", "structural", "fixture", "style"].indexOf(currentPhase) > i;
+                    // Determine phase state from orchestration status
+                    const orchPhase = orchestrationStatus?.current_phase;
+                    const orchState = orchestrationStatus?.state || "";
+                    
+                    const isGenerating = orchState === `generating_${phase}`;
+                    const isEvaluating = orchState === `evaluating_${phase}`;
+                    const isRetrying = orchState === `retrying_${phase}`;
+                    const isActive = isGenerating || isEvaluating || isRetrying || currentPhase === phase;
+                    
+                    // Phase is complete if we're past it
+                    const phaseOrder = ["cleanup", "structural", "fixture", "style"];
+                    const currentIdx = orchPhase ? phaseOrder.indexOf(orchPhase) : (currentPhase ? phaseOrder.indexOf(currentPhase) : -1);
+                    const isComplete = currentIdx > i;
                     
                     return (
                       <div key={phase} className="flex items-center gap-3">
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                           isComplete ? "bg-emerald-500" : 
+                          isRetrying ? "bg-amber-500" :
                           isActive ? "bg-continuity-500" : 
                           "bg-slate-800"
                         }`}>
@@ -942,12 +1066,16 @@ export default function ProjectPage() {
                             isActive ? "text-white" : "text-slate-400"
                           }`}>
                             {getPhaseName(phase)}
+                            {isRetrying && " (Retrying)"}
                           </span>
                           <p className="text-xs text-slate-500">
-                            {phase === "cleanup" && "Removing debris and distractions"}
-                            {phase === "structural" && "Completing walls and floors"}
-                            {phase === "fixture" && "Placing fixtures and features"}
-                            {phase === "style" && "Applying design styles"}
+                            {isGenerating && "Generating..."}
+                            {isEvaluating && "Quality check in progress..."}
+                            {isRetrying && "Applying improvements..."}
+                            {!isActive && phase === "cleanup" && "Removing debris and distractions"}
+                            {!isActive && phase === "structural" && "Completing walls and floors"}
+                            {!isActive && phase === "fixture" && "Placing fixtures and features"}
+                            {!isActive && phase === "style" && "Applying design styles"}
                           </p>
                         </div>
                       </div>
@@ -956,6 +1084,13 @@ export default function ProjectPage() {
                 </div>
               </div>
             </div>
+
+            {/* Orchestration Info */}
+            {orchestrationStatus && (
+              <div className="max-w-md mx-auto text-center text-xs text-slate-500">
+                {isPolling && <span className="animate-pulse">Live updating...</span>}
+              </div>
+            )}
           </div>
         )}
 
