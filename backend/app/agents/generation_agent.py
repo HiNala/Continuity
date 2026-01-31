@@ -12,15 +12,12 @@ The agent follows policy configuration but does NOT modify it.
 Quality Control Agent (Mission 05) handles policy modification.
 """
 
-import os
-import json
 import base64
 import httpx
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import weave
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,8 +26,7 @@ from sqlalchemy import select, and_
 from app.config import settings
 from app.models import (
     Project, Policy, Iteration, Constraint, ProjectAnalysis, Requirements,
-    ProjectStatus, GenerationPhase, IterationStatus, ConstraintClassification,
-    PolicyCreator
+    ProjectStatus, GenerationPhase, IterationStatus, ConstraintClassification
 )
 
 
@@ -175,7 +171,7 @@ class GenerationAgent:
         # First try to find project-specific policy
         result = await session.execute(
             select(Policy)
-            .where(and_(Policy.project_id == project_id, Policy.is_active == True))
+            .where(and_(Policy.project_id == project_id, Policy.is_active.is_(True)))
             .order_by(Policy.version.desc())
             .limit(1)
         )

@@ -8,21 +8,19 @@ Project Creation → Requirements → Spatial Analysis → Generation Loop → C
 It handles retries, policy updates, and ensures deterministic termination.
 """
 
-import asyncio
 import time
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 from uuid import UUID
 
 import weave
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.config import settings
 from app.models import (
     Project, Requirements, OrchestrationLog, Iteration,
     OrchestrationState, OrchestrationTrigger, GenerationPhase,
-    ProjectStatus, EvaluationStatus
+    ProjectStatus
 )
 from app.agents.requirements_agent import requirements_agent
 from app.agents.spatial_agent import spatial_agent
@@ -367,7 +365,6 @@ class Orchestrator:
     
     async def _save_default_requirements(self, identified: Dict[str, Any]) -> None:
         """Save requirements when no clarification needed."""
-        from app.models import Requirements
         
         req = Requirements(
             project_id=self.project_id,
@@ -712,7 +709,7 @@ class Orchestrator:
         
         try:
             # Process answers and finalize requirements
-            result = await requirements_agent.process_responses(
+            await requirements_agent.process_responses(
                 self.session, self.project_id, answers
             )
             

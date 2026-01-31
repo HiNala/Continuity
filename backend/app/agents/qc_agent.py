@@ -12,7 +12,6 @@ The agent does NOT generate images - it only evaluates and optimizes.
 """
 
 import json
-import time
 import httpx
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
@@ -24,8 +23,7 @@ from sqlalchemy import select, and_, desc
 
 from app.config import settings
 from app.models import (
-    Project, Policy, Iteration, Constraint, ProjectAnalysis,
-    EvaluationDetail, PolicyChange, EvaluationStatus, EvaluationCriterion,
+    Policy, Iteration, Constraint, EvaluationDetail, PolicyChange, EvaluationStatus, EvaluationCriterion,
     PolicyCreator, ConstraintClassification, GenerationPhase
 )
 
@@ -129,7 +127,7 @@ Return a JSON response with this structure:
                         "violations": violations,
                     },
                 }
-        except Exception as e:
+        except Exception:
             pass  # Fall through to default response
         
         # Default response if vision API fails
@@ -686,7 +684,7 @@ Return a JSON response:
         # Load current policy
         result = await session.execute(
             select(Policy)
-            .where(and_(Policy.project_id == project_id, Policy.is_active == True))
+            .where(and_(Policy.project_id == project_id, Policy.is_active.is_(True)))
             .order_by(desc(Policy.version))
             .limit(1)
         )
@@ -772,7 +770,7 @@ Return a JSON response:
             style_config=new_style,
             created_by=PolicyCreator.QUALITY_CONTROL,
             is_active=True,
-            notes=f"Auto-updated by QC agent based on evaluation failures.",
+            notes="Auto-updated by QC agent based on evaluation failures.",
         )
         session.add(new_policy)
         await session.flush()
