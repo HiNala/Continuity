@@ -36,7 +36,7 @@ export interface ClarifyingQuestion {
 export interface AnalyzeGoalResponse {
   project_id: string;
   original_goal: string;
-  identified: Record<string, any>;
+  identified: Record<string, string | boolean | number | string[]>;
   questions: ClarifyingQuestion[];
   questions_needed: boolean;
 }
@@ -341,16 +341,16 @@ export interface IterationResponse {
   status: string;
   error_message: string | null;
   created_at: string;
-  metadata: Record<string, any> | null;
+  metadata: Record<string, unknown> | null;
 }
 
 export interface PolicyResponse {
   id: number | null;
   version: number;
-  cleanup_config: Record<string, any>;
-  structural_config: Record<string, any>;
-  fixture_config: Record<string, any>;
-  style_config: Record<string, any>;
+  cleanup_config: Record<string, unknown>;
+  structural_config: Record<string, unknown>;
+  fixture_config: Record<string, unknown>;
+  style_config: Record<string, unknown>;
 }
 
 // ============================================
@@ -437,6 +437,201 @@ export async function getPolicy(
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.detail || "Failed to get policy");
+  }
+
+  return response.json();
+}
+
+// ============================================
+// QC & Evaluation Types (Mission 05)
+// ============================================
+export interface CriterionResult {
+  criterion: string;
+  passed: boolean;
+  score: number;
+  details: string;
+  evidence: Record<string, unknown>;
+}
+
+export interface EvaluationResponse {
+  success: boolean;
+  iteration_id: string;
+  overall_score: number | null;
+  passed: boolean | null;
+  status: string | null;
+  evaluations: CriterionResult[] | null;
+  threshold: number;
+  error: string | null;
+}
+
+export interface FailureAnalysisResponse {
+  iteration_id: string;
+  phase: string;
+  overall_score: number | null;
+  failed_criteria: Array<{
+    criterion: string;
+    score: number;
+    details: string;
+    evidence: Record<string, unknown>;
+  }>;
+  insights: string[];
+  recommended_changes: Array<{
+    type: string;
+    rationale: string;
+    [key: string]: unknown;
+  }>;
+}
+
+export interface PolicyChangeRecord {
+  id: string;
+  old_policy_id: number;
+  new_policy_id: number;
+  trigger_iteration_id: string | null;
+  trigger_reason: string | null;
+  changes_made: Array<Record<string, unknown>>;
+  rationale: string | null;
+  created_at: string;
+}
+
+export interface EvaluateAndImproveResponse {
+  evaluation: {
+    passed: boolean;
+    score: number;
+    status: string;
+  };
+  analysis: {
+    insights: string[];
+    recommended_changes: Array<Record<string, unknown>>;
+  } | null;
+  policy_update: {
+    old_version: number;
+    new_version: number;
+    changes_applied: Array<Record<string, unknown>>;
+  } | null;
+}
+
+// ============================================
+// QC & Evaluation Functions (Mission 05)
+// ============================================
+
+/**
+ * Evaluate an iteration against all quality criteria.
+ */
+export async function evaluateIteration(
+  projectId: string,
+  iterationId: string,
+  targetStyle?: string
+): Promise<EvaluationResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/iterations/${iterationId}/evaluate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(targetStyle ? { target_style: targetStyle } : {}),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Evaluation failed");
+  }
+
+  return response.json();
+}
+
+/**
+ * Analyze a failed iteration to understand what went wrong.
+ */
+export async function analyzeFailure(
+  projectId: string,
+  iterationId: string
+): Promise<FailureAnalysisResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/analyze-failure?iteration_id=${iterationId}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failure analysis failed");
+  }
+
+  return response.json();
+}
+
+/**
+ * Apply policy changes to create a new policy version.
+ */
+export async function applyPolicyChanges(
+  projectId: string,
+  changes: Array<Record<string, unknown>>,
+  triggerIterationId?: string
+): Promise<{
+  success: boolean;
+  old_version: number;
+  new_version: number;
+  new_policy_id: number;
+  changes_applied: Array<Record<string, unknown>>;
+}> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/apply-policy-change`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        changes,
+        trigger_iteration_id: triggerIterationId,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to apply policy changes");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get policy change history for a project.
+ */
+export async function getPolicyHistory(
+  projectId: string
+): Promise<PolicyChangeRecord[]> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/policy-history`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get policy history");
+  }
+
+  return response.json();
+}
+
+/**
+ * Full QC pipeline: evaluate, analyze, and improve.
+ */
+export async function evaluateAndImprove(
+  projectId: string,
+  iterationId: string
+): Promise<EvaluateAndImproveResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/evaluate-and-improve?iteration_id=${iterationId}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Evaluate and improve failed");
   }
 
   return response.json();

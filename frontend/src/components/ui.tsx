@@ -235,6 +235,7 @@ export function ImagePreview({
     <div
       className={`relative group rounded-lg overflow-hidden border border-slate-700 ${className}`}
     >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
         alt={alt}

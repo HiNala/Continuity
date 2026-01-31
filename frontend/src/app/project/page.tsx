@@ -20,14 +20,16 @@ import {
   Move,
   Building2,
   Droplets,
-  Zap,
-  Wind,
   Trash2,
   Play,
-  ImageIcon,
   Wand2,
   Layers,
   Clock,
+  Shield,
+  TrendingUp,
+  AlertTriangle,
+  RefreshCw,
+  XCircle,
 } from "lucide-react";
 import {
   createProject,
@@ -35,11 +37,12 @@ import {
   submitAnswers,
   analyzeSpace,
   generateImages,
+  evaluateAndImprove,
   ClarifyingQuestion,
   RequirementsResponse,
   AnalysisSummaryResponse,
   GenerationResponse,
-  PhaseResult,
+  EvaluateAndImproveResponse,
 } from "@/lib/api";
 
 // ============================================
@@ -77,7 +80,7 @@ export default function ProjectPage() {
   const [imageUrlInput, setImageUrlInput] = useState("");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [questions, setQuestions] = useState<ClarifyingQuestion[]>([]);
-  const [identified, setIdentified] = useState<Record<string, any>>({});
+  const [identified, setIdentified] = useState<Record<string, string | boolean | number | string[]>>({});
   const [answers, setAnswers] = useState<Answers>({});
   const [requirements, setRequirements] = useState<RequirementsResponse | null>(
     null
@@ -89,6 +92,10 @@ export default function ProjectPage() {
   // Generation (Mission 04)
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
   const [currentPhase, setCurrentPhase] = useState<string | null>(null);
+  
+  // Quality Control (Mission 05)
+  const [qcResult, setQcResult] = useState<EvaluateAndImproveResponse | null>(null);
+  const [isEvaluating, setIsEvaluating] = useState(false);
 
   // ==========================================
   // Image URL handling
@@ -246,24 +253,6 @@ export default function ProjectPage() {
     return state ? labels[state] || state : "Unknown";
   };
 
-  const getElementIcon = (elementType: string) => {
-    if (elementType.includes("wall") || elementType.includes("column") || elementType.includes("beam")) {
-      return <Building2 className="w-4 h-4" />;
-    }
-    if (elementType.includes("drain") || elementType.includes("plumbing") || elementType.includes("water")) {
-      return <Droplets className="w-4 h-4" />;
-    }
-    if (elementType.includes("electric") || elementType.includes("outlet") || elementType.includes("switch")) {
-      return <Zap className="w-4 h-4" />;
-    }
-    if (elementType.includes("vent") || elementType.includes("hvac") || elementType.includes("duct")) {
-      return <Wind className="w-4 h-4" />;
-    }
-    if (elementType.includes("debris") || elementType.includes("temporary")) {
-      return <Trash2 className="w-4 h-4" />;
-    }
-    return <Target className="w-4 h-4" />;
-  };
 
   // ==========================================
   // Step 5: Generate Images (Mission 04)
@@ -309,6 +298,26 @@ export default function ProjectPage() {
   const getPhaseName = (phase: string) => {
     return phase.charAt(0).toUpperCase() + phase.slice(1);
   };
+
+  // ==========================================
+  // Step 6: Quality Control Evaluation (Mission 05)
+  // ==========================================
+  const handleEvaluate = async (iterationId: string) => {
+    if (!projectId) return;
+
+    setIsEvaluating(true);
+    setError(null);
+
+    try {
+      const result = await evaluateAndImprove(projectId, iterationId);
+      setQcResult(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Evaluation failed");
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
 
   // ==========================================
   // Render
@@ -367,7 +376,7 @@ export default function ProjectPage() {
               </h2>
               <p className="text-slate-400 max-w-lg mx-auto">
                 Describe your space and what you want to see. Be as specific or
-                as general as you like — we'll ask clarifying questions if
+                as general as you like — we&apos;ll ask clarifying questions if
                 needed.
               </p>
             </div>
@@ -460,7 +469,7 @@ export default function ProjectPage() {
                 Just a few quick questions
               </h2>
               <p className="text-slate-400 max-w-lg mx-auto">
-                Help us understand exactly what you're looking for.
+                Help us understand exactly what you&apos;re looking for.
               </p>
             </div>
 
@@ -474,19 +483,19 @@ export default function ProjectPage() {
                       We detected from your goal:
                     </p>
                     <ul className="text-sm text-slate-300 space-y-1">
-                      {identified.space_type && (
+                      {identified.space_type && typeof identified.space_type === "string" && (
                         <li>Space type: {identified.space_type}</li>
                       )}
-                      {identified.styles?.length > 0 && (
+                      {Array.isArray(identified.styles) && identified.styles.length > 0 && (
                         <li>Styles: {identified.styles.join(", ")}</li>
                       )}
                       {identified.accessibility && (
                         <li>Accessibility required</li>
                       )}
-                      {identified.budget && (
+                      {identified.budget && typeof identified.budget === "string" && (
                         <li>Budget: {identified.budget}</li>
                       )}
-                      {identified.intended_use && (
+                      {identified.intended_use && typeof identified.intended_use === "string" && (
                         <li>Use: {identified.intended_use}</li>
                       )}
                     </ul>
@@ -589,7 +598,7 @@ export default function ProjectPage() {
               </div>
               <h2 className="text-2xl font-bold">Requirements Complete!</h2>
               <p className="text-slate-400 max-w-lg mx-auto">
-                We've captured everything we need. Here's a summary of your
+                We&apos;ve captured everything we need. Here&apos;s a summary of your
                 project requirements.
               </p>
             </div>
@@ -747,8 +756,8 @@ export default function ProjectPage() {
               </div>
               <h2 className="text-2xl font-bold">Spatial Analysis Complete</h2>
               <p className="text-slate-400 max-w-lg mx-auto">
-                We've identified the physical constraints in your space.
-                Here's what we found.
+                We&apos;ve identified the physical constraints in your space.
+                Here&apos;s what we found.
               </p>
             </div>
 
@@ -1049,16 +1058,112 @@ export default function ProjectPage() {
               </div>
             )}
 
+            {/* Quality Control Section (Mission 05) */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-5 h-5 text-continuity-400" />
+                  <h3 className="font-semibold">Quality Control</h3>
+                </div>
+                {generationResult.phases.length > 0 && generationResult.phases[0].iteration_id && (
+                  <button
+                    onClick={() => handleEvaluate(generationResult.phases[generationResult.phases.length - 1].iteration_id)}
+                    disabled={isEvaluating}
+                    className="btn-secondary flex items-center gap-2 text-sm py-1.5 px-3"
+                  >
+                    {isEvaluating ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Evaluating...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4" />
+                        Run QC Check
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {!qcResult ? (
+                <p className="text-sm text-slate-400">
+                  Click &quot;Run QC Check&quot; to evaluate the generation quality and trigger self-improvement.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {/* Evaluation Result */}
+                  <div className={`p-4 rounded-lg ${
+                    qcResult.evaluation.passed 
+                      ? "bg-emerald-500/10 border border-emerald-500/20" 
+                      : "bg-amber-500/10 border border-amber-500/20"
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      {qcResult.evaluation.passed ? (
+                        <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                      ) : (
+                        <AlertTriangle className="w-6 h-6 text-amber-400" />
+                      )}
+                      <div>
+                        <p className={`font-semibold ${
+                          qcResult.evaluation.passed ? "text-emerald-400" : "text-amber-400"
+                        }`}>
+                          {qcResult.evaluation.passed ? "Quality Check Passed" : "Quality Issues Detected"}
+                        </p>
+                        <p className="text-sm text-slate-300">
+                          Score: {(qcResult.evaluation.score * 100).toFixed(0)}% • 
+                          Status: {qcResult.evaluation.status}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Analysis Insights */}
+                  {qcResult.analysis && qcResult.analysis.insights.length > 0 && (
+                    <div>
+                      <p className="text-sm font-medium text-slate-300 mb-2">Insights:</p>
+                      <ul className="space-y-1">
+                        {qcResult.analysis.insights.map((insight, i) => (
+                          <li key={i} className="text-sm text-slate-400 flex items-start gap-2">
+                            <span className="text-amber-400">•</span>
+                            {insight}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Policy Update */}
+                  {qcResult.policy_update && (
+                    <div className="p-3 rounded-lg bg-continuity-500/10 border border-continuity-500/20">
+                      <div className="flex items-center gap-2 mb-2">
+                        <TrendingUp className="w-4 h-4 text-continuity-400" />
+                        <span className="text-sm font-medium text-continuity-400">
+                          Self-Improvement Applied
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300">
+                        Policy updated from v{qcResult.policy_update.old_version} to v{qcResult.policy_update.new_version}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {qcResult.policy_update.changes_applied.length} change(s) applied to improve future generations
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Success/Error Message */}
             {generationResult.success ? (
               <div className="card bg-emerald-500/5 border-emerald-500/20">
                 <div className="flex items-start gap-3">
                   <Sparkles className="w-5 h-5 text-emerald-400 mt-0.5" />
                   <div>
-                    <p className="font-medium text-emerald-400 mb-1">Success!</p>
+                    <p className="font-medium text-emerald-400 mb-1">Generation Complete!</p>
                     <p className="text-sm text-slate-300">
-                      All phases completed successfully. Your visualizations are ready!
-                      In a full implementation, the generated images would be displayed here.
+                      All phases completed successfully. Run QC Check to evaluate quality and 
+                      trigger the self-improvement loop.
                     </p>
                   </div>
                 </div>
@@ -1066,7 +1171,7 @@ export default function ProjectPage() {
             ) : (
               <div className="card bg-red-500/5 border-red-500/20">
                 <div className="flex items-start gap-3">
-                  <Zap className="w-5 h-5 text-red-400 mt-0.5" />
+                  <XCircle className="w-5 h-5 text-red-400 mt-0.5" />
                   <div>
                     <p className="font-medium text-red-400 mb-1">Generation Issue</p>
                     <p className="text-sm text-slate-300">
@@ -1097,6 +1202,7 @@ export default function ProjectPage() {
                   setRequirements(null);
                   setAnalysisSummary(null);
                   setGenerationResult(null);
+                  setQcResult(null);
                 }}
                 className="btn-primary flex-1"
               >
