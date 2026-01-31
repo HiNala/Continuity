@@ -3,64 +3,64 @@
 ## Task Checklist
 
 ### Step 1: Create the Projects Table
-- [ ] Create projects table schema
-- [ ] Add id, user_id, created_at, status fields
-- [ ] Add images field (JSON array)
-- [ ] Add goal field for original text
-- [ ] Create SQLAlchemy model
+- [x] Create projects table schema
+- [x] Add id, user_id, created_at, status fields
+- [x] Add images field (JSON array)
+- [x] Add goal field for original text
+- [x] Create SQLAlchemy model
 
 ### Step 2: Create the Requirements Table
-- [ ] Create requirements table schema
-- [ ] Add foreign key to projects
-- [ ] Add space_type, style_targets, accessibility_required fields
-- [ ] Add budget_tier, additional_constraints fields
-- [ ] Add clarification_responses JSON field
-- [ ] Add timestamps
-- [ ] Create SQLAlchemy model
+- [x] Create requirements table schema
+- [x] Add foreign key to projects
+- [x] Add space_type, style_targets, accessibility_required fields
+- [x] Add budget_tier, additional_constraints fields
+- [x] Add clarification_responses JSON field
+- [x] Add timestamps
+- [x] Create SQLAlchemy model
 
 ### Step 3: Design Question Generation Logic
-- [ ] Define required information fields
-- [ ] Create logic to detect specified information from goal
-- [ ] Create logic to identify missing information
-- [ ] Implement 5-question limit with prioritization
+- [x] Define required information fields
+- [x] Create logic to detect specified information from goal
+- [x] Create logic to identify missing information
+- [x] Implement 5-question limit with prioritization
 
 ### Step 4: Create Requirements Agent Module
-- [ ] Create backend/app/agents/ directory
-- [ ] Create requirements_agent.py module
-- [ ] Implement analyze_goal() function
-- [ ] Implement generate_questions() function
-- [ ] Implement process_responses() function
-- [ ] Implement save_requirements() function
+- [x] Create backend/app/agents/ directory
+- [x] Create requirements_agent.py module
+- [x] Implement analyze_goal() function
+- [x] Implement generate_questions() function
+- [x] Implement process_responses() function
+- [x] Implement save_requirements() function
 
 ### Step 5: Wrap Functions with Weave Operations
-- [ ] Add @weave.op() to analyze_goal
-- [ ] Add @weave.op() to generate_questions
-- [ ] Add @weave.op() to process_responses
-- [ ] Add @weave.op() to save_requirements
+- [x] Add @weave.op() to analyze_goal
+- [x] Add @weave.op() to generate_questions
+- [x] Add @weave.op() to process_responses
+- [x] Add @weave.op() to save_requirements
 
 ### Step 6: Create Backend API Endpoints
-- [ ] POST /api/projects - Create project
-- [ ] POST /api/projects/{id}/analyze-goal - Trigger analysis
-- [ ] POST /api/projects/{id}/submit-answers - Submit answers
-- [ ] GET /api/projects/{id}/requirements - Get requirements
+- [x] POST /api/projects - Create project
+- [x] POST /api/projects/{id}/analyze-goal - Trigger analysis
+- [x] POST /api/projects/{id}/submit-answers - Submit answers
+- [x] GET /api/projects/{id}/requirements - Get requirements
 
 ### Step 7: Build Frontend Clarification Interface
-- [ ] Create clarification page/component
-- [ ] Display questions as cards
-- [ ] Add answer buttons for each question
-- [ ] Add "Continue" button
-- [ ] Show all questions at once
+- [x] Create clarification page/component
+- [x] Display questions as cards
+- [x] Add answer buttons for each question
+- [x] Add "Continue" button
+- [x] Show all questions at once
 
 ### Step 8: Connect Frontend Flow
-- [ ] Call analyze-goal endpoint after upload
-- [ ] Display returned questions
-- [ ] Send answers on Continue click
-- [ ] Show confirmation with structured requirements
+- [x] Call analyze-goal endpoint after upload
+- [x] Display returned questions
+- [x] Send answers on Continue click
+- [x] Show confirmation with structured requirements
 
 ### Step 9: Handle Edge Cases
-- [ ] Handle complete goals (skip questions)
+- [x] Handle complete goals (skip questions)
 - [ ] Handle LLM errors with retry
-- [ ] Allow going back to edit goal
+- [x] Allow going back to edit goal
 
 ### Step 10: Test Complete Flow
 - [ ] Test vague goal generates questions
@@ -69,15 +69,15 @@
 - [ ] Verify PostgreSQL storage
 
 ### Step 11: Verify Acceptance Criteria
-- [ ] Backend Requirements Agent module exists
-- [ ] At most 5 questions generated
-- [ ] Questions returned as structured data
-- [ ] Frontend shows clickable buttons
-- [ ] User selections captured
-- [ ] Final specification created
-- [ ] Requirements stored in PostgreSQL
-- [ ] All operations traced in Weave
-- [ ] Complete flow works end-to-end
+- [x] Backend Requirements Agent module exists
+- [x] At most 5 questions generated
+- [x] Questions returned as structured data
+- [x] Frontend shows clickable buttons
+- [x] User selections captured
+- [x] Final specification created
+- [ ] Requirements stored in PostgreSQL *(needs Docker running)*
+- [ ] All operations traced in Weave *(needs Docker running)*
+- [ ] Complete flow works end-to-end *(needs Docker running)*
 
 ---
 

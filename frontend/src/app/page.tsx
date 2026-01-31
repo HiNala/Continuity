@@ -161,23 +161,26 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Upload Placeholder */}
+          {/* Start New Project */}
           <div className="max-w-2xl mx-auto">
-            <div className="card border-dashed border-2 border-slate-700 hover:border-continuity-500/50 transition-colors cursor-pointer group">
-              <div className="flex flex-col items-center py-12">
-                <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mb-4 group-hover:bg-continuity-900/50 transition-colors">
-                  <Upload className="w-8 h-8 text-slate-400 group-hover:text-continuity-400 transition-colors" />
+            <a href="/project" className="block">
+              <div className="card border-2 border-slate-700 hover:border-continuity-500/50 transition-colors cursor-pointer group">
+                <div className="flex flex-col items-center py-12">
+                  <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mb-4 group-hover:bg-continuity-900/50 transition-colors">
+                    <Upload className="w-8 h-8 text-slate-400 group-hover:text-continuity-400 transition-colors" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-slate-200 mb-2">
+                    Start New Project
+                  </h3>
+                  <p className="text-slate-400 text-center text-sm max-w-md">
+                    Describe your visualization goal and our AI will guide you through the process.
+                  </p>
+                  <div className="mt-4">
+                    <span className="btn-primary">Get Started</span>
+                  </div>
                 </div>
-                <h3 className="text-lg font-semibold text-slate-200 mb-2">
-                  Upload Your Space
-                </h3>
-                <p className="text-slate-400 text-center text-sm max-w-md">
-                  Drop images of your unfinished or existing space here to begin the transformation.
-                  <br />
-                  <span className="text-slate-500">(Coming in Mission 02)</span>
-                </p>
               </div>
-            </div>
+            </a>
           </div>
         </div>
       </section>
