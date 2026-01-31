@@ -14,6 +14,8 @@ import {
   Zap,
   RefreshCw
 } from "lucide-react";
+import { SettingsDropdown } from "@/components/SettingsDropdown";
+import { useToastContext } from "@/components/Providers";
 
 // API base URL from environment
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -28,6 +30,7 @@ interface ApiStatus {
 }
 
 export default function Home() {
+  const toast = useToastContext();
   const [status, setStatus] = useState<ApiStatus>({
     health: "idle",
     database: "idle",
@@ -121,6 +124,19 @@ export default function Home() {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-continuity-900/20 via-transparent to-transparent" />
         
         <div className="relative max-w-6xl mx-auto px-6 py-20">
+          {/* Top Bar with Settings */}
+          <div className="absolute top-4 right-6">
+            <SettingsDropdown
+              onTestResult={(type, title, message) => {
+                if (type === "success") {
+                  toast.success(title, message);
+                } else {
+                  toast.error(title, message);
+                }
+              }}
+            />
+          </div>
+
           {/* Badge */}
           <div className="flex justify-center mb-8">
             <div className="badge-info flex items-center gap-2 px-4 py-2">

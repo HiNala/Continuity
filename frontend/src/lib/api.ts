@@ -788,3 +788,127 @@ export async function getOrchestrationLog(
 
   return response.json();
 }
+
+// ============================================
+// Settings & API Test Types
+// ============================================
+export interface APITestResult {
+  service: string;
+  success: boolean;
+  message: string;
+  timestamp: string;
+  details?: Record<string, unknown>;
+}
+
+export interface AllAPITestsResult {
+  weave: APITestResult;
+  gemini: APITestResult;
+  browserbase: APITestResult;
+  database: APITestResult;
+}
+
+export interface SettingsStatus {
+  weave_configured: boolean;
+  gemini_configured: boolean;
+  browserbase_configured: boolean;
+  database_configured: boolean;
+  environment: string;
+}
+
+// ============================================
+// Settings & API Test Functions
+// ============================================
+
+/**
+ * Get current settings status (which keys are configured).
+ */
+export async function getSettingsStatus(): Promise<SettingsStatus> {
+  const response = await fetch(`${API_URL}/api/settings/status`);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get settings status");
+  }
+
+  return response.json();
+}
+
+/**
+ * Test W&B/Weave API key.
+ */
+export async function testWeaveAPI(): Promise<APITestResult> {
+  const response = await fetch(`${API_URL}/api/settings/test/weave`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to test Weave API");
+  }
+
+  return response.json();
+}
+
+/**
+ * Test Google Gemini API key.
+ */
+export async function testGeminiAPI(): Promise<APITestResult> {
+  const response = await fetch(`${API_URL}/api/settings/test/gemini`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to test Gemini API");
+  }
+
+  return response.json();
+}
+
+/**
+ * Test Browserbase API key.
+ */
+export async function testBrowserbaseAPI(): Promise<APITestResult> {
+  const response = await fetch(`${API_URL}/api/settings/test/browserbase`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to test Browserbase API");
+  }
+
+  return response.json();
+}
+
+/**
+ * Test database connectivity.
+ */
+export async function testDatabaseAPI(): Promise<APITestResult> {
+  const response = await fetch(`${API_URL}/api/settings/test/database`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to test database");
+  }
+
+  return response.json();
+}
+
+/**
+ * Test all API keys at once.
+ */
+export async function testAllAPIs(): Promise<AllAPITestsResult> {
+  const response = await fetch(`${API_URL}/api/settings/test/all`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to test APIs");
+  }
+
+  return response.json();
+}

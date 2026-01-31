@@ -47,6 +47,8 @@ import {
   EvaluateAndImproveResponse,
   OrchestrationStatusResponse,
 } from "@/lib/api";
+import { SettingsDropdown } from "@/components/SettingsDropdown";
+import { useToastContext } from "@/components/Providers";
 
 // ============================================
 // Types
@@ -73,6 +75,7 @@ const questionIcons: Record<string, React.ReactNode> = {
 // ============================================
 export default function ProjectPage() {
   const router = useRouter();
+  const toast = useToastContext();
   const [step, setStep] = useState<Step>("input");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -452,6 +455,16 @@ export default function ProjectPage() {
             <div className={`w-2 h-2 rounded-full ${step === "analyzing" ? "bg-continuity-500 animate-pulse" : ["constraints", "generating", "results"].includes(step) ? "bg-emerald-500" : "bg-slate-600"}`} />
             <div className={`w-2 h-2 rounded-full ${step === "generating" ? "bg-continuity-500 animate-pulse" : step === "results" ? "bg-emerald-500" : "bg-slate-600"}`} />
           </div>
+          {/* Settings Dropdown */}
+          <SettingsDropdown
+            onTestResult={(type, title, message) => {
+              if (type === "success") {
+                toast.success(title, message);
+              } else {
+                toast.error(title, message);
+              }
+            }}
+          />
         </div>
       </header>
 
