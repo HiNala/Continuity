@@ -62,7 +62,7 @@ class QualityControlAgent:
     # Evaluation Functions
     # ==========================================
     
-    @weave.op()
+    @weave.op(name="qc_evaluate_constraint_compliance")
     async def evaluate_constraint_compliance(
         self,
         iteration: Iteration,
@@ -141,7 +141,7 @@ Return a JSON response with this structure:
             "evidence": {"locked_count": len(locked_constraints), "violations": []},
         }
     
-    @weave.op()
+    @weave.op(name="qc_evaluate_geometry_preservation")
     async def evaluate_geometry_preservation(
         self,
         iteration: Iteration,
@@ -195,7 +195,7 @@ Return a JSON response:
             "evidence": {"issues": []},
         }
     
-    @weave.op()
+    @weave.op(name="qc_evaluate_hallucinations")
     async def evaluate_hallucinations(
         self,
         iteration: Iteration,
@@ -252,7 +252,7 @@ Return a JSON response:
             "evidence": {"hallucinations": [], "critical_count": 0},
         }
     
-    @weave.op()
+    @weave.op(name="qc_evaluate_style_execution")
     async def evaluate_style_execution(
         self,
         iteration: Iteration,
@@ -323,7 +323,7 @@ Return a JSON response:
             "evidence": {"target_style": style},
         }
     
-    @weave.op()
+    @weave.op(name="qc_evaluate_phase_completion")
     async def evaluate_phase_completion(
         self,
         iteration: Iteration,
@@ -390,7 +390,7 @@ Return a JSON response:
             "evidence": {"phase": phase, "goal": goal},
         }
     
-    @weave.op()
+    @weave.op(name="qc_compute_overall_evaluation")
     async def compute_overall_evaluation(
         self,
         session: AsyncSession,
@@ -483,7 +483,7 @@ Return a JSON response:
     # Trace Analysis Functions
     # ==========================================
     
-    @weave.op()
+    @weave.op(name="qc_analyze_failure")
     async def analyze_failure(
         self,
         session: AsyncSession,
@@ -672,7 +672,7 @@ Return a JSON response:
     # Policy Modification Functions
     # ==========================================
     
-    @weave.op()
+    @weave.op(name="qc_apply_policy_changes")
     async def apply_policy_changes(
         self,
         session: AsyncSession,
@@ -800,7 +800,7 @@ Return a JSON response:
             "changes_applied": changes_applied,
         }
     
-    @weave.op()
+    @weave.op(name="qc_get_policy_history")
     async def get_policy_history(
         self,
         session: AsyncSession,

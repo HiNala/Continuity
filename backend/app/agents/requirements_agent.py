@@ -147,7 +147,7 @@ class RequirementsAgent:
     def __init__(self):
         self.max_questions = MAX_QUESTIONS
     
-    @weave.op()
+    @weave.op(name="requirements_agent_analyze_goal")
     def analyze_goal(self, goal_text: str) -> Dict[str, Any]:
         """
         Analyze the user's goal text to identify specified and missing information.
@@ -241,7 +241,7 @@ class RequirementsAgent:
             return "personal"
         return None
     
-    @weave.op()
+    @weave.op(name="requirements_agent_generate_questions")
     def generate_questions(self, analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Generate clarifying questions based on what information is missing.
@@ -271,7 +271,7 @@ class RequirementsAgent:
         
         return questions
     
-    @weave.op()
+    @weave.op(name="requirements_agent_process_responses")
     def process_responses(
         self,
         analysis: Dict[str, Any],
@@ -326,7 +326,7 @@ class RequirementsAgent:
             return True  # Treat preferred as true for generation
         return False
     
-    @weave.op()
+    @weave.op(name="requirements_agent_save_requirements")
     async def save_requirements(
         self,
         session: AsyncSession,

@@ -194,7 +194,7 @@ class Orchestrator:
             raise ValueError(f"Project {self.project_id} not found")
         return self.project
     
-    @weave.op()
+    @weave.op(name="orchestrator_state_transition")
     async def transition(
         self,
         to_state: str,
@@ -251,7 +251,7 @@ class Orchestrator:
         await self.session.flush()
         self.state_start_time = time.time()
     
-    @weave.op()
+    @weave.op(name="orchestrator_run_pipeline")
     async def run(self) -> Dict[str, Any]:
         """
         Drive the state machine until a terminal state is reached.

@@ -127,7 +127,7 @@ class SpatialAnalysisAgent:
         self.gemini_api_key = settings.gemini_api_key
         self.gemini_model = settings.gemini_model
     
-    @weave.op()
+    @weave.op(name="spatial_agent_prepare_image")
     def prepare_image(self, image_path: str) -> Optional[Dict[str, Any]]:
         """
         Prepare an image for vision API analysis.
@@ -174,7 +174,7 @@ class SpatialAnalysisAgent:
             print(f"Error preparing image {image_path}: {e}")
             return None
     
-    @weave.op()
+    @weave.op(name="spatial_agent_analyze_image")
     async def analyze_single_image(
         self,
         image_data: Dict[str, Any],
@@ -280,7 +280,7 @@ class SpatialAnalysisAgent:
                 "construction_state": None,
             }
     
-    @weave.op()
+    @weave.op(name="spatial_agent_merge_analysis")
     def merge_multi_image_analysis(
         self,
         analyses: List[Dict[str, Any]]
@@ -352,7 +352,7 @@ class SpatialAnalysisAgent:
             "images_analyzed": len(analyses),
         }
     
-    @weave.op()
+    @weave.op(name="spatial_agent_classify_elements")
     def classify_elements(
         self,
         elements: List[Dict[str, Any]]
@@ -389,7 +389,7 @@ class SpatialAnalysisAgent:
         
         return classified
     
-    @weave.op()
+    @weave.op(name="spatial_agent_assess_construction")
     def assess_construction_state(
         self,
         analysis: Dict[str, Any]
@@ -422,7 +422,7 @@ class SpatialAnalysisAgent:
         else:
             return ConstructionState.PARTIALLY_COMPLETE
     
-    @weave.op()
+    @weave.op(name="spatial_agent_save_constraints")
     async def save_constraints(
         self,
         session: AsyncSession,

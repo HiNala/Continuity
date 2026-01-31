@@ -162,7 +162,7 @@ class GenerationAgent:
         self.output_dir = Path("generated_images")
         self.output_dir.mkdir(exist_ok=True)
     
-    @weave.op()
+    @weave.op(name="generation_agent_load_policy")
     async def load_policy(
         self,
         session: AsyncSession,
@@ -198,7 +198,7 @@ class GenerationAgent:
             **DEFAULT_POLICY,
         }
     
-    @weave.op()
+    @weave.op(name="generation_agent_load_constraints")
     async def load_constraints(
         self,
         session: AsyncSession,
@@ -240,7 +240,7 @@ class GenerationAgent:
         
         return constraints_list, analysis_summary
     
-    @weave.op()
+    @weave.op(name="generation_agent_load_requirements")
     async def load_requirements(
         self,
         session: AsyncSession,
@@ -305,7 +305,7 @@ class GenerationAgent:
         
         return "\n".join(instructions)
     
-    @weave.op()
+    @weave.op(name="gemini_generate_image")
     async def generate_image(
         self,
         prompt: str,
@@ -402,7 +402,7 @@ class GenerationAgent:
                 "latency_ms": int((time.time() - start_time) * 1000),
             }
     
-    @weave.op()
+    @weave.op(name="generation_agent_cleanup_phase")
     async def execute_cleanup_phase(
         self,
         session: AsyncSession,
@@ -471,7 +471,7 @@ class GenerationAgent:
             "latency_ms": result.get("latency_ms"),
         }
     
-    @weave.op()
+    @weave.op(name="generation_agent_structural_phase")
     async def execute_structural_phase(
         self,
         session: AsyncSession,
@@ -535,7 +535,7 @@ class GenerationAgent:
             "latency_ms": result.get("latency_ms"),
         }
     
-    @weave.op()
+    @weave.op(name="generation_agent_fixture_phase")
     async def execute_fixture_phase(
         self,
         session: AsyncSession,
@@ -601,7 +601,7 @@ class GenerationAgent:
             "latency_ms": result.get("latency_ms"),
         }
     
-    @weave.op()
+    @weave.op(name="generation_agent_style_phase")
     async def execute_style_phase(
         self,
         session: AsyncSession,
@@ -684,7 +684,7 @@ class GenerationAgent:
             "latency_ms": result.get("latency_ms"),
         }
     
-    @weave.op()
+    @weave.op(name="generation_agent_full_pipeline")
     async def run_full_pipeline(
         self,
         session: AsyncSession,
