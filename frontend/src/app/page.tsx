@@ -1309,18 +1309,48 @@ function SplitView({
               </div>
             )}
             
-            {/* Empty state */}
+            {/* Empty state - enhanced */}
             {agentCards.length === 0 && !isLoading && (
               <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="text-center py-12 rounded-xl border border-dashed border-black/[0.08] bg-black/[0.01]"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
+                className="text-center py-16 px-6 rounded-2xl border-2 border-dashed border-black/[0.06] bg-gradient-to-b from-white/50 to-transparent"
               >
-                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-black/[0.03] flex items-center justify-center">
-                  <Sparkles className="w-5 h-5 text-muted-foreground/30" />
+                {/* Animated icon container */}
+                <motion.div 
+                  className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center shadow-sm border border-primary/10"
+                  animate={{ 
+                    scale: [1, 1.05, 1],
+                    rotate: [0, 2, -2, 0]
+                  }}
+                  transition={{ 
+                    duration: 4, 
+                    repeat: Infinity,
+                    ease: "easeInOut"
+                  }}
+                >
+                  <Sparkles className="w-7 h-7 text-primary/50" />
+                </motion.div>
+                
+                <h3 className="text-base font-semibold text-foreground/70 mb-1">
+                  Ready to Transform
+                </h3>
+                <p className="text-sm text-muted-foreground/50 max-w-xs mx-auto">
+                  Upload an image and describe your vision to start the AI-powered design process
+                </p>
+                
+                {/* Decorative dots */}
+                <div className="flex justify-center gap-1.5 mt-6">
+                  {[0, 1, 2].map((i) => (
+                    <motion.div
+                      key={i}
+                      className="w-1.5 h-1.5 rounded-full bg-primary/20"
+                      animate={{ opacity: [0.3, 1, 0.3] }}
+                      transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.2 }}
+                    />
+                  ))}
                 </div>
-                <p className="text-sm text-muted-foreground/50">Agents will appear here as they work</p>
-                <p className="text-xs text-muted-foreground/30 mt-1">Submit your design request to get started</p>
               </motion.div>
             )}
             
@@ -1332,7 +1362,7 @@ function SplitView({
   );
 }
 
-// Chat Bubble with clean design and streaming text
+// Chat Bubble with polished design and streaming text
 function ChatBubble({ message, index }: { message: ChatMessage; index: number }) {
   const isUser = message.type === "user";
   const isSystem = message.type === "system";
@@ -1341,65 +1371,82 @@ function ChatBubble({ message, index }: { message: ChatMessage; index: number })
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
+      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.98 }}
       transition={{
-        duration: 0.25,
-        delay: Math.min(index * 0.03, 0.15),
+        duration: 0.3,
+        delay: Math.min(index * 0.02, 0.1),
+        ease: [0.25, 0.1, 0.25, 1],
       }}
       className={cn(
-        "flex gap-2.5",
+        "flex gap-3 group",
         isUser ? "flex-row-reverse" : "flex-row"
       )}
     >
+      {/* Avatar */}
       {!isUser && (
-        <div
+        <motion.div
+          initial={{ scale: 0.8 }}
+          animate={{ scale: 1 }}
           className={cn(
-            "w-6 h-6 rounded-md flex items-center justify-center shrink-0 mt-0.5",
-            isSystem ? "bg-amber-100" : "bg-gradient-to-br from-primary/20 to-accent/20"
+            "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 shadow-sm",
+            isSystem 
+              ? "bg-gradient-to-br from-amber-100 to-amber-200 border border-amber-300/50" 
+              : "bg-gradient-to-br from-primary/15 to-accent/15 border border-primary/10"
           )}
         >
           {isSystem ? (
             <span className="text-amber-600 text-[10px] font-bold">!</span>
           ) : (
-            <ContinuityIcon size={12} />
+            <ContinuityIcon size={13} />
           )}
-        </div>
+        </motion.div>
       )}
+      
+      {/* Message bubble */}
       <div
         className={cn(
-          "rounded-xl px-3 py-2 max-w-[85%]",
+          "rounded-2xl px-4 py-2.5 max-w-[80%] shadow-sm transition-shadow duration-200",
           isUser 
-            ? "bg-foreground text-background rounded-br-sm"
+            ? "bg-gradient-to-br from-foreground to-foreground/90 text-background rounded-br-md shadow-md"
             : isSystem
-              ? "bg-amber-50 border border-amber-200 text-amber-900"
-              : "bg-black/[0.02] border border-black/[0.04] text-foreground rounded-bl-sm"
+              ? "bg-gradient-to-br from-amber-50 to-amber-100/80 border border-amber-200/60 text-amber-900 rounded-bl-md"
+              : "bg-white/80 backdrop-blur-sm border border-black/[0.06] text-foreground rounded-bl-md hover:shadow-md"
         )}
       >
         {shouldStream ? (
           <StreamingChatMessage 
             content={message.content}
             isNew={true}
-            speed={60}
-            className="text-[13px] leading-relaxed"
+            speed={50}
+            className="text-[13px] leading-[1.6]"
           />
         ) : (
-          <p className="text-[13px] leading-relaxed">{message.content}</p>
+          <p className="text-[13px] leading-[1.6]">{message.content}</p>
         )}
+        
         {/* Compact image thumbnails in messages */}
         {message.images && message.images.length > 0 && (
-          <div className="mt-2 flex gap-1.5 flex-wrap">
+          <div className="mt-2.5 flex gap-2 flex-wrap">
             {message.images.map((img, i) => (
-              <div
+              <motion.div
                 key={i}
-                className="w-10 h-10 rounded-md overflow-hidden border border-black/10"
+                whileHover={{ scale: 1.05 }}
+                className="w-12 h-12 rounded-lg overflow-hidden border border-white/20 shadow-sm cursor-pointer"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={img} alt="" className="w-full h-full object-cover" />
-              </div>
+              </motion.div>
             ))}
           </div>
+        )}
+        
+        {/* Subtle timestamp on hover */}
+        {message.timestamp && (
+          <p className="text-[10px] text-current/40 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            {message.timestamp}
+          </p>
         )}
       </div>
     </motion.div>

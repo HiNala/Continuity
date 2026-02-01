@@ -152,24 +152,26 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
   const getStatusStyles = () => {
     switch (status) {
       case "running":
-        return "border-l-2 border-l-primary";
+        return "border-l-[3px] border-l-primary shadow-[inset_0_0_0_1px_rgba(236,72,153,0.1)]";
       case "completed":
-        return "border-l-2 border-l-emerald-500";
+        return "border-l-[3px] border-l-emerald-500";
       case "error":
-        return "border-l-2 border-l-red-500";
+        return "border-l-[3px] border-l-red-500 bg-red-50/30";
       case "warning":
-        return "border-l-2 border-l-amber-500";
+        return "border-l-[3px] border-l-amber-500 bg-amber-50/30";
       default:
-        return "border-l-2 border-l-slate-200";
+        return "border-l-[3px] border-l-slate-200";
     }
   };
 
   return (
     <motion.div
       initial={false}
+      whileHover={{ y: -1 }}
+      transition={{ duration: 0.2 }}
       className={cn(
-        "relative rounded-lg border border-black/[0.06] bg-white overflow-hidden shadow-sm",
-        "hover:shadow-md transition-shadow duration-200",
+        "relative rounded-xl border border-black/[0.05] bg-white/95 backdrop-blur-sm overflow-hidden",
+        "shadow-sm hover:shadow-lg hover:border-black/[0.08] transition-all duration-300",
         getStatusStyles()
       )}
     >
@@ -356,7 +358,7 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
                             transition={{ delay: index * 0.05 }}
                             className="flex flex-col"
                           >
-                            <span className="text-muted-foreground/50 capitalize text-[10px] uppercase tracking-wider">
+                            <span className="text-muted-foreground/50 text-[10px] uppercase tracking-wider">
                               {key.replace(/_/g, ' ')}
                             </span>
                             <span className="text-foreground/70 font-medium truncate">
@@ -511,29 +513,32 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={smoothTransition}
-      className="rounded-lg border border-black/[0.06] bg-white/60 p-3"
+      className="rounded-xl border border-black/[0.06] bg-white/80 backdrop-blur-sm p-4 shadow-sm"
     >
-      <p className="text-[13px] font-medium text-foreground mb-2">{question.question_text}</p>
+      <p className="text-[13px] font-medium text-foreground mb-3 leading-relaxed">{question.question_text}</p>
       {question.multi_select && (
-        <p className="text-[10px] text-muted-foreground/60 mb-2">Select all that apply</p>
+        <p className="text-[10px] text-muted-foreground/60 mb-2.5 flex items-center gap-1">
+          <span className="w-1 h-1 rounded-full bg-primary/50" />
+          Select all that apply
+        </p>
       )}
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap gap-2">
         {question.possible_answers.map((answer, index) => (
           <motion.button
             key={answer.answer_id}
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: index * 0.03 }}
-            whileHover={!disabled ? { scale: 1.02 } : {}}
-            whileTap={!disabled ? { scale: 0.98 } : {}}
+            transition={{ delay: index * 0.03, type: "spring", stiffness: 300 }}
+            whileHover={!disabled ? { scale: 1.03, y: -1 } : {}}
+            whileTap={!disabled ? { scale: 0.97 } : {}}
             onClick={() => handleSelect(answer.answer_id)}
             disabled={disabled}
             className={cn(
-              "px-2.5 py-1.5 rounded-md text-xs font-medium transition-all duration-150",
-              "border",
+              "px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200",
+              "border shadow-sm",
               selected.includes(answer.answer_id)
-                ? "bg-foreground text-background border-foreground"
-                : "bg-white border-black/[0.08] text-foreground/70 hover:bg-black/[0.02] hover:border-black/[0.12]",
+                ? "bg-gradient-to-br from-foreground to-foreground/90 text-background border-foreground shadow-md"
+                : "bg-white border-black/[0.08] text-foreground/70 hover:bg-black/[0.02] hover:border-black/[0.15] hover:shadow",
               disabled && "opacity-50 cursor-not-allowed"
             )}
           >

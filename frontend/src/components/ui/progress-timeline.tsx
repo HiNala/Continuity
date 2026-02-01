@@ -49,20 +49,20 @@ function getStageStatus(stageId: PipelineStage, currentStage: PipelineStage): St
 
 export function ProgressTimeline({ currentStage, className = "" }: ProgressTimelineProps) {
   return (
-    <div className={cn("w-full", className)}>
+    <div className={cn("w-full py-2", className)}>
       <div className="flex items-center justify-between relative">
         {/* Background line */}
-        <div className="absolute top-4 left-6 right-6 h-0.5 bg-black/[0.06]" />
+        <div className="absolute top-5 left-8 right-8 h-[2px] bg-gradient-to-r from-black/[0.04] via-black/[0.06] to-black/[0.04] rounded-full" />
         
-        {/* Progress line */}
+        {/* Progress line with glow */}
         <motion.div 
-          className="absolute top-4 left-6 h-0.5 bg-gradient-to-r from-primary to-accent"
+          className="absolute top-5 left-8 h-[2px] bg-gradient-to-r from-primary via-accent to-primary rounded-full"
           initial={{ width: 0 }}
           animate={{ 
             width: `${(stages.findIndex(s => s.id === currentStage) / (stages.length - 1)) * 100}%` 
           }}
-          transition={{ duration: 0.5, ease: "easeInOut" }}
-          style={{ maxWidth: "calc(100% - 3rem)" }}
+          transition={{ duration: 0.6, ease: [0.25, 0.1, 0.25, 1] }}
+          style={{ maxWidth: "calc(100% - 4rem)" }}
         />
         
         {/* Stage indicators */}
@@ -75,15 +75,24 @@ export function ProgressTimeline({ currentStage, className = "" }: ProgressTimel
               key={stage.id}
               className="flex flex-col items-center relative z-10"
             >
+              {/* Glow effect for active */}
+              {status === "active" && (
+                <motion.div
+                  className="absolute top-0 w-10 h-10 rounded-full bg-primary/20 blur-md"
+                  animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0.8, 0.5] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                />
+              )}
+              
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: index * 0.1 }}
+                transition={{ delay: index * 0.08, type: "spring", stiffness: 300 }}
                 className={cn(
-                  "w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300",
-                  status === "completed" && "bg-gradient-to-br from-emerald-400 to-emerald-500 text-white shadow-sm",
-                  status === "active" && "bg-gradient-to-br from-primary to-accent text-white shadow-md shadow-primary/25",
-                  status === "pending" && "bg-white border-2 border-black/[0.08] text-muted-foreground/40"
+                  "w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 relative",
+                  status === "completed" && "bg-gradient-to-br from-emerald-400 to-emerald-500 text-white shadow-md shadow-emerald-500/25",
+                  status === "active" && "bg-gradient-to-br from-primary to-accent text-white shadow-lg shadow-primary/30",
+                  status === "pending" && "bg-white/80 border-2 border-black/[0.06] text-muted-foreground/30"
                 )}
               >
                 {status === "active" ? (
@@ -91,24 +100,30 @@ export function ProgressTimeline({ currentStage, className = "" }: ProgressTimel
                     animate={{ rotate: 360 }}
                     transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
                   >
-                    <Loader2 className="w-4 h-4" />
+                    <Loader2 className="w-4.5 h-4.5" />
                   </motion.div>
                 ) : status === "completed" ? (
-                  <CheckCircle2 className="w-4 h-4" />
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: "spring", stiffness: 400, delay: 0.1 }}
+                  >
+                    <CheckCircle2 className="w-5 h-5" />
+                  </motion.div>
                 ) : (
-                  <Icon className="w-3.5 h-3.5" />
+                  <Icon className="w-4 h-4" />
                 )}
               </motion.div>
               
               <motion.span
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 + 0.2 }}
+                transition={{ delay: index * 0.08 + 0.15 }}
                 className={cn(
-                  "text-[10px] font-medium mt-2 text-center whitespace-nowrap",
+                  "text-[11px] font-medium mt-2.5 text-center whitespace-nowrap",
                   status === "completed" && "text-emerald-600",
                   status === "active" && "text-primary font-semibold",
-                  status === "pending" && "text-muted-foreground/50"
+                  status === "pending" && "text-muted-foreground/40"
                 )}
               >
                 {stage.label}
