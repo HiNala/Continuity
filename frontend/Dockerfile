@@ -11,11 +11,11 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat gcompat
 
 # Copy package files
-COPY package.json ./
+COPY package.json package-lock.json* ./
 
-# Install dependencies - use npm install to get correct platform binaries
-# The --force flag ensures SWC binaries are installed for the correct platform
-RUN npm install --force --legacy-peer-deps
+# Install dependencies using lockfile for deterministic builds
+RUN rm -rf node_modules && \
+    npm ci
 
 # Copy application code
 COPY . .

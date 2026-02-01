@@ -223,7 +223,7 @@ export function ResultsTimeline({
 
       {/* Compare Mode Hint */}
       {compareMode && (
-        <p className="text-xs text-neutral-600 dark:text-zinc-400 bg-primary/5 dark:bg-primary/10 border border-primary/10 dark:border-primary/20 px-3 py-2 rounded-lg">
+        <p className="text-xs text-neutral-600 dark:text-zinc-400 bg-white/70 dark:bg-zinc-900/60 border border-white/40 dark:border-white/10 backdrop-blur-xl px-3 py-2 rounded-lg shadow-[0_8px_18px_rgba(0,0,0,0.08)]">
           Select two images to compare side by side
         </p>
       )}

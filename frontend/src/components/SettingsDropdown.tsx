@@ -201,9 +201,9 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.95 }}
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
-            className="absolute right-0 mt-2 w-72 bg-white dark:bg-zinc-900 backdrop-blur-xl border border-neutral-200 dark:border-zinc-700 rounded-2xl shadow-xl z-50 overflow-hidden"
+            className="absolute right-0 mt-2 w-72 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-2xl border border-white/50 dark:border-white/10 rounded-2xl shadow-[0_18px_50px_rgba(0,0,0,0.18)] z-50 overflow-hidden"
           >
-            <div className="p-4 border-b border-neutral-100 dark:border-zinc-800 bg-gradient-to-r from-primary/5 to-accent/5 dark:from-primary/10 dark:to-accent/10">
+            <div className="p-4 border-b border-white/30 dark:border-white/10 bg-gradient-to-r from-primary/6 to-accent/6 dark:from-primary/10 dark:to-accent/10">
               <h3 className="font-semibold text-neutral-900 dark:text-zinc-100">API Connections</h3>
               <p className="text-xs text-neutral-500 dark:text-zinc-400 mt-1">
                 Test your API keys before running the demo

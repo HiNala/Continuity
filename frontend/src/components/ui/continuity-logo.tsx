@@ -3,13 +3,14 @@
 import React from "react";
 import { motion } from "framer-motion";
 
-interface ContinuityLogoProps {
+interface ClarityLogoProps {
   className?: string;
   size?: number;
   animate?: boolean;
 }
 
-export const ContinuityLogo: React.FC<ContinuityLogoProps> = ({
+// Export with both names for backward compatibility
+export const ClarityLogo: React.FC<ClarityLogoProps> = ({
   className = "",
   size = 32,
   animate = false,
@@ -25,7 +26,7 @@ export const ContinuityLogo: React.FC<ContinuityLogoProps> = ({
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       role="img"
-      aria-label="Continuity logo"
+      aria-label="Clarity logo"
     >
       <defs>
         <linearGradient id={`grad-${uniqueId}`} x1="0%" y1="0%" x2="100%" y2="100%">
@@ -87,7 +88,7 @@ export const ContinuityLogo: React.FC<ContinuityLogoProps> = ({
   );
 };
 
-export const ContinuityIcon: React.FC<{ className?: string; size?: number }> = ({
+export const ClarityIcon: React.FC<{ className?: string; size?: number }> = ({
   className = "",
   size = 18,
 }) => {
@@ -102,7 +103,7 @@ export const ContinuityIcon: React.FC<{ className?: string; size?: number }> = (
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       role="img"
-      aria-label="Continuity icon"
+      aria-label="Clarity icon"
     >
       <defs>
         <linearGradient id={`icon-grad-${uniqueId}`} x1="0%" y1="0%" x2="100%" y2="100%">
@@ -126,3 +127,7 @@ export const ContinuityIcon: React.FC<{ className?: string; size?: number }> = (
     </svg>
   );
 };
+
+// Backward compatible exports
+export const ContinuityLogo = ClarityLogo;
+export const ContinuityIcon = ClarityIcon;

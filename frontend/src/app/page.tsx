@@ -1401,7 +1401,7 @@ export default function ContinuityApp() {
                 {/* Logo */}
                 <motion.div layout className="flex items-center gap-2.5">
                   <ContinuityLogo size={24} />
-                  <span className="font-semibold text-sm text-neutral-900 dark:text-zinc-100">Continuity</span>
+                  <span className="font-semibold text-sm text-neutral-900 dark:text-zinc-100">Clarity</span>
                   
                   {/* Status in header when active */}
                   <AnimatePresence>
@@ -1841,7 +1841,7 @@ function SplitView({
                   className="py-4 border-t border-neutral-100 dark:border-zinc-800/50"
                 >
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[11px] font-medium text-neutral-400 dark:text-zinc-500">Continuity</span>
+                    <span className="text-[11px] font-medium text-neutral-400 dark:text-zinc-500">Clarity</span>
                   </div>
                   <ThinkingIndicator 
                     agent={currentThinking.agent} 
@@ -2089,7 +2089,7 @@ function ChatBubble({ message, index }: { message: ChatMessage; index: number })
         {isUser ? (
           <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">You</span>
         ) : (
-          <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">Continuity</span>
+          <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">Clarity</span>
         )}
         {message.timestamp && (
           <span className="text-[10px] text-neutral-300 dark:text-zinc-600">{message.timestamp}</span>
