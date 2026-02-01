@@ -141,6 +141,18 @@ class SpatialAnalysisAgent:
         """
         try:
             # Handle URL vs local file
+            if image_path.startswith("data:"):
+                header, encoded = image_path.split(",", 1)
+                mime_type = "image/jpeg"
+                if ";base64" in header:
+                    mime_type = header[5:].split(";")[0] or mime_type
+                if not encoded:
+                    return None
+                return {
+                    "type": "base64",
+                    "data": encoded,
+                    "mime_type": mime_type,
+                }
             if image_path.startswith(('http://', 'https://')):
                 return {
                     "type": "url",

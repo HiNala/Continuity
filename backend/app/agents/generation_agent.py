@@ -346,7 +346,19 @@ class GenerationAgent:
             
             # Add input image if provided
             if input_image_path:
-                if input_image_path.startswith(('http://', 'https://')):
+                if input_image_path.startswith("data:"):
+                    header, encoded = input_image_path.split(",", 1)
+                    mime_type = "image/jpeg"
+                    if ";base64" in header:
+                        mime_type = header[5:].split(";")[0] or mime_type
+                    if encoded:
+                        parts.insert(0, {
+                            "inline_data": {
+                                "mime_type": mime_type,
+                                "data": encoded
+                            }
+                        })
+                elif input_image_path.startswith(('http://', 'https://')):
                     # For URL images, instruct model to reference them
                     parts.insert(0, {
                         "text": f"Reference image URL: {input_image_path}\n\nBased on this reference:"
