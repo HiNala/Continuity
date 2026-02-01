@@ -23,6 +23,36 @@ import {
 const cn = (...classes: (string | undefined | null | false)[]) =>
   classes.filter(Boolean).join(" ");
 
+// Simple markdown parser for bold text
+function parseMarkdown(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let remaining = text;
+  let key = 0;
+
+  const boldPattern = /\*\*([^*]+)\*\*/;
+  
+  while (remaining) {
+    const match = remaining.match(boldPattern);
+    
+    if (match && match.index !== undefined) {
+      if (match.index > 0) {
+        parts.push(<span key={key++}>{remaining.slice(0, match.index)}</span>);
+      }
+      parts.push(
+        <strong key={key++} className="font-semibold text-neutral-900 dark:text-zinc-100">
+          {match[1]}
+        </strong>
+      );
+      remaining = remaining.slice(match.index + match[0].length);
+    } else {
+      parts.push(<span key={key++}>{remaining}</span>);
+      break;
+    }
+  }
+  
+  return parts;
+}
+
 // Smooth animation transitions
 const smoothTransition = {
   duration: 0.3,
@@ -240,7 +270,7 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
       {/* Content - cleaner */}
       <div className="px-4 pb-3">
         <p className="text-xs text-neutral-500 dark:text-zinc-400 leading-relaxed">
-          {content}
+          {parseMarkdown(content)}
         </p>
       </div>
 
@@ -545,28 +575,44 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   };
 
   return (
-    <div className="space-y-2">
-      <p className="text-[14px] text-neutral-800 dark:text-zinc-200 leading-relaxed">{question.question_text}</p>
+    <div className="space-y-3">
+      <p className="text-[14px] text-neutral-800 dark:text-zinc-200 leading-relaxed">{parseMarkdown(question.question_text)}</p>
       {question.multi_select && (
-        <p className="text-[11px] text-neutral-400 dark:text-zinc-500">Select all that apply</p>
+        <p className="text-[10px] text-neutral-400 dark:text-zinc-500 uppercase tracking-wider font-medium">Select all that apply</p>
       )}
       <div className="flex flex-wrap gap-2">
-        {question.possible_answers.map((answer) => (
-          <button
-            key={answer.answer_id}
-            onClick={() => handleSelect(answer.answer_id)}
-            disabled={disabled}
-            className={cn(
-              "px-3 py-1.5 rounded-md text-[13px] transition-colors",
-              selected.includes(answer.answer_id)
-                ? "bg-neutral-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                : "bg-neutral-100 dark:bg-zinc-800 text-neutral-600 dark:text-zinc-300 hover:bg-neutral-200 dark:hover:bg-zinc-700",
-              disabled && "opacity-50 cursor-not-allowed"
-            )}
-          >
-            {answer.answer_text}
-          </button>
-        ))}
+        {question.possible_answers.map((answer) => {
+          const isSelected = selected.includes(answer.answer_id);
+          return (
+            <motion.button
+              key={answer.answer_id}
+              onClick={() => handleSelect(answer.answer_id)}
+              disabled={disabled}
+              whileHover={!disabled ? { y: -1, scale: 1.02 } : {}}
+              whileTap={!disabled ? { scale: 0.98 } : {}}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 border",
+                isSelected
+                  ? "bg-gradient-to-br from-neutral-900 to-neutral-800 dark:from-zinc-100 dark:to-zinc-200 text-white dark:text-zinc-900 border-transparent shadow-lg shadow-neutral-900/20 dark:shadow-zinc-100/20"
+                  : "bg-white/80 dark:bg-zinc-800/80 text-neutral-600 dark:text-zinc-300 border-neutral-200 dark:border-zinc-700 hover:bg-white dark:hover:bg-zinc-800 hover:border-neutral-300 dark:hover:border-zinc-600 hover:shadow-md",
+                disabled && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <span className="flex items-center gap-2">
+                {isSelected && (
+                  <motion.span
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="w-4 h-4 rounded-full bg-white/20 dark:bg-zinc-900/20 flex items-center justify-center"
+                  >
+                    <CheckCircle2 className="w-3 h-3" />
+                  </motion.span>
+                )}
+                {answer.answer_text}
+              </span>
+            </motion.button>
+          );
+        })}
       </div>
     </div>
   );

@@ -12,11 +12,12 @@ import { IntelligencePanel, SelfImprovingBadge } from "@/components/Intelligence
 import { SettingsDropdown } from "@/components/SettingsDropdown";
 import { EvaluationDetails, type EvaluationResult } from "@/components/EvaluationDetails";
 import { StepTimeline, StepSummary, type Step } from "@/components/StepTimeline";
-import { StreamingChatMessage, ThinkingIndicator, LiveBadge } from "@/components/ui/streaming-text";
-import { ProgressTimeline, CompactTimeline } from "@/components/ui/progress-timeline";
+import { StreamingChatMessage, ThinkingIndicator, LiveBadge, parseMarkdown } from "@/components/ui/streaming-text";
+import { CompactTimeline } from "@/components/ui/progress-timeline";
 import { ToastProvider } from "@/components/ui/toast";
 import { AgentCardSkeleton } from "@/components/ui/skeleton";
 import { ThemeToggle, useTheme } from "@/components/ThemeProvider";
+import { GenerationProgress, PHASE_CONFIG, type PhaseProgress, type Phase } from "@/components/ui/generation-progress";
 import { 
   createProject, 
   analyzeGoal, 
@@ -36,7 +37,7 @@ import {
   type IterationResponse,
   type BatchReport,
 } from "@/lib/api";
-import { APP_CONFIG, getHeaderText, getFooterText } from "@/lib/config";
+import { APP_CONFIG } from "@/lib/config";
 
 const cn = (...classes: (string | undefined | null | false)[]) =>
   classes.filter(Boolean).join(" ");
@@ -159,11 +160,27 @@ export default function ContinuityApp() {
   // Evaluation results for all iterations
   const [evaluationResults, setEvaluationResults] = useState<EvaluationResult[]>([]);
   
+  // Detailed generation phase progress for demo visibility
+  const [generationPhaseProgress, setGenerationPhaseProgress] = useState<PhaseProgress[]>([
+    { phase: "cleanup", status: "pending" },
+    { phase: "structural", status: "pending" },
+    { phase: "fixture", status: "pending" },
+    { phase: "style", status: "pending" },
+  ]);
+  const [currentGenerationPhaseIndex, setCurrentGenerationPhaseIndex] = useState(-1);
+  const [isGenerationRunning, setIsGenerationRunning] = useState(false);
+  
   const cardsEndRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const streamCleanupRef = useRef<(() => void) | null>(null);
   const messageCounterRef = useRef(0);
+  const projectIdRef = useRef<string | null>(null);  // Ref to avoid stale closures
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
 
   const getMessageId = useCallback(() => {
     messageCounterRef.current += 1;
@@ -230,12 +247,193 @@ export default function ContinuityApp() {
   const handleStreamEvent = useCallback((event: StreamEvent) => {
     setIsConnected(true);
     
+    // Capture Weave trace URL from any event that includes it
+    const eventWeaveUrl = event.details?.weave_trace_url || event.details?.weave_url;
+    if (eventWeaveUrl && typeof eventWeaveUrl === "string") {
+      setWeaveTraceUrl(eventWeaveUrl);
+    }
+    
+    // CRITICAL FIX: Update orchestrationStatus from SSE events for stepper progression
+    // Extract state/phase from event details to keep status in sync
+    if (event.details) {
+      const toState = event.details.to_state as string | undefined;
+      const phase = event.details.phase as string | undefined;
+      const currentState = event.details.state as string | undefined;
+      
+      if (toState || phase || currentState) {
+        setOrchestrationStatus(prev => ({
+          ...prev!,
+          project_id: prev?.project_id || projectId || "",
+          state: toState || currentState || prev?.state || "idle",
+          status: prev?.status || "running",
+          current_phase: phase || (toState?.includes("generating_") ? toState.replace("generating_", "") : 
+                         toState?.includes("evaluating_") ? toState.replace("evaluating_", "") :
+                         toState?.includes("retrying_") ? toState.replace("retrying_", "") :
+                         prev?.current_phase) || null,
+          retry_count: (event.details.retry_number as number) || prev?.retry_count || 0,
+          has_warnings: (event.details.has_warnings as boolean) || prev?.has_warnings || false,
+          warning_details: prev?.warning_details || null,
+          started_at: prev?.started_at || null,
+          completed_at: prev?.completed_at || null,
+          recent_transitions: prev?.recent_transitions || [],
+        }));
+      }
+      
+      // UPDATE DETAILED GENERATION PHASE PROGRESS
+      // This powers the detailed generation progress component for demo visibility
+      if (toState) {
+        const phaseOrder: Phase[] = ["cleanup", "structural", "fixture", "style"];
+        
+        // Detect which phase and what status
+        let detectedPhase: Phase | null = null;
+        let phaseStatus: PhaseProgress["status"] = "pending";
+        
+        if (toState.includes("generating_")) {
+          const phaseName = toState.replace("generating_", "") as Phase;
+          if (phaseOrder.includes(phaseName)) {
+            detectedPhase = phaseName;
+            phaseStatus = "running";
+            setIsGenerationRunning(true);
+          }
+        } else if (toState.includes("evaluating_")) {
+          const phaseName = toState.replace("evaluating_", "") as Phase;
+          if (phaseOrder.includes(phaseName)) {
+            detectedPhase = phaseName;
+            phaseStatus = "evaluating";
+          }
+        } else if (toState.includes("retrying_")) {
+          const phaseName = toState.replace("retrying_", "") as Phase;
+          if (phaseOrder.includes(phaseName)) {
+            detectedPhase = phaseName;
+            phaseStatus = "retrying";
+          }
+        } else if (toState === "completed" || toState === "completed_with_warnings") {
+          // All phases complete
+          setIsGenerationRunning(false);
+          setGenerationPhaseProgress(prev => 
+            prev.map(p => ({ ...p, status: "completed" as const }))
+          );
+        }
+        
+        // Update the phase progress
+        if (detectedPhase) {
+          const phaseIndex = phaseOrder.indexOf(detectedPhase);
+          setCurrentGenerationPhaseIndex(phaseIndex);
+          
+          setGenerationPhaseProgress(prev => {
+            const updated = [...prev];
+            
+            // Mark all previous phases as completed
+            for (let i = 0; i < phaseIndex; i++) {
+              if (updated[i].status !== "completed") {
+                updated[i] = { 
+                  ...updated[i], 
+                  status: "completed",
+                  completedAt: new Date(),
+                };
+              }
+            }
+            
+            // Update current phase
+            updated[phaseIndex] = {
+              ...updated[phaseIndex],
+              status: phaseStatus,
+              startedAt: updated[phaseIndex].startedAt || new Date(),
+              currentStep: phaseStatus === "running" ? 0 : 
+                          phaseStatus === "evaluating" ? 3 :
+                          updated[phaseIndex].currentStep,
+              stepMessage: phaseStatus === "running" 
+                ? `Constructing prompt with spatial constraints...`
+                : phaseStatus === "evaluating"
+                  ? `Checking quality criteria...`
+                  : phaseStatus === "retrying"
+                    ? `Analyzing failure and adjusting policy...`
+                    : updated[phaseIndex].stepMessage,
+              retryNumber: event.details?.retry_number as number | undefined,
+              evaluationScore: event.details?.score as number | undefined,
+              evaluationPassed: event.details?.evaluation_passed as boolean | undefined,
+              outputPath: (event.details?.output_path || event.details?.output_image) as string | undefined,
+            };
+            
+            return updated;
+          });
+        }
+        
+        // Handle evaluation results updating phase progress
+        if (event.details?.evaluation_passed !== undefined && event.details?.phase) {
+          const evalPhase = event.details.phase as Phase;
+          if (phaseOrder.includes(evalPhase)) {
+            setGenerationPhaseProgress(prev => {
+              const updated = [...prev];
+              const idx = phaseOrder.indexOf(evalPhase);
+              if (idx >= 0) {
+                const passed = event.details?.evaluation_passed as boolean;
+                updated[idx] = {
+                  ...updated[idx],
+                  status: passed ? "completed" : "retrying",
+                  evaluationScore: event.details?.score as number | undefined,
+                  evaluationPassed: passed,
+                  completedAt: passed ? new Date() : undefined,
+                };
+              }
+              return updated;
+            });
+          }
+        }
+      }
+    }
+    
     switch (event.event) {
       case "agent":
       case "thinking":
         // Update current thinking state
         if (event.agent && event.action) {
           setCurrentThinking({ agent: event.agent, action: event.action });
+        }
+        
+        // FIX: Add detailed chat messages for significant events to show more info during demo
+        const toState = event.details?.to_state as string | undefined;
+        if (toState && event.agent) {
+          // Send informative messages for key phase transitions
+          if (toState.includes("analyzing_space")) {
+            addChatMessage({
+              type: "assistant",
+              content: "🔍 **Spatial Analysis Starting** - Analyzing room geometry, detecting fixtures, identifying constraints...",
+            });
+          } else if (toState.includes("generating_cleanup")) {
+            addChatMessage({
+              type: "assistant",
+              content: "🧹 **Cleanup Phase** - Removing debris and preparing base image for transformation...",
+            });
+          } else if (toState.includes("generating_structural")) {
+            addChatMessage({
+              type: "assistant",
+              content: "🏗️ **Structural Phase** - Rendering walls, floors, and architectural elements...",
+            });
+          } else if (toState.includes("generating_fixture")) {
+            addChatMessage({
+              type: "assistant",
+              content: "🚿 **Fixture Phase** - Placing fixtures and appliances according to spatial constraints...",
+            });
+          } else if (toState.includes("generating_style")) {
+            addChatMessage({
+              type: "assistant",
+              content: "🎨 **Style Phase** - Applying final aesthetic styling and finishing touches...",
+            });
+          } else if (toState.includes("evaluating")) {
+            const phase = toState.replace("evaluating_", "");
+            addChatMessage({
+              type: "assistant",
+              content: `📋 **Quality Check** - Evaluating ${phase || "output"} against 5 criteria: constraints, geometry, hallucinations, style, completeness...`,
+            });
+          } else if (toState.includes("retrying")) {
+            const retryPhase = toState.replace("retrying_", "");
+            const retryNum = event.details?.retry_number || 1;
+            addChatMessage({
+              type: "assistant",
+              content: `🔄 **Self-Improvement** - QC detected issues. Retry #${retryNum} for ${retryPhase} - analyzing failure and adjusting policy...`,
+            });
+          }
         }
         
         // Add to pipeline steps timeline
@@ -277,7 +475,7 @@ export default function ContinuityApp() {
               weaveTraceId: event.details?.weave_trace_id as string | undefined,
               phase: event.details?.phase as string | undefined,
               iterationNumber: event.details?.iteration_number as number | undefined,
-              imagePath: event.details?.output_path as string | undefined,
+              imagePath: (event.details?.output_path || event.details?.output_image) as string | undefined,
               evaluationScore: event.details?.score as number | undefined,
               evaluationPassed: event.details?.evaluation_passed as boolean | undefined,
               failureReasons: event.details?.failure_reasons as string[] | undefined,
@@ -442,14 +640,15 @@ export default function ContinuityApp() {
           }
           return updated;
         });
-        // If output path is provided, add to generated phases (with deduplication)
-        if (event.details?.output_path) {
+        // FIX: Handle both output_path and output_image from backend
+        const sceneOutputPath = event.details?.output_path || event.details?.output_image;
+        if (sceneOutputPath) {
           setGeneratedPhases(prev => {
-            const exists = prev.some(p => p.imagePath === event.details?.output_path);
+            const exists = prev.some(p => p.imagePath === sceneOutputPath);
             if (exists) return prev;
             return [...prev, {
               phase: `Scene ${(event.details?.scene_index || 0) + 1}`,
-              imagePath: event.details?.output_path || "",
+              imagePath: sceneOutputPath as string,
               evaluationPassed: true,
               iterationNumber: 1,
             }];
@@ -502,6 +701,37 @@ export default function ContinuityApp() {
         break;
         
       case "progress":
+        // CRITICAL: Update orchestrationStatus from progress events (especially initial state)
+        if (event.details?.state) {
+          const progressState = event.details.state as string;
+          console.log("Progress event - updating orchestrationStatus state to:", progressState);
+          setOrchestrationStatus(prev => ({
+            ...prev!,
+            project_id: prev?.project_id || projectId || "",
+            state: progressState,
+            status: progressState === "completed" || progressState === "completed_with_warnings" ? "completed" : (prev?.status || "running"),
+            current_phase: (event.details?.phase as string) || prev?.current_phase || null,
+            retry_count: prev?.retry_count || 0,
+            has_warnings: (event.details?.has_warnings as boolean) || prev?.has_warnings || false,
+            warning_details: prev?.warning_details || null,
+            started_at: prev?.started_at || null,
+            completed_at: progressState === "completed" || progressState === "completed_with_warnings" 
+              ? new Date().toISOString() 
+              : prev?.completed_at || null,
+            recent_transitions: prev?.recent_transitions || [],
+          }));
+          
+          // If already completed on initial connect, trigger iteration fetch and transformation complete
+          if (progressState === "completed" || progressState === "completed_with_warnings") {
+            setTransformationComplete(true);
+            const currentProjectId = projectIdRef.current || projectId;
+            if (currentProjectId) {
+              console.log("Initial progress shows completed - fetching iterations for:", currentProjectId);
+              fetchIterations(currentProjectId);
+            }
+          }
+        }
+        
         // Add assistant message for progress updates
         if (event.message && !event.message.includes("heartbeat")) {
           addChatMessage({
@@ -509,19 +739,21 @@ export default function ContinuityApp() {
             content: event.message,
           });
         }
-        // Capture generated images from progress events
-        if (event.details?.output_path && event.details?.phase) {
+        // FIX: Handle both output_path and output_image from backend
+        const progressOutputPath = event.details?.output_path || event.details?.output_image;
+        const progressPhase = event.details?.phase || event.details?.current_phase;
+        if (progressOutputPath && progressPhase) {
           setGeneratedPhases(prev => {
             // Avoid duplicates
-            const exists = prev.some(p => p.imagePath === event.details?.output_path);
+            const exists = prev.some(p => p.imagePath === progressOutputPath);
             if (exists) return prev;
             return [...prev, {
-              phase: event.details?.phase || "Generation",
-              imagePath: event.details?.output_path || "",
-              iterationId: event.details?.iteration_id,
-              evaluationPassed: event.details?.evaluation_passed,
-              evaluationScore: event.details?.evaluation_score,
-              iterationNumber: event.details?.iteration_number || 1,
+              phase: progressPhase as string,
+              imagePath: progressOutputPath as string,
+              iterationId: event.details?.iteration_id as string | undefined,
+              evaluationPassed: event.details?.evaluation_passed as boolean | undefined,
+              evaluationScore: event.details?.evaluation_score as number | undefined,
+              iterationNumber: (event.details?.iteration_number as number) || 1,
             }];
           });
         }
@@ -569,6 +801,27 @@ export default function ContinuityApp() {
           streamCleanupRef.current();
           streamCleanupRef.current = null;
         }
+        // Stop any polling
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+        
+        // FIX: Update orchestrationStatus to completed state for stepper
+        setOrchestrationStatus(prev => ({
+          ...prev!,
+          project_id: prev?.project_id || projectId || "",
+          state: event.details?.has_warnings ? "completed_with_warnings" : "completed",
+          status: "completed",
+          current_phase: "complete",
+          retry_count: prev?.retry_count || 0,
+          has_warnings: (event.details?.has_warnings as boolean) || false,
+          warning_details: (event.details?.warning_details as Array<Record<string, unknown>>) || null,
+          started_at: prev?.started_at || null,
+          completed_at: new Date().toISOString(),
+          recent_transitions: prev?.recent_transitions || [],
+        }));
+        
         // Mark all running agent cards as completed
         setAgentCards(prev => {
           return prev.map(card => 
@@ -581,9 +834,14 @@ export default function ContinuityApp() {
             ? "Transformation complete with some minor adjustments. Check the results below!"
             : "Your visualization is ready! Check out the transformation timeline below.",
         });
-        // Fetch all iterations to display in timeline
-        if (projectId) {
-          fetchIterations(projectId);
+        // Fetch all iterations to display in timeline - this is critical for showing results
+        // Use ref to avoid stale closure - projectId state may not be up to date
+        const currentProjectId = projectIdRef.current || projectId;
+        if (currentProjectId) {
+          console.log("Fetching iterations for project:", currentProjectId);
+          fetchIterations(currentProjectId);
+        } else {
+          console.warn("No projectId available to fetch iterations!");
         }
         break;
         
@@ -733,14 +991,20 @@ export default function ContinuityApp() {
   // Fetch all iterations to display in results timeline
   const fetchIterations = useCallback(async (pId: string) => {
     try {
+      console.log("Fetching iterations for project:", pId);
       const iterations = await getIterations(pId);
+      console.log("Got iterations:", iterations.length, iterations);
+      
       const phases: typeof generatedPhases = [];
       const seenPaths = new Set<string>(); // Deduplication for successful iterations
       
       // Group by phase and show all attempts (including failures)
       for (const iter of iterations) {
+        // FIX: Handle all possible image path fields from backend
         const imagePath = iter.output_image_url || iter.output_image_path || "";
         const isFailed = iter.status === "failed" || iter.status === "error";
+        
+        console.log(`Iteration ${iter.id}: phase=${iter.phase}, status=${iter.status}, imagePath=${imagePath}`);
         
         // Show successful iterations with images (deduped) or failed ones
         if (isFailed && !imagePath) {
@@ -768,7 +1032,14 @@ export default function ContinuityApp() {
         }
       }
       
-      setGeneratedPhases(phases);
+      console.log("Setting generatedPhases:", phases.length, phases);
+      
+      // Only update if we have phases, don't clear existing ones if fetch returns empty
+      if (phases.length > 0) {
+        setGeneratedPhases(phases);
+      } else if (iterations.length === 0) {
+        console.warn("No iterations returned from API - keeping existing generatedPhases");
+      }
       
       // Fetch detailed evaluation results for evaluated iterations
       const evaluatedIterations = iterations.filter(
@@ -817,6 +1088,20 @@ export default function ContinuityApp() {
       fetchAgentReasoning(projectId);
     }
   }, [projectId, orchestrationStatus?.state, fetchAgentReasoning]);
+
+  // CRITICAL: Fetch iterations when orchestration completes - fallback if SSE missed it
+  useEffect(() => {
+    if (projectId && orchestrationStatus?.state && 
+        (orchestrationStatus.state === "completed" || 
+         orchestrationStatus.state === "completed_with_warnings")) {
+      // Only fetch if we don't have generated phases yet
+      if (generatedPhases.length === 0) {
+        console.log("Completion detected via state change - fetching iterations now");
+        fetchIterations(projectId);
+        setTransformationComplete(true);
+      }
+    }
+  }, [projectId, orchestrationStatus?.state, generatedPhases.length, fetchIterations]);
 
   useEffect(() => {
     const shouldFetch =
@@ -1157,6 +1442,10 @@ export default function ContinuityApp() {
       streamCleanupRef.current = cleanup;
       setIsConnected(true);
 
+      // FIX: Start lightweight status sync polling ALONGSIDE SSE
+      // This ensures orchestrationStatus stays in sync even if SSE events miss updates
+      startStatusSyncPolling(pId);
+
     } catch (err) {
       console.error("SSE connection failed, falling back to polling:", err);
       updateAgentCard(orchestrateCardId, {
@@ -1167,6 +1456,55 @@ export default function ContinuityApp() {
       startStatusPolling(pId);
     }
   };
+
+  // Lightweight status sync polling - runs alongside SSE to ensure status is accurate
+  const startStatusSyncPolling = useCallback((pId: string) => {
+    // Don't start if already have full polling running
+    if (pollingRef.current) return;
+
+    const syncInterval = setInterval(async () => {
+      try {
+        const status = await getOrchestrationStatus(pId);
+        
+        // Only update status-related fields, don't trigger full UI updates
+        setOrchestrationStatus(prev => ({
+          ...prev!,
+          project_id: status.project_id,
+          state: status.state,
+          status: status.status,
+          current_phase: status.current_phase,
+          retry_count: status.retry_count,
+          has_warnings: status.has_warnings,
+          warning_details: status.warning_details,
+          started_at: status.started_at,
+          completed_at: status.completed_at,
+          recent_transitions: status.recent_transitions,
+          total_scenes: status.total_scenes,
+          completed_scenes: status.completed_scenes,
+          is_batch: status.is_batch,
+          scene_progress: status.scene_progress,
+        }));
+
+        // Check if pipeline is complete
+        const isTerminal = ["completed", "completed_with_warnings", "failed"].includes(status.state);
+        if (isTerminal) {
+          clearInterval(syncInterval);
+          // Fetch final iterations if complete
+          if (status.state !== "failed") {
+            setTransformationComplete(true);
+            fetchIterations(pId);
+          }
+        }
+      } catch (err) {
+        console.warn("Status sync poll failed:", err);
+      }
+    }, 3000); // Poll every 3 seconds
+
+    // Store reference so we can clean it up
+    // Note: Using a separate ref would be cleaner but reusing pollingRef for simplicity
+    // The interval will self-clear on terminal state
+    return () => clearInterval(syncInterval);
+  }, [fetchIterations]);
 
   const startStatusPolling = (pId: string) => {
     if (pollingRef.current) {
@@ -1369,23 +1707,51 @@ export default function ContinuityApp() {
     setReasoningSteps([]);
     setPipelineSteps([]);
     setEvaluationResults([]);
+    // Reset generation phase progress
+    setGenerationPhaseProgress([
+      { phase: "cleanup", status: "pending" },
+      { phase: "structural", status: "pending" },
+      { phase: "fixture", status: "pending" },
+      { phase: "style", status: "pending" },
+    ]);
+    setCurrentGenerationPhaseIndex(-1);
+    setIsGenerationRunning(false);
   };
 
   const allQuestionsAnswered = questions 
     ? questions.questions.every(q => answers[q.question_id] !== undefined)
     : false;
 
-  // Derive pipeline stage from orchestration status
+  // Derive pipeline stage from orchestration status - ENHANCED for better stepper accuracy
   const getPipelineStage = (): "requirements" | "spatial" | "generation" | "qc" | "complete" => {
     if (!orchestrationStatus) return "requirements";
     const state = orchestrationStatus.state;
     const phase = orchestrationStatus.current_phase;
     
-    if (state === "completed") return "complete";
-    if (state === "failed") return "requirements";
-    if (phase?.includes("qc") || phase?.includes("quality")) return "qc";
-    if (phase?.includes("generat") || phase?.includes("render")) return "generation";
-    if (phase?.includes("spatial") || phase?.includes("analy")) return "spatial";
+    // Check completed states first
+    if (state === "completed" || state === "completed_with_warnings") return "complete";
+    
+    // Check state string for current activity
+    if (state) {
+      // QC/Evaluation states
+      if (state.includes("evaluating") || state.includes("retrying")) return "qc";
+      // Generation states
+      if (state.includes("generating")) return "generation";
+      // Spatial analysis states
+      if (state.includes("analyzing_space") || state.includes("spatial")) return "spatial";
+      // Requirements states
+      if (state.includes("requirements") || state.includes("clarification") || state.includes("gathering")) return "requirements";
+    }
+    
+    // Fallback to phase-based detection
+    if (phase) {
+      if (phase.includes("qc") || phase.includes("quality") || phase.includes("evaluat")) return "qc";
+      if (phase.includes("generat") || phase.includes("render") || phase.includes("cleanup") || 
+          phase.includes("structural") || phase.includes("fixture") || phase.includes("style")) return "generation";
+      if (phase.includes("spatial") || phase.includes("analy")) return "spatial";
+    }
+    
+    // Default to requirements if nothing else matches
     return "requirements";
   };
 
@@ -1394,14 +1760,14 @@ export default function ContinuityApp() {
   return (
     <ToastProvider>
     <LayoutGroup>
-      <div className="h-screen overflow-hidden text-foreground bg-background transition-colors duration-300">
+      <div className="min-h-screen flex flex-col overflow-x-hidden text-foreground bg-background transition-colors duration-300">
             <AnimatedBackground 
               isActive={appState === "active"} 
               intensity={appState === "active" ? "intense" : "normal"} 
               isLoading={isLoading}
             />
 
-        <div className="relative z-10 h-full flex flex-col">
+        <div className="relative z-10 flex-1 flex flex-col min-h-0">
           {/* Header - Clean and minimal with dark mode support */}
           <motion.header
             layout
@@ -1433,7 +1799,11 @@ export default function ContinuityApp() {
                         exit={{ opacity: 0, width: 0 }}
                         className="hidden sm:flex items-center gap-3 ml-4 pl-4 border-l border-neutral-200 dark:border-zinc-700"
                       >
-                        <CompactTimeline currentStage={pipelineStage} className="w-20" />
+                        <CompactTimeline 
+                          currentStage={pipelineStage} 
+                          className="w-24" 
+                          subPhase={orchestrationStatus?.current_phase || undefined}
+                        />
                         {orchestrationStatus && orchestrationStatus.retry_count > 0 && (
                           <SelfImprovingBadge 
                             cycleCount={orchestrationStatus.retry_count}
@@ -1470,7 +1840,10 @@ export default function ContinuityApp() {
           </motion.header>
 
           {/* Main Content with smooth transitions */}
-          <main className="flex-1 flex overflow-hidden">
+          <main className={cn(
+            "flex-1 flex min-h-0",
+            appState === "welcome" ? "overflow-y-auto" : "overflow-hidden"
+          )}>
             <AnimatePresence mode="wait">
               {appState === "welcome" ? (
                 <WelcomeView key="welcome" onSend={handleSend} isLoading={isLoading} />
@@ -1502,33 +1875,37 @@ export default function ContinuityApp() {
                   selfImprovementRetries={selfImprovementRetries}
                   generatedPhases={generatedPhases}
                   transformationComplete={transformationComplete}
+                  generationPhaseProgress={generationPhaseProgress}
+                  currentGenerationPhaseIndex={currentGenerationPhaseIndex}
+                  isGenerationRunning={isGenerationRunning}
                 />
               )}
             </AnimatePresence>
           </main>
 
-          {/* Footer - Minimal (welcome only) */}
+          {/* Footer - Consolidated attribution (welcome only) */}
           {appState === "welcome" && (
             <motion.footer
               layout
               transition={springTransition}
-              className="relative z-10 shrink-0"
+              className="relative z-10 shrink-0 pb-6"
             >
-              <div className="mx-4 mb-4">
+              <div className="mx-4">
                 <motion.div
                   layout
                   transition={springTransition}
-                  className={cn(
-                    "mx-auto px-4 h-9 flex items-center justify-center rounded-lg text-[11px] text-neutral-400 dark:text-zinc-500",
-                    "max-w-2xl"
-                  )}
+                  className="mx-auto max-w-2xl text-center"
                 >
-                  <span className="flex items-center gap-2">
-                    <Sparkles className="w-3 h-3" />
-                    <span>{APP_CONFIG.event}</span>
-                    <span className="text-neutral-300 dark:text-zinc-600">•</span>
-                    <span>Self-improving AI agents</span>
-                  </span>
+                  <p className="text-[11px] text-neutral-400 dark:text-zinc-500">
+                    <span className="font-medium">{APP_CONFIG.event}</span>
+                    <span className="mx-2 text-neutral-300 dark:text-zinc-600">—</span>
+                    <span>Powered by </span>
+                    <span className="text-neutral-500 dark:text-zinc-400">Weave</span>
+                    <span className="mx-1.5 text-neutral-300 dark:text-zinc-600">•</span>
+                    <span className="text-neutral-500 dark:text-zinc-400">Browserbase</span>
+                    <span className="mx-1.5 text-neutral-300 dark:text-zinc-600">•</span>
+                    <span className="text-neutral-500 dark:text-zinc-400">Gemini</span>
+                  </p>
                 </motion.div>
               </div>
             </motion.footer>
@@ -1573,9 +1950,9 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
       initial="hidden"
       animate="visible"
       exit="exit"
-      className="flex-1 flex items-center justify-center px-6 py-8 overflow-hidden"
+      className="flex-1 flex flex-col items-center justify-start md:justify-center px-6 py-8 min-h-0"
     >
-      <div className="w-full max-w-xl welcome-fit">
+      <div className="w-full max-w-xl">
         {/* Hero */}
         <div className="text-center mb-6">
           {/* Logo */}
@@ -1590,14 +1967,6 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
             </div>
           </motion.div>
           
-          {/* Badge */}
-          <motion.div variants={itemVariants}>
-            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-neutral-100 dark:bg-zinc-800 text-xs font-medium text-neutral-600 dark:text-zinc-300 mb-6">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              {getFooterText()}
-            </span>
-          </motion.div>
-
           {/* Headline */}
           <motion.h1
             variants={itemVariants}
@@ -1617,12 +1986,17 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
         </div>
 
         {/* Prompt input */}
-        <motion.div variants={itemVariants}>
-          <PromptInputBox 
-            onSend={onSend} 
-            isLoading={isLoading}
-            placeholder={APP_CONFIG.demo.placeholderPrompt}
-          />
+        <motion.div variants={itemVariants} className="relative">
+          <motion.div
+            animate={{ y: [0, -3, 0] }}
+            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <PromptInputBox 
+              onSend={onSend} 
+              isLoading={isLoading}
+              placeholder={APP_CONFIG.demo.placeholderPrompt}
+            />
+          </motion.div>
         </motion.div>
 
         {/* Hints - Minimal */}
@@ -1641,55 +2015,31 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
           </span>
         </motion.div>
 
-        {/* Tech Stack - For hackathon judges */}
-        <motion.div
-          variants={itemVariants}
-          className="mt-8 pt-6 border-t border-neutral-100 dark:border-zinc-800"
-        >
-          <p className="text-[10px] uppercase tracking-wider text-neutral-400 dark:text-zinc-600 text-center mb-3">
-            Powered by
-          </p>
-          <div className="flex items-center justify-center gap-6 text-[11px] text-neutral-500 dark:text-zinc-500">
-            <span className="flex items-center gap-1.5 hover:text-neutral-700 dark:hover:text-zinc-300 transition-colors">
-              <span className="w-2 h-2 rounded-full bg-gradient-to-r from-orange-400 to-amber-500" />
-              Weave
-            </span>
-            <span className="flex items-center gap-1.5 hover:text-neutral-700 dark:hover:text-zinc-300 transition-colors">
-              <span className="w-2 h-2 rounded-full bg-gradient-to-r from-blue-400 to-indigo-500" />
-              Browserbase
-            </span>
-            <span className="flex items-center gap-1.5 hover:text-neutral-700 dark:hover:text-zinc-300 transition-colors">
-              <span className="w-2 h-2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" />
-              Gemini
-            </span>
-          </div>
-        </motion.div>
-
         {/* Features - Clean cards with dark mode */}
         <motion.div
           variants={itemVariants}
-          className="mt-10 hidden sm:grid grid-cols-3 gap-3"
+          className="mt-8 hidden sm:grid grid-cols-3 gap-3"
         >
           {[
             { 
               label: "Multi-Agent Pipeline", 
               desc: "Weave-traced orchestration", 
-              lightColor: "bg-pink-50 border-pink-100", 
-              darkColor: "dark:bg-pink-950/30 dark:border-pink-900/30",
+              tint: "from-pink-200/55 via-white/45 to-white/35",
+              darkTint: "dark:from-pink-500/15 dark:via-zinc-900/50 dark:to-zinc-950/70",
               icon: "🎯"
             },
             { 
               label: "Self-Improving AI", 
               desc: "Learns from each iteration", 
-              lightColor: "bg-violet-50 border-violet-100", 
-              darkColor: "dark:bg-violet-950/30 dark:border-violet-900/30",
+              tint: "from-violet-200/55 via-white/45 to-white/35",
+              darkTint: "dark:from-violet-500/15 dark:via-zinc-900/50 dark:to-zinc-950/70",
               icon: "🧠"
             },
             { 
               label: "Real-time Streaming", 
               desc: "Watch agents think & work", 
-              lightColor: "bg-cyan-50 border-cyan-100", 
-              darkColor: "dark:bg-cyan-950/30 dark:border-cyan-900/30",
+              tint: "from-cyan-200/55 via-white/45 to-white/35",
+              darkTint: "dark:from-cyan-500/15 dark:via-zinc-900/50 dark:to-zinc-950/70",
               icon: "⚡"
             },
           ].map((item) => (
@@ -1698,9 +2048,12 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               className={cn(
-                "p-4 rounded-xl border transition-all cursor-default",
-                item.lightColor,
-                item.darkColor
+                "p-4 rounded-xl border backdrop-blur-2xl transition-all cursor-default",
+                "bg-gradient-to-br shadow-[0_12px_36px_rgba(15,23,42,0.12),0_6px_16px_rgba(15,23,42,0.08)]",
+                "ring-1 ring-white/50 dark:ring-white/10",
+                "border-white/60 dark:border-white/10",
+                item.tint,
+                item.darkTint
               )}
             >
               <div className="flex items-center gap-2 mb-1">
@@ -1788,6 +2141,10 @@ interface SplitViewProps {
     iterationNumber?: number;
   }>;
   transformationComplete: boolean;
+  // Detailed generation progress for demo
+  generationPhaseProgress: PhaseProgress[];
+  currentGenerationPhaseIndex: number;
+  isGenerationRunning: boolean;
 }
 
 function SplitView({
@@ -1816,10 +2173,35 @@ function SplitView({
   selfImprovementRetries,
   generatedPhases,
   transformationComplete,
+  generationPhaseProgress,
+  currentGenerationPhaseIndex,
+  isGenerationRunning,
 }: SplitViewProps) {
   const [splitPosition, setSplitPosition] = useState(50); // Default 50%
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const activityScrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat to latest message
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTo({
+        top: chatScrollRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  }, [chatMessages, questions, currentThinking]);
+
+  // Auto-scroll activity log to latest card
+  useEffect(() => {
+    if (activityScrollRef.current) {
+      activityScrollRef.current.scrollTo({
+        top: activityScrollRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  }, [agentCards, pipelineSteps]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1864,66 +2246,95 @@ function SplitView({
         {...slideInLeft}
         transition={{ ...smoothTransition, delay: 0.1 }}
         style={{ width: `${splitPosition}%` }}
-        className="flex flex-col border-r border-white/40 dark:border-white/10 min-w-[280px] bg-white/70 dark:bg-zinc-950/80 backdrop-blur-xl"
+        className="relative flex flex-col border-r border-white/30 dark:border-white/10 min-w-[280px] bg-gradient-to-b from-white/60 to-white/40 dark:from-zinc-950/70 dark:to-zinc-950/50 backdrop-blur-2xl"
       >
         {/* Minimal header */}
-        <div className="shrink-0 h-11 flex items-center justify-between px-4 border-b border-white/30 dark:border-white/10 bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl">
-          <span className="text-[13px] font-medium text-neutral-600 dark:text-zinc-300">Conversation</span>
-          <span className={`text-[10px] ${isConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-400 dark:text-zinc-500'}`}>
-            {isConnected ? '● Connected' : '○ Offline'}
+        <div className="shrink-0 h-12 flex items-center justify-between px-5 border-b border-white/20 dark:border-white/5 bg-white/40 dark:bg-zinc-950/40 backdrop-blur-xl">
+          <span className="text-[13px] font-semibold text-neutral-700 dark:text-zinc-200">Conversation</span>
+          <span className={cn(
+            "text-[9px] px-1.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300",
+            isConnected 
+              ? 'text-emerald-600 dark:text-emerald-400' 
+              : 'text-neutral-300 dark:text-zinc-600'
+          )}>
+            <span className={cn(
+              "w-1.5 h-1.5 rounded-full transition-all duration-300",
+              isConnected 
+                ? "bg-emerald-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" 
+                : "bg-neutral-300 dark:bg-zinc-600"
+            )} />
+            {isConnected ? 'Live' : 'Offline'}
           </span>
         </div>
 
-        {/* Messages area - clean, document-like */}
-        <div className="flex-1 overflow-y-auto scrollbar-on-hover">
-          <div className="max-w-2xl mx-auto px-6 py-4">
-            {/* Uploaded Images - Compact at top */}
+        {/* Messages area - modern chat feel */}
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto scrollbar-invisible pb-24">
+          <div className="max-w-xl mx-auto px-5 py-5">
+            {/* Uploaded Images - Elegant display */}
             {uploadedImages.length > 0 && (
-              <div className="pb-4 mb-4 border-b border-neutral-100 dark:border-zinc-800">
-                <div className="flex items-center gap-3">
-                  <span className="text-[11px] font-medium text-neutral-400 dark:text-zinc-500">Uploaded</span>
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="pb-4 mb-5"
+              >
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-neutral-50/80 dark:bg-zinc-900/50 border border-neutral-100 dark:border-zinc-800">
+                  <span className="text-[9px] font-medium text-neutral-400 dark:text-zinc-500 uppercase tracking-wider">Your space</span>
                   <div className="flex gap-2">
                     {uploadedImages.map((img, i) => (
-                      <div key={i} className="w-12 h-12 rounded-lg overflow-hidden bg-neutral-100 dark:bg-zinc-800">
+                      <motion.div 
+                        key={i} 
+                        initial={{ scale: 0.9, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ delay: i * 0.05 }}
+                        className="w-12 h-12 rounded-lg overflow-hidden bg-neutral-100 dark:bg-zinc-800 ring-1 ring-black/5 dark:ring-white/10 shadow-sm hover:ring-2 hover:ring-violet-500/30 transition-all cursor-pointer"
+                      >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={img} alt="" className="w-full h-full object-cover" />
-                      </div>
+                      </motion.div>
                     ))}
                   </div>
                 </div>
-              </div>
+              </motion.div>
             )}
 
-            {/* Chat messages - Clean conversation thread */}
-            <div className="divide-y divide-neutral-100 dark:divide-zinc-800/50">
+            {/* Chat messages - Modern conversation thread */}
+            <div className="space-y-4">
               {chatMessages.map((msg) => (
                 <ChatBubble key={msg.id} message={msg} index={0} />
               ))}
             </div>
 
-            {/* Thinking indicator - Simple and clean */}
+            {/* Thinking indicator - Elegant and clean */}
             <AnimatePresence>
               {currentThinking && !questions && (
                 <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="py-4 border-t border-neutral-100 dark:border-zinc-800/50"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -5 }}
+                  transition={{ duration: 0.3 }}
+                  className="pt-4"
                 >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[11px] font-medium text-neutral-400 dark:text-zinc-500">Continuity</span>
+                  <div className="rounded-2xl p-4 bg-gradient-to-br from-neutral-50 to-neutral-100/50 dark:from-zinc-900/80 dark:to-zinc-800/50 border border-neutral-100 dark:border-zinc-800">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <motion.div
+                        animate={{ scale: [1, 1.1, 1] }}
+                        transition={{ duration: 1.5, repeat: Infinity }}
+                        className="w-2 h-2 rounded-full bg-violet-500"
+                      />
+                      <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">Clarity</span>
+                    </div>
+                    <ThinkingIndicator 
+                      agent={currentThinking.agent} 
+                      action={currentThinking.action} 
+                    />
                   </div>
-                  <ThinkingIndicator 
-                    agent={currentThinking.agent} 
-                    action={currentThinking.action} 
-                  />
                 </motion.div>
               )}
             </AnimatePresence>
 
             {/* Questions - Clean, inline */}
             {questions && (
-              <div className="py-4 border-t border-neutral-100 dark:border-zinc-800/50 space-y-4">
+              <div className="pt-6 space-y-4">
                 {questions.questions.map((q) => (
                   <QuestionCard
                     key={q.question_id}
@@ -1934,26 +2345,55 @@ function SplitView({
                   />
                 ))}
                 
-                <button
+                <motion.button
                   onClick={onSubmitAnswers}
                   disabled={!allQuestionsAnswered || isLoading}
+                  whileHover={allQuestionsAnswered && !isLoading ? { scale: 1.01, y: -1 } : {}}
+                  whileTap={allQuestionsAnswered && !isLoading ? { scale: 0.99 } : {}}
                   className={cn(
-                    "w-full py-2.5 rounded-lg text-[13px] font-medium transition-colors",
+                    "w-full py-3 rounded-xl text-[13px] font-semibold transition-all duration-200",
                     allQuestionsAnswered && !isLoading
-                      ? "bg-neutral-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-neutral-800 dark:hover:bg-zinc-200"
+                      ? "bg-gradient-to-r from-neutral-900 to-neutral-800 dark:from-zinc-100 dark:to-zinc-200 text-white dark:text-zinc-900 shadow-lg shadow-neutral-900/25 dark:shadow-zinc-200/25 hover:shadow-xl hover:shadow-neutral-900/30 dark:hover:shadow-zinc-200/30"
                       : "bg-neutral-100 dark:bg-zinc-800 text-neutral-400 dark:text-zinc-500 cursor-not-allowed"
                   )}
                 >
-                  {isLoading ? "Processing..." : "Continue →"}
-                </button>
+                  {isLoading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <motion.span
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                      />
+                      Processing...
+                    </span>
+                  ) : (
+                    <span className="flex items-center justify-center gap-1">
+                      Continue
+                      <motion.span
+                        animate={{ x: [0, 3, 0] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                      >
+                        →
+                      </motion.span>
+                    </span>
+                  )}
+                </motion.button>
               </div>
             )}
 
             {/* Results - Clean completion state */}
-            {transformationComplete && generatedPhases.length > 0 && uploadedImages.length > 0 && (
-              <div className="py-4 border-t border-neutral-100 dark:border-zinc-800/50">
+            {/* Show results as soon as we have generated phases - not just on completion */}
+            {generatedPhases.length > 0 && uploadedImages.length > 0 && (
+              <div className="pt-6">
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">✓ Complete</span>
+                  {transformationComplete ? (
+                    <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">✓ Complete</span>
+                  ) : (
+                    <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                      In Progress - {generatedPhases.length} phase{generatedPhases.length !== 1 ? 's' : ''} generated
+                    </span>
+                  )}
                 </div>
                 <ResultsTimeline
                   originalImage={uploadedImages[0] || ""}
@@ -1966,25 +2406,39 @@ function SplitView({
               </div>
             )}
 
-            {/* Error - Simple text */}
+            {/* Error - Styled alert */}
             {error && (
-              <div className="py-4 border-t border-neutral-100 dark:border-zinc-800/50">
-                <p className="text-[13px] text-red-600 dark:text-red-400">{error}</p>
-              </div>
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="pt-4"
+              >
+                <div className="rounded-xl p-3 bg-red-50/80 dark:bg-red-950/30 border border-red-100 dark:border-red-900/30">
+                  <p className="text-[13px] text-red-600 dark:text-red-400">{error}</p>
+                </div>
+              </motion.div>
             )}
 
             <div ref={chatEndRef} className="h-4" />
           </div>
         </div>
 
-        {/* Input - Minimal */}
-        <div className="shrink-0 px-6 py-3 border-t border-white/30 dark:border-white/10 bg-white/60 dark:bg-zinc-950/70 backdrop-blur-xl shadow-[0_-6px_20px_rgba(0,0,0,0.08)]">
-          <PromptInputBox
-            onSend={onSend}
-            isLoading={isLoading}
-            placeholder="Ask a follow-up..."
-            compact
-          />
+        {/* Input - Truly floating with glassmorphism */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 pointer-events-none">
+          {/* Fade gradient behind input */}
+          <div className="absolute inset-0 bg-gradient-to-t from-white/90 via-white/60 to-transparent dark:from-zinc-950/95 dark:via-zinc-950/70 dark:to-transparent" />
+          
+          {/* Floating input card */}
+          <div className="relative pointer-events-auto">
+            <div className="glass-card rounded-2xl shadow-[0_-8px_30px_rgba(0,0,0,0.08),0_4px_20px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_-8px_30px_rgba(0,0,0,0.3),0_4px_20px_rgba(0,0,0,0.25),0_0_0_1px_rgba(255,255,255,0.05)]">
+              <PromptInputBox
+                onSend={onSend}
+                isLoading={isLoading}
+                placeholder="Ask a follow-up..."
+                compact
+              />
+            </div>
+          </div>
         </div>
       </motion.div>
 
@@ -2008,9 +2462,42 @@ function SplitView({
         {...slideInRight}
         transition={{ ...smoothTransition, delay: 0.15 }}
         style={{ width: `${100 - splitPosition}%` }}
-        className="flex-1 overflow-y-auto bg-gradient-to-br from-neutral-50/60 to-white/80 dark:from-zinc-900/60 dark:to-zinc-950/80 backdrop-blur-xl scrollbar-thin min-w-[300px]"
+        className="flex-1 flex flex-col overflow-hidden bg-gradient-to-br from-slate-50/80 via-white/60 to-slate-50/80 dark:from-zinc-900/80 dark:via-zinc-950/60 dark:to-zinc-900/80 backdrop-blur-2xl min-w-[300px]"
       >
-        <div className="p-5 space-y-5">
+        {/* Panel header */}
+        <div className="shrink-0 h-12 flex items-center justify-between px-5 border-b border-white/20 dark:border-white/5 bg-white/40 dark:bg-zinc-950/40 backdrop-blur-xl">
+          <span className="text-[13px] font-semibold text-neutral-700 dark:text-zinc-200">Activity Log</span>
+          <div className="flex items-center gap-2">
+            {/* Weave Trace Link - prominently visible */}
+            {weaveTraceUrl && (
+              <a
+                href={weaveTraceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] px-2 py-1 rounded-lg bg-gradient-to-r from-orange-500/10 to-amber-500/10 text-orange-600 dark:text-orange-400 font-medium hover:from-orange-500/20 hover:to-amber-500/20 transition-colors flex items-center gap-1"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                View in Weave
+              </a>
+            )}
+            {agentCards.length > 0 && (
+              <motion.span 
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="text-[9px] px-2 py-0.5 rounded-full bg-gradient-to-r from-violet-500/10 to-pink-500/10 text-violet-600 dark:text-violet-400 font-medium"
+              >
+                {agentCards.length} {agentCards.length === 1 ? 'event' : 'events'}
+              </motion.span>
+            )}
+          </div>
+        </div>
+        
+        {/* Scrollable content */}
+        <div ref={activityScrollRef} className="flex-1 overflow-y-auto scrollbar-invisible p-4 space-y-4">
           {/* Batch Demo Console */}
           {orchestrationStatus?.is_batch && (
             <motion.div
@@ -2071,15 +2558,6 @@ function SplitView({
             </motion.div>
           )}
 
-          {/* Progress Timeline - Clean header */}
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="p-4 rounded-xl bg-white/80 dark:bg-zinc-900/80 border border-white/50 dark:border-white/10 backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.08)]"
-          >
-            <ProgressTimeline currentStage={pipelineStage} />
-          </motion.div>
-
           {/* Self-Improvement Intelligence Panel - KEY FEATURE */}
           <AnimatePresence>
             {(selfImprovementRetries.length > 0 || reasoningSteps.length > 0) && (
@@ -2119,6 +2597,17 @@ function SplitView({
             )}
           </AnimatePresence>
 
+          {/* DETAILED GENERATION PROGRESS - Primary demo component */}
+          {/* Show when generation has started or is running */}
+          {(isGenerationRunning || generationPhaseProgress.some(p => p.status !== "pending")) && (
+            <GenerationProgress
+              phases={generationPhaseProgress}
+              currentPhaseIndex={currentGenerationPhaseIndex}
+              isRunning={isGenerationRunning}
+              onViewTrace={weaveTraceUrl ? () => window.open(weaveTraceUrl, "_blank") : undefined}
+            />
+          )}
+
           {/* Step Timeline - Comprehensive view of all steps */}
           {pipelineSteps.length > 0 && (
             <div className="p-4 rounded-xl bg-white/80 dark:bg-zinc-900/80 border border-white/50 dark:border-white/10 backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.08)]">
@@ -2150,50 +2639,51 @@ function SplitView({
             <EvaluationDetails evaluations={evaluationResults} />
           )}
 
-          {/* Agent Activity Section - Compact cards */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[13px] font-medium text-neutral-600 dark:text-zinc-400">Activity Log</span>
-              {agentCards.length > 0 && (
-                <span className="text-[10px] text-neutral-400 dark:text-zinc-500">
-                  {agentCards.length} events
-                </span>
-              )}
-            </div>
-
-            {/* Agent cards */}
-            <div className="space-y-2">
-              <AnimatePresence mode="popLayout">
-                {agentCards.map((card) => (
-                  <motion.div
-                    key={card.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <AgentWorkCard {...card} weaveTraceUrl={weaveTraceUrl || undefined} />
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-              
-              {/* Loading skeleton */}
-              {agentCards.length === 0 && isLoading && (
-                <div className="space-y-2">
-                  <AgentCardSkeleton />
-                  <AgentCardSkeleton />
-                </div>
-              )}
-              
-              {/* Empty state */}
-              {agentCards.length === 0 && !isLoading && pipelineSteps.length === 0 && (
-                <div className="text-center py-8">
-                  <p className="text-sm text-neutral-400 dark:text-zinc-500">Waiting for activity...</p>
-                </div>
-              )}
-              
-              <div ref={cardsEndRef} className="h-2" />
-            </div>
+          {/* Agent cards */}
+          <div className="space-y-3">
+            <AnimatePresence mode="popLayout">
+              {agentCards.map((card) => (
+                <motion.div
+                  key={card.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <AgentWorkCard {...card} weaveTraceUrl={weaveTraceUrl || undefined} />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+            
+            {/* Loading skeleton */}
+            {agentCards.length === 0 && isLoading && (
+              <div className="space-y-3">
+                <AgentCardSkeleton />
+                <AgentCardSkeleton />
+              </div>
+            )}
+            
+            {/* Empty state - Premium look */}
+            {agentCards.length === 0 && !isLoading && pipelineSteps.length === 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+                className="text-center py-16"
+              >
+                <motion.div 
+                  className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-100 to-pink-100 dark:from-violet-900/30 dark:to-pink-900/30 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-violet-500/10"
+                  animate={{ y: [0, -4, 0] }}
+                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                >
+                  <Zap className="w-7 h-7 text-violet-500 dark:text-violet-400" />
+                </motion.div>
+                <p className="text-sm font-medium text-neutral-600 dark:text-zinc-300">Ready to assist</p>
+                <p className="text-xs text-neutral-400 dark:text-zinc-500 mt-1.5 max-w-[200px] mx-auto">Upload an image and describe your vision to begin</p>
+              </motion.div>
+            )}
+            
+            <div ref={cardsEndRef} className="h-2" />
           </div>
         </div>
       </motion.div>
@@ -2201,61 +2691,84 @@ function SplitView({
   );
 }
 
-// Chat Bubble - Clean, minimal, Anthropic-inspired
+// Chat Bubble - Modern, clean with subtle containers
 function ChatBubble({ message, index }: { message: ChatMessage; index: number }) {
   const isUser = message.type === "user";
   const isAssistant = message.type === "assistant";
+  const isSystem = message.type === "system";
   const shouldStream = isAssistant && message.isNew;
+  const isInsight = message.content.includes("🔍") || message.content.includes("**");
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.2 }}
-      className="py-3"
+      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
     >
-      {/* Simple role label */}
-      <div className="flex items-center gap-2 mb-1.5">
-        {isUser ? (
-          <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">You</span>
-        ) : (
-          <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">Continuity</span>
-        )}
-        {message.timestamp && (
-          <span className="text-[10px] text-neutral-300 dark:text-zinc-600">{message.timestamp}</span>
-        )}
-      </div>
-      
-      {/* Message content - just text, no bubble */}
       <div className={cn(
-        "text-[14px] leading-[1.7] text-neutral-800 dark:text-zinc-200",
-        isUser && "text-neutral-600 dark:text-zinc-300"
+        "rounded-2xl p-4 transition-all duration-200",
+        isUser 
+          ? "bg-neutral-900 dark:bg-zinc-100 text-white dark:text-zinc-900 ml-8 shadow-lg shadow-neutral-900/10 dark:shadow-zinc-100/10"
+          : isInsight
+            ? "bg-gradient-to-br from-violet-50/80 to-pink-50/80 dark:from-violet-950/50 dark:to-pink-950/50 border border-violet-100/80 dark:border-violet-800/30 shadow-sm"
+            : isSystem
+              ? "bg-red-50/80 dark:bg-red-950/40 border border-red-100 dark:border-red-900/30 shadow-sm"
+              : "bg-white/70 dark:bg-zinc-900/70 border border-neutral-100 dark:border-zinc-800 shadow-sm"
       )}>
-        {shouldStream ? (
-          <StreamingChatMessage 
-            content={message.content}
-            isNew={true}
-            speed={40}
-          />
-        ) : (
-          <span className="whitespace-pre-wrap">{message.content}</span>
+        {/* Header row with role and subtle timestamp */}
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className={cn(
+            "text-[11px] font-medium",
+            isUser 
+              ? "text-white/70 dark:text-zinc-900/70" 
+              : isInsight
+                ? "text-violet-600/80 dark:text-violet-400/80"
+                : isSystem
+                  ? "text-red-600/80 dark:text-red-400/80"
+                  : "text-neutral-500 dark:text-zinc-400"
+          )}>
+            {isUser ? "You" : "Clarity"}
+          </span>
+          {message.timestamp && (
+            <span className="text-[9px] text-neutral-300 dark:text-zinc-600">
+              {message.timestamp}
+            </span>
+          )}
+        </div>
+        
+        {/* Message content */}
+        <div className={cn(
+          "text-[14px] leading-relaxed whitespace-pre-wrap",
+          isUser 
+            ? "text-white/90 dark:text-zinc-900/90" 
+            : "text-neutral-700 dark:text-zinc-200"
+        )}>
+          {shouldStream ? (
+            <StreamingChatMessage 
+              content={message.content}
+              isNew={true}
+              speed={50}
+            />
+          ) : (
+            parseMarkdown(message.content)
+          )}
+        </div>
+        
+        {/* Images - clean thumbnails */}
+        {message.images && message.images.length > 0 && (
+          <div className="mt-3 flex gap-2">
+            {message.images.map((img, i) => (
+              <div
+                key={i}
+                className="w-16 h-16 rounded-xl overflow-hidden bg-neutral-100 dark:bg-zinc-800 ring-1 ring-black/5 dark:ring-white/10"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={img} alt="" className="w-full h-full object-cover" />
+              </div>
+            ))}
+          </div>
         )}
       </div>
-      
-      {/* Images - clean thumbnails */}
-      {message.images && message.images.length > 0 && (
-        <div className="mt-3 flex gap-2">
-          {message.images.map((img, i) => (
-            <div
-              key={i}
-              className="w-16 h-16 rounded-lg overflow-hidden bg-neutral-100 dark:bg-zinc-800"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={img} alt="" className="w-full h-full object-cover" />
-            </div>
-          ))}
-        </div>
-      )}
     </motion.div>
   );
 }

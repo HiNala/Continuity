@@ -3,6 +3,46 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 
 // ============================================
+// Markdown Parser - Renders bold text and other formatting
+// ============================================
+function parseMarkdown(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let remaining = text;
+  let key = 0;
+
+  // Pattern for **bold** text
+  const boldPattern = /\*\*([^*]+)\*\*/;
+  
+  while (remaining) {
+    const match = remaining.match(boldPattern);
+    
+    if (match && match.index !== undefined) {
+      // Add text before the match
+      if (match.index > 0) {
+        parts.push(<span key={key++}>{remaining.slice(0, match.index)}</span>);
+      }
+      // Add the bold text
+      parts.push(
+        <strong key={key++} className="font-semibold text-neutral-900 dark:text-zinc-100">
+          {match[1]}
+        </strong>
+      );
+      // Continue with the rest
+      remaining = remaining.slice(match.index + match[0].length);
+    } else {
+      // No more matches, add the rest
+      parts.push(<span key={key++}>{remaining}</span>);
+      break;
+    }
+  }
+  
+  return parts;
+}
+
+// Export for use in other components
+export { parseMarkdown };
+
+// ============================================
 // Streaming Text Hook - Core functionality
 // ============================================
 interface UseStreamingTextOptions {
@@ -106,9 +146,9 @@ export function StreamingChatMessage({
 
   return (
     <span className={className}>
-      {textToShow}
+      {parseMarkdown(textToShow)}
       {isNew && isStreaming && (
-        <span className="inline-block w-[3px] h-[1.1em] bg-neutral-400 dark:bg-zinc-500 ml-0.5 align-text-bottom animate-pulse" />
+        <span className="inline-block w-[3px] h-[1.1em] bg-primary/60 dark:bg-primary/70 ml-0.5 align-text-bottom animate-pulse rounded-sm" />
       )}
     </span>
   );
@@ -182,11 +222,11 @@ export function ThinkingIndicator({
   };
 
   return (
-    <div className={`text-[13px] text-neutral-500 dark:text-zinc-400 ${className}`}>
+    <div className={`text-[13px] text-neutral-600 dark:text-zinc-300 ${className}`}>
       {agent ? (
-        <span>
-          <span className="text-neutral-600 dark:text-zinc-300">{agent}</span>
-          {" "}is {getVerb().toLowerCase()}
+        <span className="flex items-center gap-1">
+          <span className="font-medium">{agent}</span>
+          <span className="text-neutral-400 dark:text-zinc-500">is {getVerb().toLowerCase()}</span>
           <span className="inline-block w-6 text-left">{dots}</span>
         </span>
       ) : (

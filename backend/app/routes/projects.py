@@ -17,6 +17,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload
 
 from app.database import get_async_session
+from app.config import settings
 from app.models import (
     Project, Requirements, ProjectStatus, Constraint, ProjectAnalysis,
     Iteration, EvaluationDetail, OrchestrationLog,
@@ -1666,8 +1667,23 @@ async def generate_orchestration_stream(
     # Check if this is a batch project
     is_batch = project.is_batch and project.total_scenes > 1
     
+    # Build Weave trace URL for frontend display
+    weave_url = None
+    if settings.wandb_api_key and settings.weave_project_name:
+        if "/" in settings.weave_project_name:
+            project_path = settings.weave_project_name
+        elif settings.wandb_entity:
+            project_path = f"{settings.wandb_entity}/{settings.weave_project_name}"
+        else:
+            project_path = settings.weave_project_name
+        weave_url = f"https://wandb.ai/{project_path}/weave"
+    
     # Send initial state
-    initial_details = {"state": project.orchestration_state, "phase": project.current_phase}
+    initial_details = {
+        "state": project.orchestration_state, 
+        "phase": project.current_phase,
+        "weave_trace_url": weave_url,  # Include weave URL in initial event
+    }
     if is_batch:
         initial_details["is_batch"] = True
         initial_details["total_scenes"] = project.total_scenes
@@ -1681,6 +1697,83 @@ async def generate_orchestration_stream(
         "details": initial_details,
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
+    
+    # IMPORTANT: If project is already in terminal state, replay all historical logs
+    # This ensures frontend sees the full progress history even if it connected late
+    terminal_check_states = {
+        OrchestrationState.COMPLETED,
+        OrchestrationState.COMPLETED_WITH_WARNINGS,
+        OrchestrationState.FAILED,
+    }
+    
+    if project.orchestration_state in terminal_check_states:
+        # Replay all historical log entries
+        history_result = await session.execute(
+            select(OrchestrationLog)
+            .where(OrchestrationLog.project_id == project_id)
+            .order_by(OrchestrationLog.created_at)
+        )
+        historical_logs = history_result.scalars().all()
+        
+        for log in historical_logs:
+            agent = "orchestrator"
+            action = "thinking"
+            
+            if "requirements" in log.to_state or "clarification" in log.to_state:
+                agent = "requirements"
+                action = "analyzing" if "gathering" in log.to_state else "question"
+            elif "analyzing_space" in log.to_state:
+                agent = "spatial"
+                action = "analyzing"
+            elif "generating" in log.to_state:
+                agent = "generation"
+                phase = log.to_state.replace("generating_", "")
+                action = f"generating_{phase}"
+            elif "evaluating" in log.to_state:
+                agent = "qc"
+                action = "evaluating"
+            elif "retrying" in log.to_state:
+                agent = "qc"
+                action = "policy_update"
+            elif log.to_state in ["completed", "completed_with_warnings"]:
+                agent = "orchestrator"
+                action = "success"
+            elif log.to_state == "failed":
+                agent = "orchestrator"
+                action = "error"
+            
+            event_details = {
+                "from_state": log.from_state,
+                "to_state": log.to_state,
+                "trigger": log.trigger,
+                "duration_ms": log.duration_ms,
+                **log.details
+            }
+            
+            yield format_sse("agent", {
+                "event": "agent",
+                "agent": agent,
+                "action": action,
+                "message": log.details.get("message", f"Transition: {log.from_state} → {log.to_state}"),
+                "details": event_details,
+                "timestamp": log.created_at.isoformat()
+            })
+        
+        # Send complete event for terminal state
+        final_event_type = "complete" if project.orchestration_state != OrchestrationState.FAILED else "error"
+        yield format_sse(final_event_type, {
+            "event": final_event_type,
+            "agent": "orchestrator",
+            "action": "complete" if final_event_type == "complete" else "error",
+            "message": f"Orchestration {project.orchestration_state}",
+            "details": {
+                "state": project.orchestration_state,
+                "has_warnings": project.has_warnings,
+                "warning_details": project.warning_details,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        return  # Exit - no need to poll for completed project
     
     # For batch projects, track scene progress
     last_scene_status = {} if is_batch else None

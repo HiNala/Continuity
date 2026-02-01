@@ -92,6 +92,8 @@
     font-feature-settings: "rlig" 1, "calt" 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+    overflow-x: hidden;
   }
   
   ::selection {
@@ -119,13 +121,7 @@
   }
 }
 
-/* Welcome screen fit for short viewports */
-.welcome-fit {
-  --welcome-scale: clamp(0.84, calc(100vh / 920), 1);
-  transform: scale(var(--welcome-scale));
-  transform-origin: center;
-  will-change: transform;
-}
+/* Welcome screen - removed scaling, allow natural flow */
 
 /* Custom scrollbar - refined with dark mode support */
 ::-webkit-scrollbar {
@@ -158,13 +154,45 @@
   background-clip: padding-box;
 }
 
-/* Hide scrollbar until hover */
+/* Invisible scrollbar - only shows on hover */
+.scrollbar-invisible {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-invisible::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+.scrollbar-invisible::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.scrollbar-invisible:hover::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+}
+
+.scrollbar-invisible:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* Legacy - Hide scrollbar until hover */
 .scrollbar-on-hover {
   scrollbar-width: thin;
 }
 
+.scrollbar-on-hover::-webkit-scrollbar {
+  width: 6px;
+}
+
 .scrollbar-on-hover::-webkit-scrollbar-thumb {
   background: transparent;
+  border-radius: 3px;
+  transition: background 0.2s ease;
 }
 
 .scrollbar-on-hover:hover::-webkit-scrollbar-thumb {
@@ -281,9 +309,14 @@
 /* Glass morphism - dark mode aware */
 .glass {
   background: var(--glass-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(22px) saturate(155%);
+  -webkit-backdrop-filter: blur(22px) saturate(155%);
   border: 1px solid var(--glass-border);
+  box-shadow:
+    0 24px 64px rgba(15, 23, 42, 0.14),
+    0 10px 28px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .glass-subtle {
@@ -295,15 +328,25 @@
 
 .glass-strong {
   background: var(--glass-bg);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(28px) saturate(170%);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
   border: 1px solid var(--glass-border);
+  box-shadow:
+    0 32px 80px rgba(15, 23, 42, 0.16),
+    0 14px 36px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.14);
 }
 
 /* Dark mode specific glass */
 .dark .glass {
   background: rgba(24, 24, 27, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.55),
+    0 10px 28px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3);
 }
 
 .dark .glass-subtle {
@@ -314,6 +357,56 @@
 .dark .glass-strong {
   background: rgba(24, 24, 27, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 32px 84px rgba(0, 0, 0, 0.6),
+    0 14px 36px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+}
+
+/* Elevated glass cards */
+.glass-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.45));
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow:
+    0 30px 72px rgba(15, 23, 42, 0.16),
+    0 12px 28px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px) saturate(165%);
+  -webkit-backdrop-filter: blur(24px) saturate(165%);
+}
+
+.glass-card-strong {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.5));
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow:
+    0 38px 96px rgba(15, 23, 42, 0.2),
+    0 18px 40px rgba(15, 23, 42, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+}
+
+.dark .glass-card {
+  background: linear-gradient(135deg, rgba(24, 24, 27, 0.85), rgba(9, 9, 11, 0.75));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 30px 78px rgba(0, 0, 0, 0.6),
+    0 12px 30px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+}
+
+.dark .glass-card-strong {
+  background: linear-gradient(135deg, rgba(24, 24, 27, 0.95), rgba(9, 9, 11, 0.82));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 40px 110px rgba(0, 0, 0, 0.7),
+    0 18px 42px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.45);
 }
 
 /* Gradient utilities */

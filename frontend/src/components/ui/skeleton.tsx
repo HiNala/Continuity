@@ -24,13 +24,13 @@ export function Skeleton({ className }: SkeletonProps) {
   );
 }
 
-// Agent card skeleton - enhanced
+// Agent card skeleton - enhanced with glassmorphism
 export function AgentCardSkeleton() {
   return (
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-xl border border-neutral-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 backdrop-blur-sm p-4 space-y-3 border-l-[3px] border-l-neutral-200 dark:border-l-zinc-700 shadow-sm"
+      className="rounded-xl border border-white/50 dark:border-white/10 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl p-4 space-y-3 border-l-[3px] border-l-neutral-200 dark:border-l-zinc-700 shadow-[0_6px_18px_rgba(0,0,0,0.08)]"
     >
       <div className="flex items-start gap-3">
         <Skeleton className="w-8 h-8 rounded-lg" />
@@ -41,11 +41,11 @@ export function AgentCardSkeleton() {
           </div>
           <Skeleton className="h-4 w-36 rounded" />
         </div>
-        <Skeleton className="h-5 w-18 rounded-full" />
+        <Skeleton className="h-5 w-16 rounded-full" />
       </div>
       <div className="space-y-1.5">
         <Skeleton className="h-3 w-full rounded" />
-        <Skeleton className="h-3 w-4/5 rounded" />
+        <Skeleton className="h-3 w-3/4 rounded" />
       </div>
     </motion.div>
   );

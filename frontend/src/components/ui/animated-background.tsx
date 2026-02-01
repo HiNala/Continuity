@@ -16,9 +16,9 @@ export function AnimatedBackground({
 }: AnimatedBackgroundProps) {
   // Simplified configuration - cleaner, more subtle
   const config = useMemo(() => ({
-    subtle: { blur: 90, duration: 25, size: 300, opacity: 0.32 },
-    normal: { blur: 100, duration: 20, size: 360, opacity: 0.42 },
-    intense: { blur: 110, duration: 12, size: 420, opacity: 0.52 },
+    subtle: { blur: 80, duration: 36, size: 340, opacity: 0.45 },
+    normal: { blur: 90, duration: 28, size: 400, opacity: 0.55 },
+    intense: { blur: 100, duration: 18, size: 460, opacity: 0.65 },
   }), []);
   
   const { blur, duration: baseDuration, size, opacity: baseOpacity } = config[intensity];
@@ -34,6 +34,13 @@ export function AnimatedBackground({
     <div className="fixed inset-0 overflow-hidden pointer-events-none">
       {/* Clean gradient base - Light mode */}
       <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-white to-slate-50 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950" />
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle at 18% 22%, rgba(236, 72, 153, 0.18), transparent 55%), radial-gradient(circle at 82% 30%, rgba(34, 211, 238, 0.16), transparent 55%), radial-gradient(circle at 50% 82%, rgba(168, 85, 247, 0.14), transparent 60%)",
+        }}
+      />
       
       {/* Primary Pink Orb - simplified movement */}
       <motion.div
@@ -123,9 +130,9 @@ export function AnimatedBackground({
 
       {/* Frosted overlay - adapts to dark mode */}
       <div 
-        className="absolute inset-0 bg-white/20 dark:bg-zinc-900/40"
+        className="absolute inset-0 bg-white/12 dark:bg-zinc-900/35"
         style={{
-          backdropFilter: "blur(96px)",
+          backdropFilter: "blur(64px)",
         }}
       />
     </div>

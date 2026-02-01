@@ -1,8 +1,8 @@
-# Continuity
+# Clarity
 
 <div align="center">
 
-![Continuity Banner](https://img.shields.io/badge/WeaveHacks_3-Self--Improving_Agents-00a8ff?style=for-the-badge)
+![Clarity Banner](https://img.shields.io/badge/WeaveHacks_3-Self--Improving_Agents-00a8ff?style=for-the-badge)
 
 **Transform raw photographs into realistic, professionally staged renovation visualizations**
 
@@ -17,9 +17,9 @@
 
 ---
 
-## 🎯 What is Continuity?
+## 🎯 What is Clarity?
 
-Continuity is an intelligent agent system that transforms raw photographs of unfinished or existing spaces into realistic, professionally staged renovation visualizations. It is designed for **any interior or commercial environment** (kitchens, offices, retail, hospitality, clinics, and more). Unlike single-shot image generation tools that produce inconsistent or physically impossible results, Continuity uses a **multi-agent architecture** that:
+Clarity is an intelligent agent system that transforms raw photographs of unfinished or existing spaces into realistic, professionally staged renovation visualizations. It is designed for **any interior or commercial environment** (kitchens, offices, retail, hospitality, clinics, and more). Unlike single-shot image generation tools that produce inconsistent or physically impossible results, Clarity uses a **multi-agent architecture** that:
 
 - **Understands spatial constraints** — Plumbing, HVAC, electrical, and structural elements are identified and preserved
 - **Respects immovable fixtures** — Sinks, appliances, built-ins, and utilities remain anchored to real-world constraints
@@ -34,7 +34,7 @@ Current AI image generation tools fail at architectural visualization because th
 - 🚫 Room dimensions change unexpectedly
 - 🚫 Construction debris bleeds through into "finished" outputs
 
-**Continuity fixes this** by using a phased, constraint-aware approach with self-improvement through Weave traces.
+**Clarity fixes this** by using a phased, constraint-aware approach with self-improvement through Weave traces.
 
 ---
 
@@ -339,7 +339,7 @@ curl http://localhost:8000/db-test
 ```bash
 curl -X POST http://localhost:8000/weave-test \
   -H "Content-Type: application/json" \
-  -d '{"input_text": "Hello Continuity!"}'
+  -d '{"input_text": "Hello Clarity!"}'
 ```
 
 After this call, check your [Weave Dashboard](https://wandb.ai/home) to see the trace!
@@ -391,7 +391,7 @@ After this call, check your [Weave Dashboard](https://wandb.ai/home) to see the 
 
 ## 📸 Batch Processing for Virtual Staging
 
-Continuity supports processing entire photoshoots with consistent style across all images, with **cross-scene and cross-project learning**:
+Clarity supports processing entire photoshoots with consistent style across all images, with **cross-scene and cross-project learning**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -713,7 +713,7 @@ Redis is used for performance-critical caching and session management:
 
 ### Google Gemini (Nano Banana Pro) — Vision & Generation
 
-Continuity uses Google Gemini's cutting-edge models for both image analysis and generation:
+Clarity uses Google Gemini's cutting-edge models for both image analysis and generation:
 
 **Vision Analysis (Spatial Agent):**
 - Model: `gemini-2.0-flash` (configurable via `GEMINI_VISION_MODEL`)
@@ -722,7 +722,7 @@ Continuity uses Google Gemini's cutting-edge models for both image analysis and 
 - Results cached in Redis to avoid redundant API calls
 
 **Image Generation (Generation Agent):**
-- Model: `gemini-3-pro-image-preview` (Nano Banana Pro)
+- Model: `gemini-2.0-flash-exp-image-generation` (Gemini 2.0 Flash with image generation)
 - Configuration follows latest API spec:
   ```python
   generationConfig = {
@@ -877,7 +877,7 @@ STAGEHAND_MODEL_API_KEY=sk-...  # OpenAI or Anthropic API key
 - **extract()** — Extract structured data from pages
 - **observe()** — Find interactive elements on a page
 
-Combined with Browserbase's cloud browser infrastructure, Stagehand enables Continuity to intelligently navigate design websites and extract inspiration images without hardcoded selectors.
+Combined with Browserbase's cloud browser infrastructure, Stagehand enables Clarity to intelligently navigate design websites and extract inspiration images without hardcoded selectors.
 
 ---
 

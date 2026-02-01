@@ -979,6 +979,30 @@ class Orchestrator:
         state = self.project.orchestration_state
         phase = self._get_phase_from_state(state)
         
+        # Human-readable phase descriptions for frontend display
+        phase_descriptions = {
+            "cleanup": {
+                "name": "Cleanup",
+                "description": "Removing debris and normalizing the space",
+                "index": 1,
+            },
+            "structural": {
+                "name": "Structural Completion", 
+                "description": "Completing walls, ceiling, and flooring",
+                "index": 2,
+            },
+            "fixture": {
+                "name": "Fixture Placement",
+                "description": "Placing fixtures according to spatial constraints",
+                "index": 3,
+            },
+            "style": {
+                "name": "Style Application",
+                "description": "Applying final aesthetic styling",
+                "index": 4,
+            },
+        }
+        
         if not phase:
             await self.transition(
                 OrchestrationState.FAILED,
@@ -988,6 +1012,7 @@ class Orchestrator:
             return
         
         self.project.current_phase = phase
+        phase_info = phase_descriptions.get(phase, {"name": phase, "description": "", "index": 0})
         
         try:
             # Determine input image
@@ -998,7 +1023,8 @@ class Orchestrator:
             constraints, _ = await generation_agent.load_constraints(self.session, self.project_id)
             policy = await generation_agent.load_policy(self.session, self.project_id)
             
-            # Execute phase
+            # Execute phase with enhanced messaging
+            start_time = time.time()
             if phase == GenerationPhase.CLEANUP:
                 result = await generation_agent.execute_cleanup_phase(
                     self.session, self.project_id, input_image, policy, constraints
@@ -1019,16 +1045,29 @@ class Orchestrator:
                     requirements, styles[0]
                 )
             
-            # Store output for next phase
-            if result.get("output_path"):
-                self._current_input_image = result["output_path"]
+            generation_time_ms = int((time.time() - start_time) * 1000)
             
-            # Move to evaluation
+            # Store output for next phase
+            output_path = result.get("output_path")
+            if output_path:
+                self._current_input_image = output_path
+            
+            # Move to evaluation - include detailed info for frontend demo display
             eval_state = f"evaluating_{phase}"
             await self.transition(
                 eval_state,
                 OrchestrationTrigger.SUCCESS,
-                {"iteration_id": result.get("iteration_id")}
+                {
+                    "iteration_id": result.get("iteration_id"),
+                    "output_path": output_path,
+                    "phase": phase,
+                    "phase_name": phase_info["name"],
+                    "phase_index": phase_info["index"],
+                    "total_phases": 4,
+                    "generation_time_ms": generation_time_ms,
+                    "constraints_count": len(constraints) if constraints else 0,
+                    "message": f"Phase {phase_info['index']} of 4 ({phase_info['name']}) - Generation complete in {generation_time_ms}ms",
+                }
             )
             
         except Exception as e:
@@ -1061,18 +1100,48 @@ class Orchestrator:
                 return
             
             # Run evaluation
+            eval_start = time.time()
             eval_result = await qc_agent.compute_overall_evaluation(
                 self.session, iteration.id
             )
+            eval_time_ms = int((time.time() - eval_start) * 1000)
+            
+            # Include output path for frontend display
+            output_path = iteration.output_image_path
+            eval_score = eval_result.get("overall_score", 0)
+            criteria_results = eval_result.get("criteria", [])
+            
+            # Build detailed evaluation feedback for frontend
+            passed_criteria = sum(1 for c in criteria_results if c.get("passed", False))
+            total_criteria = len(criteria_results)
             
             if eval_result.get("passed"):
                 # Passed - move to next phase or complete
-                await self._advance_to_next_phase(phase)
+                # Store the output path and score for the advance transition
+                self._last_eval_output = output_path
+                self._last_eval_score = eval_score
+                await self._advance_to_next_phase(
+                    phase, 
+                    output_path=output_path, 
+                    eval_score=eval_score,
+                    eval_time_ms=eval_time_ms,
+                    passed_criteria=passed_criteria,
+                    total_criteria=total_criteria
+                )
             else:
                 # Failed - retry or move on
+                failed_criteria = [c.get("criterion", "unknown") for c in criteria_results if not c.get("passed", True)]
                 await self._handle_evaluation_failure(phase, {
-                    "score": eval_result.get("overall_score"),
+                    "score": eval_score,
                     "iteration_id": str(iteration.id),
+                    "output_path": output_path,
+                    "evaluation_passed": False,
+                    "eval_time_ms": eval_time_ms,
+                    "passed_criteria": passed_criteria,
+                    "total_criteria": total_criteria,
+                    "failed_criteria": failed_criteria,
+                    "failure_reasons": failed_criteria,
+                    "message": f"Quality check failed ({passed_criteria}/{total_criteria} criteria passed, score: {eval_score:.2%})",
                 })
                 
         except Exception as e:
@@ -1155,21 +1224,50 @@ class Orchestrator:
             details
         )
     
-    async def _advance_to_next_phase(self, current_phase: str, max_retries: bool = False) -> None:
+    async def _advance_to_next_phase(
+        self, 
+        current_phase: str, 
+        max_retries: bool = False,
+        output_path: Optional[str] = None,
+        eval_score: Optional[float] = None,
+        eval_time_ms: Optional[int] = None,
+        passed_criteria: Optional[int] = None,
+        total_criteria: Optional[int] = None
+    ) -> None:
         """Advance to the next phase or complete."""
         next_phase = NEXT_PHASE.get(current_phase)
+        
+        # Phase indices for frontend display
+        phase_indices = {"cleanup": 1, "structural": 2, "fixture": 3, "style": 4}
+        current_idx = phase_indices.get(current_phase, 0)
         
         # Reset retry count for new phase
         self.project.retry_count = 0
         
+        score_str = f"{eval_score:.2f}" if eval_score else "N/A"
+        criteria_str = f"{passed_criteria}/{total_criteria}" if passed_criteria is not None else ""
+        
         if next_phase:
+            next_idx = phase_indices.get(next_phase, current_idx + 1)
             # Move to next phase
             gen_state = f"generating_{next_phase}"
             trigger = OrchestrationTrigger.MAX_RETRIES if max_retries else OrchestrationTrigger.SUCCESS
             await self.transition(
                 gen_state,
                 trigger,
-                {"from_phase": current_phase, "to_phase": next_phase}
+                {
+                    "from_phase": current_phase, 
+                    "to_phase": next_phase,
+                    "output_path": output_path,
+                    "evaluation_passed": True,
+                    "score": eval_score,
+                    "eval_time_ms": eval_time_ms,
+                    "passed_criteria": passed_criteria,
+                    "total_criteria": total_criteria,
+                    "phase_index": next_idx,
+                    "total_phases": 4,
+                    "message": f"✓ Phase {current_idx}/4 ({current_phase}) passed QC ({criteria_str}, score: {score_str}). Starting phase {next_idx}/4 ({next_phase})...",
+                }
             )
         else:
             # All phases complete
@@ -1177,13 +1275,25 @@ class Orchestrator:
                 await self.transition(
                     OrchestrationState.COMPLETED_WITH_WARNINGS,
                     OrchestrationTrigger.SUCCESS,
-                    {"message": "All phases complete with some warnings"}
+                    {
+                        "message": f"✓ All 4 phases complete with warnings. Final score: {score_str}",
+                        "final_output_path": output_path,
+                        "final_score": eval_score,
+                        "total_phases": 4,
+                        "completed_phases": 4,
+                    }
                 )
             else:
                 await self.transition(
                     OrchestrationState.COMPLETED,
                     OrchestrationTrigger.SUCCESS,
-                    {"message": "All phases complete successfully"}
+                    {
+                        "message": f"✓ All 4 phases complete successfully! Final score: {score_str}",
+                        "final_output_path": output_path,
+                        "final_score": eval_score,
+                        "total_phases": 4,
+                        "completed_phases": 4,
+                    }
                 )
     
     # ==========================================

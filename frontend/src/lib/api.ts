@@ -1,5 +1,5 @@
 /**
- * Continuity - API Client
+ * Clarity - API Client
  * Handles all communication with the backend.
  */
 

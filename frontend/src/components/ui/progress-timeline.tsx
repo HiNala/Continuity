@@ -151,28 +151,48 @@ export function ProgressTimeline({ currentStage, className = "" }: ProgressTimel
 interface CompactTimelineProps {
   currentStage: PipelineStage;
   className?: string;
+  subPhase?: string; // Optional sub-phase like "cleanup", "structural", etc.
 }
 
-export function CompactTimeline({ currentStage, className = "" }: CompactTimelineProps) {
+export function CompactTimeline({ currentStage, className = "", subPhase }: CompactTimelineProps) {
   const stageIndex = stages.findIndex(s => s.id === currentStage);
   const progress = ((stageIndex + 1) / stages.length) * 100;
   
+  // Get current stage label
+  const currentLabel = stages[stageIndex]?.label || "Starting";
+  
   return (
     <div className={cn("flex items-center gap-2", className)}>
-      {/* Progress bar */}
-      <div className="flex-1 h-1 bg-neutral-200 dark:bg-zinc-700 rounded-full overflow-hidden">
+      {/* Progress bar with animated pulse when active */}
+      <div className="flex-1 h-1.5 bg-neutral-200 dark:bg-zinc-700 rounded-full overflow-hidden relative">
         <motion.div
           className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
           initial={{ width: 0 }}
           animate={{ width: `${progress}%` }}
           transition={{ duration: 0.5, ease: "easeInOut" }}
         />
+        {/* Animated pulse at the leading edge when not complete */}
+        {currentStage !== "complete" && (
+          <motion.div
+            className="absolute top-0 bottom-0 w-2 bg-white/50 rounded-full"
+            style={{ left: `calc(${progress}% - 4px)` }}
+            animate={{ opacity: [0.3, 0.8, 0.3] }}
+            transition={{ duration: 1.5, repeat: Infinity }}
+          />
+        )}
       </div>
       
-      {/* Stage indicator */}
-      <span className="text-[10px] font-medium text-neutral-500 dark:text-zinc-400 whitespace-nowrap">
-        {stageIndex + 1}/{stages.length}
-      </span>
+      {/* Stage indicator with label */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-semibold text-neutral-600 dark:text-zinc-300 whitespace-nowrap">
+          {stageIndex + 1}/{stages.length}
+        </span>
+        {currentStage !== "complete" && (
+          <span className="text-[9px] text-neutral-400 dark:text-zinc-500 whitespace-nowrap max-w-[60px] truncate">
+            {subPhase || currentLabel}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
