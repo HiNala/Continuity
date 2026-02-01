@@ -441,20 +441,29 @@ class GenerationAgent:
                     output_path = str(self.output_dir / f"gen_{int(time.time())}.{ext}")
                     with open(output_path, "wb") as f:
                         f.write(image_bytes)
-                    
-                    # Log the generated image to Weave for visualization
-                    log_image_media(
-                        output_path,
-                        description=f"Generated image from {self.gemini_model}",
-                        metadata={
-                            "model": self.gemini_model,
-                            "latency_ms": latency_ms,
-                            "aspect_ratio": self.image_aspect_ratio,
-                            "size": self.image_size,
-                        }
-                    )
+
+                    try:
+                        log_image_media(
+                            output_path,
+                            description=f"Generated image from {self.gemini_model}",
+                            metadata={
+                                "model": self.gemini_model,
+                                "latency_ms": latency_ms,
+                                "aspect_ratio": self.image_aspect_ratio,
+                                "size": self.image_size,
+                            }
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     output_path = None
+            else:
+                return {
+                    "success": False,
+                    "error": "No image data returned by Gemini",
+                    "latency_ms": latency_ms,
+                    "model": self.gemini_model,
+                }
 
             return {
                 "success": True,

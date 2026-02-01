@@ -67,21 +67,28 @@ async def test_weave_api() -> APITestResult:
     try:
         # Test by calling W&B API to get user info
         async with httpx.AsyncClient() as client:
-            response = await client.get(
+            response = await client.post(
                 "https://api.wandb.ai/graphql",
                 headers={
-                    "Authorization": f"Basic {settings.wandb_api_key}",
+                    "Authorization": f"Basic api:{settings.wandb_api_key}",
                     "Content-Type": "application/json",
                 },
-                json={"query": "{ viewer { username } }"},
+                json={"query": "{ viewer { username entity } }"},
                 timeout=10.0,
             )
             
             if response.status_code == 200:
                 data = response.json()
-                username = data.get("data", {}).get("viewer", {}).get("username", "unknown")
+                if data and "data" in data and data["data"]:
+                    viewer = data["data"].get("viewer") or {}
+                    username = viewer.get("username", "unknown")
+                    entity = viewer.get("entity") or settings.wandb_entity
+                else:
+                    # API returned 200 but no viewer data - might be partial auth
+                    username = "authenticated"
+                    entity = settings.wandb_entity
+                
                 project = settings.weave_project_name
-                entity = settings.wandb_entity
                 return APITestResult(
                     service=service,
                     success=True,
@@ -91,7 +98,15 @@ async def test_weave_api() -> APITestResult:
                         "username": username,
                         "project": project,
                         "entity": entity,
+                        "weave_url": f"https://wandb.ai/{entity or 'default'}/{project}/weave",
                     },
+                )
+            elif response.status_code == 401:
+                return APITestResult(
+                    service=service,
+                    success=False,
+                    message="Invalid or expired API key",
+                    timestamp=timestamp,
                 )
             else:
                 return APITestResult(

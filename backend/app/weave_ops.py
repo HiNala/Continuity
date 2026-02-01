@@ -22,9 +22,10 @@ appear in trace results for review.
 import base64
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Annotated
 
 import weave
+from weave import Content
 
 
 # ============================================
@@ -32,68 +33,24 @@ import weave
 # ============================================
 @weave.op(name="weave_log_image")
 def log_image_media(
-    image_path: str,
+    image_path: Annotated[str, Content],
     description: str = "Generated image",
     metadata: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+) -> Annotated[bytes, Content]:
     """
     Log an image to Weave for visualization in the trace UI.
-    
-    According to Weave documentation, images logged through traced
-    operations will appear in the Weave UI for review.
-    
-    Args:
-        image_path: Path to the image file or data URL
-        description: Description of the image
-        metadata: Additional metadata to attach
-        
-    Returns:
-        Dict containing image info and base64 data for Weave
     """
-    result = {
-        "description": description,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "metadata": metadata or {},
-    }
-    
-    try:
-        if image_path.startswith("data:"):
-            # Already a data URL - extract base64
-            header, encoded = image_path.split(",", 1)
-            mime_type = "image/jpeg"
-            if ";base64" in header:
-                mime_type = header[5:].split(";")[0] or mime_type
-            result["mime_type"] = mime_type
-            result["image_data"] = encoded[:100] + "..." if len(encoded) > 100 else encoded  # Truncate for log
-            result["logged"] = True
-        elif Path(image_path).exists():
-            # Local file - read and encode
-            with open(image_path, "rb") as f:
-                image_bytes = f.read()
-            
-            suffix = Path(image_path).suffix.lower()
-            mime_type = {
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".png": "image/png",
-                ".webp": "image/webp",
-            }.get(suffix, "image/jpeg")
-            
-            # Encode for logging (Weave will capture this)
-            encoded = base64.standard_b64encode(image_bytes).decode("utf-8")
-            result["mime_type"] = mime_type
-            result["file_path"] = image_path
-            result["file_size_bytes"] = len(image_bytes)
-            result["logged"] = True
-        else:
-            result["error"] = f"Image not found: {image_path}"
-            result["logged"] = False
-            
-    except Exception as e:
-        result["error"] = str(e)
-        result["logged"] = False
-    
-    return result
+    _ = description
+    _ = metadata
+    if image_path.startswith("data:"):
+        _, encoded = image_path.split(",", 1)
+        if not encoded:
+            raise ValueError("Empty data URL")
+        return base64.b64decode(encoded)
+    if Path(image_path).exists():
+        with open(image_path, "rb") as f:
+            return f.read()
+    raise FileNotFoundError(f"Image not found: {image_path}")
 
 
 # ============================================
