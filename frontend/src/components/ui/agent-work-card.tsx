@@ -150,6 +150,11 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
   const ActionIcon = actionInfo.icon;
 
   const hasExpandableContent = (details && Object.keys(details).length > 0) || reasoning || toolCall;
+  const detailsCount =
+    (details ? Object.keys(details).length : 0) +
+    (reasoning ? 1 : 0) +
+    (toolCall ? 1 : 0);
+  const detailsId = React.useId();
 
   const getStatusStyles = () => {
     // Special styling for self-improvement/policy update actions
@@ -181,8 +186,8 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
       whileHover={{ y: -1 }}
       transition={{ duration: 0.2 }}
       className={cn(
-        "relative rounded-xl border border-neutral-200/60 dark:border-zinc-800 bg-white dark:bg-zinc-900 backdrop-blur-sm overflow-hidden",
-        "shadow-sm hover:shadow-lg hover:border-neutral-300 dark:hover:border-zinc-700 transition-all duration-300",
+        "relative rounded-xl border border-white/50 dark:border-white/10 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl overflow-hidden",
+        "shadow-[0_6px_18px_rgba(0,0,0,0.08)] hover:shadow-[0_10px_28px_rgba(0,0,0,0.12)] hover:border-white/70 dark:hover:border-white/20 transition-all duration-300",
         getStatusStyles()
       )}
     >
@@ -272,7 +277,9 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
             onClick={() => setIsExpanded(!isExpanded)}
             whileHover={{ backgroundColor: "rgba(255,255,255,0.1)" }}
             whileTap={{ scale: 0.99 }}
-            className="w-full px-4 py-2 flex items-center justify-center gap-1 text-xs text-muted-foreground/50 hover:text-muted-foreground/70 transition-colors border-t border-white/20"
+            className="w-full px-4 py-2 flex items-center justify-center gap-1 text-xs text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors border-t border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900"
+            aria-expanded={isExpanded}
+            aria-controls={detailsId}
           >
             <motion.div
               animate={{ rotate: isExpanded ? 180 : 0 }}
@@ -280,7 +287,11 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
             >
               <ChevronDown className="w-3.5 h-3.5" />
             </motion.div>
-            {isExpanded ? "Hide details" : `Show details (${details ? Object.keys(details).length : 0})`}
+            {isExpanded
+              ? "Hide details"
+              : detailsCount > 0
+                ? `Show details (${detailsCount})`
+                : "Show details"}
           </motion.button>
           
           <AnimatePresence initial={false}>
@@ -305,6 +316,7 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
                   }
                 }}
                 className="overflow-hidden"
+                id={detailsId}
               >
                 <div className="px-4 pb-4 space-y-3">
                   {/* Reasoning section */}

@@ -107,10 +107,10 @@ export function IntelligencePanel({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={spring}
-      className={`rounded-2xl bg-white dark:bg-zinc-900 border border-neutral-200/60 dark:border-zinc-800 overflow-hidden ${className}`}
+      className={`rounded-2xl bg-white/80 dark:bg-zinc-900/80 border border-white/50 dark:border-white/10 backdrop-blur-xl overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.08)] ${className}`}
     >
       {/* Header - Clean and minimal */}
-      <div className="px-5 py-4 border-b border-neutral-100 dark:border-zinc-800">
+      <div className="px-5 py-4 border-b border-white/30 dark:border-white/10">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="relative">

@@ -323,20 +323,52 @@ VALUES (
 -- ============================================
 
 -- Ensure completed_scenes never exceeds total_scenes
-ALTER TABLE projects ADD CONSTRAINT IF NOT EXISTS chk_completed_scenes 
-    CHECK (completed_scenes <= total_scenes);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_completed_scenes'
+    ) THEN
+        ALTER TABLE projects
+            ADD CONSTRAINT chk_completed_scenes
+            CHECK (completed_scenes <= total_scenes);
+    END IF;
+END $$;
 
 -- Ensure evaluation scores are between 0 and 1
-ALTER TABLE iterations ADD CONSTRAINT IF NOT EXISTS chk_evaluation_score 
-    CHECK (evaluation_score IS NULL OR (evaluation_score >= 0 AND evaluation_score <= 1));
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_evaluation_score'
+    ) THEN
+        ALTER TABLE iterations
+            ADD CONSTRAINT chk_evaluation_score
+            CHECK (evaluation_score IS NULL OR (evaluation_score >= 0 AND evaluation_score <= 1));
+    END IF;
+END $$;
 
 -- Ensure evaluation detail scores are between 0 and 1
-ALTER TABLE evaluation_details ADD CONSTRAINT IF NOT EXISTS chk_eval_detail_score 
-    CHECK (score >= 0 AND score <= 1);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_eval_detail_score'
+    ) THEN
+        ALTER TABLE evaluation_details
+            ADD CONSTRAINT chk_eval_detail_score
+            CHECK (score >= 0 AND score <= 1);
+    END IF;
+END $$;
 
 -- Ensure constraint confidence is between 0 and 1
-ALTER TABLE constraints ADD CONSTRAINT IF NOT EXISTS chk_confidence_score 
-    CHECK (confidence_score >= 0 AND confidence_score <= 1);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_confidence_score'
+    ) THEN
+        ALTER TABLE constraints
+            ADD CONSTRAINT chk_confidence_score
+            CHECK (confidence_score >= 0 AND confidence_score <= 1);
+    END IF;
+END $$;
 
 -- Ensure scene indices are unique per project
 CREATE UNIQUE INDEX IF NOT EXISTS idx_scenes_project_scene_unique 

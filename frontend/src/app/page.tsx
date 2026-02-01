@@ -81,7 +81,7 @@ interface ChatMessage {
   isNew?: boolean;
 }
 
-export default function ClarityApp() {
+export default function ContinuityApp() {
   const [appState, setAppState] = useState<AppState>("welcome");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -1373,14 +1373,14 @@ export default function ClarityApp() {
   return (
     <ToastProvider>
     <LayoutGroup>
-      <div className="min-h-screen text-foreground bg-background transition-colors duration-300">
+      <div className="h-screen overflow-hidden text-foreground bg-background transition-colors duration-300">
             <AnimatedBackground 
               isActive={appState === "active"} 
               intensity={appState === "active" ? "intense" : "normal"} 
               isLoading={isLoading}
             />
 
-        <div className="relative z-10 min-h-screen flex flex-col">
+        <div className="relative z-10 h-full flex flex-col">
           {/* Header - Clean and minimal with dark mode support */}
           <motion.header
             layout
@@ -1392,16 +1392,16 @@ export default function ClarityApp() {
                 layout
                 transition={springTransition}
                 className={cn(
-                  "mx-auto px-5 h-14 flex items-center justify-between rounded-2xl border backdrop-blur-2xl transition-all duration-300",
+                  "mx-auto px-5 h-14 flex items-center justify-between rounded-2xl border backdrop-blur-3xl transition-all duration-300 ring-1 ring-white/30 dark:ring-white/10",
                   appState === "welcome" 
-                    ? "max-w-2xl bg-white/60 dark:bg-zinc-900/70 border-neutral-200/50 dark:border-zinc-700/50 shadow-sm" 
-                    : "max-w-7xl bg-white/80 dark:bg-zinc-900/80 border-neutral-200/60 dark:border-zinc-700/60 shadow-sm"
+                    ? "max-w-2xl bg-gradient-to-b from-white/70 to-white/40 dark:from-zinc-900/70 dark:to-zinc-900/45 border-white/50 dark:border-white/10 shadow-[0_10px_35px_rgba(0,0,0,0.12)]" 
+                    : "max-w-7xl bg-gradient-to-b from-white/80 to-white/50 dark:from-zinc-900/75 dark:to-zinc-900/50 border-white/60 dark:border-white/12 shadow-[0_12px_40px_rgba(0,0,0,0.14)]"
                 )}
               >
                 {/* Logo */}
                 <motion.div layout className="flex items-center gap-2.5">
                   <ContinuityLogo size={24} />
-                  <span className="font-semibold text-sm text-neutral-900 dark:text-zinc-100">Clarity</span>
+                  <span className="font-semibold text-sm text-neutral-900 dark:text-zinc-100">Continuity</span>
                   
                   {/* Status in header when active */}
                   <AnimatePresence>
@@ -1486,30 +1486,32 @@ export default function ClarityApp() {
             </AnimatePresence>
           </main>
 
-          {/* Footer - Minimal */}
-          <motion.footer
-            layout
-            transition={springTransition}
-            className="relative z-10 shrink-0"
-          >
-            <div className="mx-4 mb-4">
-              <motion.div
-                layout
-                transition={springTransition}
-                className={cn(
-                  "mx-auto px-4 h-9 flex items-center justify-center rounded-lg text-[11px] text-neutral-400 dark:text-zinc-500",
-                  appState === "welcome" ? "max-w-2xl" : "max-w-7xl"
-                )}
-              >
-                <span className="flex items-center gap-2">
-                  <Sparkles className="w-3 h-3" />
-                  <span>{APP_CONFIG.event}</span>
-                  <span className="text-neutral-300 dark:text-zinc-600">•</span>
-                  <span>Self-improving AI agents</span>
-                </span>
-              </motion.div>
-            </div>
-          </motion.footer>
+          {/* Footer - Minimal (welcome only) */}
+          {appState === "welcome" && (
+            <motion.footer
+              layout
+              transition={springTransition}
+              className="relative z-10 shrink-0"
+            >
+              <div className="mx-4 mb-4">
+                <motion.div
+                  layout
+                  transition={springTransition}
+                  className={cn(
+                    "mx-auto px-4 h-9 flex items-center justify-center rounded-lg text-[11px] text-neutral-400 dark:text-zinc-500",
+                    "max-w-2xl"
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="w-3 h-3" />
+                    <span>{APP_CONFIG.event}</span>
+                    <span className="text-neutral-300 dark:text-zinc-600">•</span>
+                    <span>Self-improving AI agents</span>
+                  </span>
+                </motion.div>
+              </div>
+            </motion.footer>
+          )}
         </div>
       </div>
     </LayoutGroup>
@@ -1550,13 +1552,13 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
       initial="hidden"
       animate="visible"
       exit="exit"
-      className="flex-1 flex items-center justify-center px-6 py-12"
+      className="flex-1 flex items-center justify-center px-6 py-8 overflow-hidden"
     >
-      <div className="w-full max-w-xl">
+      <div className="w-full max-w-xl welcome-fit">
         {/* Hero */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           {/* Logo */}
-          <motion.div variants={itemVariants} className="flex justify-center mb-8">
+          <motion.div variants={itemVariants} className="flex justify-center mb-6">
             <div className="relative">
               <motion.div
                 animate={{ opacity: [0.4, 0.6, 0.4] }}
@@ -1584,7 +1586,7 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
           </motion.h1>
           <motion.p
             variants={itemVariants}
-            className="text-neutral-500 dark:text-zinc-400 mt-4 text-lg"
+            className="text-neutral-500 dark:text-zinc-400 mt-3 text-lg"
           >
             Upload photos and describe your vision
           </motion.p>
@@ -1618,7 +1620,7 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
         {/* Features - Clean cards with dark mode */}
         <motion.div
           variants={itemVariants}
-          className="mt-14 grid grid-cols-3 gap-3"
+          className="mt-10 hidden sm:grid grid-cols-3 gap-3"
         >
           {[
             { label: "Spatial Analysis", desc: "Constraint detection", lightColor: "bg-pink-50 border-pink-100", darkColor: "dark:bg-pink-950/30 dark:border-pink-900/30" },
@@ -1792,10 +1794,10 @@ function SplitView({
         {...slideInLeft}
         transition={{ ...smoothTransition, delay: 0.1 }}
         style={{ width: `${splitPosition}%` }}
-        className="flex flex-col border-r border-neutral-200/60 dark:border-zinc-800 min-w-[280px] bg-white dark:bg-zinc-950"
+        className="flex flex-col border-r border-white/40 dark:border-white/10 min-w-[280px] bg-white/70 dark:bg-zinc-950/80 backdrop-blur-xl"
       >
         {/* Minimal header */}
-        <div className="shrink-0 h-11 flex items-center justify-between px-4 border-b border-neutral-100 dark:border-zinc-800/80">
+        <div className="shrink-0 h-11 flex items-center justify-between px-4 border-b border-white/30 dark:border-white/10 bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl">
           <span className="text-[13px] font-medium text-neutral-600 dark:text-zinc-300">Conversation</span>
           <span className={`text-[10px] ${isConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-400 dark:text-zinc-500'}`}>
             {isConnected ? '● Connected' : '○ Offline'}
@@ -1803,7 +1805,7 @@ function SplitView({
         </div>
 
         {/* Messages area - clean, document-like */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto scrollbar-on-hover">
           <div className="max-w-2xl mx-auto px-6 py-4">
             {/* Uploaded Images - Compact at top */}
             {uploadedImages.length > 0 && (
@@ -1906,7 +1908,7 @@ function SplitView({
         </div>
 
         {/* Input - Minimal */}
-        <div className="shrink-0 px-6 py-3 border-t border-neutral-100 dark:border-zinc-800 bg-white dark:bg-zinc-950">
+        <div className="shrink-0 px-6 py-3 border-t border-white/30 dark:border-white/10 bg-white/60 dark:bg-zinc-950/70 backdrop-blur-xl shadow-[0_-6px_20px_rgba(0,0,0,0.08)]">
           <PromptInputBox
             onSend={onSend}
             isLoading={isLoading}
@@ -1936,14 +1938,14 @@ function SplitView({
         {...slideInRight}
         transition={{ ...smoothTransition, delay: 0.15 }}
         style={{ width: `${100 - splitPosition}%` }}
-        className="flex-1 overflow-y-auto bg-gradient-to-br from-neutral-50/50 to-white dark:from-zinc-900/50 dark:to-zinc-950 scrollbar-thin min-w-[300px]"
+        className="flex-1 overflow-y-auto bg-gradient-to-br from-neutral-50/60 to-white/80 dark:from-zinc-900/60 dark:to-zinc-950/80 backdrop-blur-xl scrollbar-thin min-w-[300px]"
       >
         <div className="p-5 space-y-5">
           {/* Progress Timeline - Clean header */}
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="p-4 rounded-xl bg-white dark:bg-zinc-900 border border-neutral-200/60 dark:border-zinc-800 shadow-sm"
+            className="p-4 rounded-xl bg-white/80 dark:bg-zinc-900/80 border border-white/50 dark:border-white/10 backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.08)]"
           >
             <ProgressTimeline currentStage={pipelineStage} />
           </motion.div>
@@ -1989,7 +1991,7 @@ function SplitView({
 
           {/* Step Timeline - Comprehensive view of all steps */}
           {pipelineSteps.length > 0 && (
-            <div className="p-4 rounded-xl bg-white dark:bg-zinc-900 border border-neutral-200/60 dark:border-zinc-800">
+            <div className="p-4 rounded-xl bg-white/80 dark:bg-zinc-900/80 border border-white/50 dark:border-white/10 backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.08)]">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-medium text-neutral-700 dark:text-zinc-300">Pipeline Steps</h2>
@@ -2087,7 +2089,7 @@ function ChatBubble({ message, index }: { message: ChatMessage; index: number })
         {isUser ? (
           <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">You</span>
         ) : (
-          <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">Clarity</span>
+          <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">Continuity</span>
         )}
         {message.timestamp && (
           <span className="text-[10px] text-neutral-300 dark:text-zinc-600">{message.timestamp}</span>

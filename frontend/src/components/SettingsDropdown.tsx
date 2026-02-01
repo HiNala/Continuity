@@ -12,7 +12,6 @@ import {
   Globe,
   Activity,
   Play,
-  ChevronDown,
 } from "lucide-react";
 import {
   testWeaveAPI,
@@ -182,17 +181,16 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
     <div className="relative" ref={dropdownRef}>
       <motion.button
         onClick={() => setIsOpen(!isOpen)}
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
-        className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-600 dark:text-zinc-400 hover:text-neutral-900 dark:hover:text-zinc-100 bg-white/60 dark:bg-zinc-900/60 hover:bg-white/80 dark:hover:bg-zinc-800/80 backdrop-blur-sm border border-neutral-200 dark:border-zinc-700 hover:border-neutral-300 dark:hover:border-zinc-600 rounded-xl transition-all shadow-sm hover:shadow"
+        whileHover={{ scale: 1.04 }}
+        whileTap={{ scale: 0.97 }}
+        aria-label="Settings"
+        className="h-9 w-9 flex items-center justify-center text-neutral-600 dark:text-zinc-400 hover:text-neutral-900 dark:hover:text-zinc-100 bg-white/55 dark:bg-zinc-900/55 hover:bg-white/75 dark:hover:bg-zinc-800/70 backdrop-blur-md border border-white/40 dark:border-white/10 hover:border-white/60 dark:hover:border-white/20 rounded-full transition-all shadow-sm hover:shadow-md"
       >
-        <Settings className="w-4 h-4" />
-        <span className="font-medium">Settings</span>
         <motion.div
-          animate={{ rotate: isOpen ? 180 : 0 }}
+          animate={{ rotate: isOpen ? 90 : 0 }}
           transition={{ duration: 0.2 }}
         >
-          <ChevronDown className="w-4 h-4" />
+          <Settings className="w-4 h-4" />
         </motion.div>
       </motion.button>
 

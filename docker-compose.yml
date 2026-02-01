@@ -27,7 +27,8 @@ services:
       - NODE_ENV=development
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     volumes:
       # Mount source for hot reloading in development
       - ./frontend/src:/app/src:ro
@@ -66,6 +67,12 @@ services:
       - ./generated_images:/app/generated_images
     networks:
       - continuity-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # ==========================================

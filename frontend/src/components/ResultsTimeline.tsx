@@ -65,10 +65,12 @@ function TimelineImage({
   const [hasError, setHasError] = useState(false);
 
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
+      aria-pressed={isSelected}
       className={`
-        relative cursor-pointer rounded-xl overflow-hidden border-2 transition-all duration-200 group
+        relative cursor-pointer rounded-xl overflow-hidden border-2 transition-all duration-200 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900
         ${isSelected 
           ? "border-primary ring-2 ring-primary/30 scale-[1.02]" 
           : evaluationPassed === false 
@@ -135,7 +137,7 @@ function TimelineImage({
           {compareIndex + 1}
         </div>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -208,7 +210,7 @@ export function ResultsTimeline({
             setCompareMode(!compareMode);
             setCompareImages([null, null]);
           }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900 ${
             compareMode 
               ? "bg-primary text-white shadow-md" 
               : "bg-neutral-100 dark:bg-zinc-800 text-neutral-700 dark:text-zinc-300 hover:bg-neutral-200 dark:hover:bg-zinc-700"
@@ -300,7 +302,7 @@ export function ResultsTimeline({
         >
           <button
             onClick={() => setSelectedImage(null)}
-            className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+            className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
           >
             <X className="w-5 h-5 text-white" />
           </button>

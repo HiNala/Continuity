@@ -119,6 +119,14 @@
   }
 }
 
+/* Welcome screen fit for short viewports */
+.welcome-fit {
+  --welcome-scale: clamp(0.84, calc(100vh / 920), 1);
+  transform: scale(var(--welcome-scale));
+  transform-origin: center;
+  will-change: transform;
+}
+
 /* Custom scrollbar - refined with dark mode support */
 ::-webkit-scrollbar {
   width: 8px;

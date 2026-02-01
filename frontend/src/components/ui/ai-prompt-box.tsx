@@ -563,7 +563,8 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
                   onClick={() => uploadInputRef.current?.click()}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className="flex h-9 w-9 text-neutral-500 dark:text-zinc-400 items-center justify-center rounded-xl transition-colors hover:text-neutral-900 dark:hover:text-zinc-100 hover:bg-neutral-100 dark:hover:bg-zinc-800"
+                  className="flex h-9 w-9 text-neutral-500 dark:text-zinc-400 items-center justify-center rounded-xl transition-colors hover:text-neutral-900 dark:hover:text-zinc-100 hover:bg-neutral-100 dark:hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900"
+                  aria-label="Attach images"
                 >
                   <Paperclip className="h-[18px] w-[18px]" />
                   <input
@@ -601,13 +602,14 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
                 whileHover={hasContent && !isLoading ? { scale: 1.08 } : {}}
                 whileTap={hasContent && !isLoading ? { scale: 0.95 } : {}}
                 className={cn(
-                  "h-9 w-9 rounded-xl flex items-center justify-center transition-all duration-300",
+                  "h-9 w-9 rounded-xl flex items-center justify-center transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900",
                   hasContent
                     ? "bg-gradient-to-br from-primary via-primary to-accent text-white shadow-lg shadow-primary/30 dark:shadow-primary/40"
                     : "bg-neutral-100 dark:bg-zinc-800 text-neutral-400 dark:text-zinc-500 border border-neutral-200 dark:border-zinc-700"
                 )}
                 onClick={handleSubmit}
                 disabled={!hasContent || isLoading}
+                aria-label="Send prompt"
               >
                 {isLoading ? (
                   <motion.div

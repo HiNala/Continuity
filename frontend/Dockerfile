@@ -1,5 +1,5 @@
 # ============================================
-# Clarity Frontend - Next.js 14
+# Continuity Frontend - Next.js 15
 # ============================================
 # Simplified for hackathon development
 
@@ -13,9 +13,9 @@ RUN apk add --no-cache libc6-compat
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Clean install dependencies (remove old lockfile to avoid conflicts)
-RUN rm -rf node_modules package-lock.json && \
-    npm install
+# Clean install using lockfile for deterministic builds
+RUN rm -rf node_modules && \
+    npm ci
 
 # Copy application code
 COPY . .

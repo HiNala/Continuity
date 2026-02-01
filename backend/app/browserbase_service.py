@@ -109,7 +109,8 @@ class StagehandBrowserbaseService:
             return self._stagehand_available
         
         try:
-            from stagehand import Stagehand, StagehandConfig
+            # Import the v3 SDK
+            from stagehand import AsyncStagehand
             self._stagehand_available = self.is_stagehand_configured
             if self._stagehand_available:
                 print("[Stagehand] AI-powered browser automation available")
@@ -224,12 +225,12 @@ class StagehandBrowserbaseService:
         """
         Use Stagehand AI to extract inspiration images from the web.
         
-        This uses natural language instructions to:
+        This uses the Stagehand Python SDK v3 with natural language instructions to:
         1. Navigate to a design inspiration website
         2. Search for relevant content
         3. Extract image URLs with AI assistance
         """
-        from stagehand import Stagehand, StagehandConfig
+        from stagehand import AsyncStagehand
         
         # Build search query
         search_terms = [query]
@@ -242,46 +243,40 @@ class StagehandBrowserbaseService:
         # Use Unsplash as primary source (free, high-quality images)
         search_url = f"https://unsplash.com/s/photos/{full_query}"
         
-        # Configure Stagehand with Browserbase using Gemini
-        # Stagehand supports Google Gemini as a first-class model
-        # See: https://docs.stagehand.dev/v3/configuration/models
-        config = StagehandConfig(
-            env="BROWSERBASE",
-            api_key=self.browserbase_api_key,
-            project_id=self.browserbase_project_id,
-            model_name="google/gemini-2.5-flash",  # Fast, accurate, cost-effective
-            headless=True,
-            verbose=1,
+        # Create Stagehand client with Browserbase credentials and Gemini model
+        # SDK docs: https://docs.stagehand.dev/v3/sdk/python
+        client = AsyncStagehand(
+            browserbase_api_key=self.browserbase_api_key,
+            browserbase_project_id=self.browserbase_project_id,
+            model_api_key=self.model_api_key,
         )
         
-        stagehand = Stagehand(
-            config=config,
-            model_api_key=self.model_api_key,  # Uses GEMINI_API_KEY
-        )
-        
+        session = None
         try:
-            # Initialize Stagehand (creates browser session)
-            await stagehand.init()
-            print(f"[Stagehand] Initialized, navigating to {search_url}")
+            # Start a new browser session with Gemini model
+            session = await client.sessions.create(
+                model_name="google/gemini-2.5-flash",  # Fast, accurate, cost-effective
+            )
+            print(f"[Stagehand] Session started: {session.id}")
             
             # Navigate to the search results
-            page = stagehand.page
-            await page.goto(search_url)
+            await session.navigate(url=search_url)
+            print(f"[Stagehand] Navigated to {search_url}")
             
             # Wait for content to load
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
             
             # Extract image data using Stagehand's AI-powered extraction
-            images_data = await stagehand.extract({
-                "instruction": f"""
+            extract_response = await session.extract(
+                instruction=f"""
                 Find interior design images on this page related to: {query}
                 For each image, extract:
-                1. The image URL (src attribute of img tags)
+                1. The image URL (src attribute of img tags, prefer high resolution)
                 2. A brief description (alt text or inferred from context)
                 Focus on actual room/interior photos, not profile pictures or icons.
                 Return up to {limit} high-quality images.
                 """,
-                "schema": {
+                schema={
                     "type": "object",
                     "properties": {
                         "images": {
@@ -297,9 +292,10 @@ class StagehandBrowserbaseService:
                         }
                     }
                 }
-            })
+            )
             
             # Process extracted data
+            images_data = extract_response.data.result if hasattr(extract_response.data, 'result') else None
             if images_data and isinstance(images_data, dict):
                 images = images_data.get("images", [])
                 if images:
@@ -332,11 +328,12 @@ class StagehandBrowserbaseService:
             print(f"[Stagehand] Error during extraction: {e}")
             raise
         finally:
-            # Clean up
-            try:
-                await stagehand.close()
-            except Exception:
-                pass
+            # Clean up session
+            if session:
+                try:
+                    await session.end()
+                except Exception:
+                    pass
         
         return None
     

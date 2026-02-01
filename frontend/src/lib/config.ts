@@ -1,12 +1,12 @@
 /**
- * Clarity - Application Configuration
+ * Continuity - Application Configuration
  * 
  * Centralized configuration for branding, feature flags, and app settings.
  */
 
 export const APP_CONFIG = {
   // Branding
-  name: "Clarity",
+  name: "Continuity",
   tagline: "Self-Improving AI for Design Visualization",
   event: "WeaveHacks 3",
   version: "1.0.0",

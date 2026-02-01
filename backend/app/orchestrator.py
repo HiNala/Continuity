@@ -413,6 +413,9 @@ class Orchestrator:
                 else:
                     # Phase failed, record warning but continue
                     scene.has_warnings = True
+                    # Ensure warning_details is initialized before appending
+                    if scene.warning_details is None:
+                        scene.warning_details = []
                     scene.warning_details.append({
                         "phase": phase,
                         "error": result.get("error", "Unknown error"),

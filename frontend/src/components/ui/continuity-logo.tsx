@@ -20,12 +20,12 @@ export const ContinuityLogo: React.FC<ContinuityLogoProps> = ({
     <svg
       width={size}
       height={size}
-      viewBox="0 0 32 32"
+      viewBox="-1 -1 34 34"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       role="img"
-      aria-label="Clarity logo"
+      aria-label="Continuity logo"
     >
       <defs>
         <linearGradient id={`grad-${uniqueId}`} x1="0%" y1="0%" x2="100%" y2="100%">
@@ -97,12 +97,12 @@ export const ContinuityIcon: React.FC<{ className?: string; size?: number }> = (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 20 20"
+      viewBox="-1 -1 22 22"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       role="img"
-      aria-label="Clarity icon"
+      aria-label="Continuity icon"
     >
       <defs>
         <linearGradient id={`icon-grad-${uniqueId}`} x1="0%" y1="0%" x2="100%" y2="100%">

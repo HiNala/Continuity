@@ -16,9 +16,9 @@ export function AnimatedBackground({
 }: AnimatedBackgroundProps) {
   // Simplified configuration - cleaner, more subtle
   const config = useMemo(() => ({
-    subtle: { blur: 100, duration: 25, size: 280, opacity: 0.25 },
-    normal: { blur: 110, duration: 20, size: 320, opacity: 0.3 },
-    intense: { blur: 120, duration: 12, size: 360, opacity: 0.4 },
+    subtle: { blur: 90, duration: 25, size: 300, opacity: 0.32 },
+    normal: { blur: 100, duration: 20, size: 360, opacity: 0.42 },
+    intense: { blur: 110, duration: 12, size: 420, opacity: 0.52 },
   }), []);
   
   const { blur, duration: baseDuration, size, opacity: baseOpacity } = config[intensity];
@@ -58,7 +58,7 @@ export function AnimatedBackground({
           }}
           transition={propertyTransition}
           className="rounded-full bg-gradient-to-br from-pink-300 via-rose-200 to-pink-400 dark:from-pink-600/50 dark:via-rose-500/40 dark:to-pink-700/50"
-          style={{ filter: `blur(${blur}px)` }}
+          style={{ filter: `blur(${blur}px) drop-shadow(0 0 16px rgba(236, 72, 153, 0.18))` }}
         />
       </motion.div>
       
@@ -85,7 +85,7 @@ export function AnimatedBackground({
           }}
           transition={propertyTransition}
           className="rounded-full bg-gradient-to-br from-sky-300 via-cyan-200 to-blue-300 dark:from-cyan-600/50 dark:via-sky-500/40 dark:to-blue-600/50"
-          style={{ filter: `blur(${blur}px)` }}
+          style={{ filter: `blur(${blur}px) drop-shadow(0 0 16px rgba(34, 211, 238, 0.16))` }}
         />
       </motion.div>
 
@@ -113,7 +113,7 @@ export function AnimatedBackground({
               style={{ 
                 width: size * 0.7,
                 height: size * 0.7,
-                filter: `blur(${blur * 1.1}px)`,
+                filter: `blur(${blur * 1.05}px) drop-shadow(0 0 14px rgba(168, 85, 247, 0.16))`,
                 opacity: opacity * 0.6,
               }}
             />
@@ -123,9 +123,9 @@ export function AnimatedBackground({
 
       {/* Frosted overlay - adapts to dark mode */}
       <div 
-        className="absolute inset-0 bg-white/30 dark:bg-zinc-900/50"
+        className="absolute inset-0 bg-white/20 dark:bg-zinc-900/40"
         style={{
-          backdropFilter: 'blur(80px)',
+          backdropFilter: "blur(96px)",
         }}
       />
     </div>

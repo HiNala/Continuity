@@ -13,7 +13,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Clarity - AI Space Visualization",
+  title: "Continuity - AI Space Visualization",
   description: "Transform raw space photos into realistic renovation visualizations with self-improving AI agents",
   icons: {
     icon: "/favicon.ico",
@@ -28,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable} suppressHydrationWarning>
       <body className="font-sans antialiased">
-        <ThemeProvider defaultTheme="light" storageKey="clarity-theme">
+        <ThemeProvider defaultTheme="light" storageKey="continuity-theme">
           <ToastProvider>
             <ErrorBoundary>
               {children}
