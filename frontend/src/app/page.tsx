@@ -28,11 +28,13 @@ import {
   getAgentReasoning,
   getIterations,
   getIterationEvaluation,
+  getBatchReport,
   type AnalyzeGoalResponse,
   type OrchestrationStatusResponse,
   type StreamEvent,
   type AgentReasoningResponse,
   type IterationResponse,
+  type BatchReport,
 } from "@/lib/api";
 import { APP_CONFIG, getHeaderText, getFooterText } from "@/lib/config";
 
@@ -90,6 +92,8 @@ export default function ContinuityApp() {
   const [questions, setQuestions] = useState<AnalyzeGoalResponse | null>(null);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [orchestrationStatus, setOrchestrationStatus] = useState<OrchestrationStatusResponse | null>(null);
+  const [batchReport, setBatchReport] = useState<BatchReport | null>(null);
+  const [batchReportError, setBatchReportError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -813,6 +817,23 @@ export default function ContinuityApp() {
       fetchAgentReasoning(projectId);
     }
   }, [projectId, orchestrationStatus?.state, fetchAgentReasoning]);
+
+  useEffect(() => {
+    const shouldFetch =
+      projectId &&
+      orchestrationStatus?.is_batch &&
+      (orchestrationStatus.state === "completed" ||
+        orchestrationStatus.state === "completed_with_warnings");
+    if (!shouldFetch) return;
+
+    if (batchReport || batchReportError) return;
+
+    getBatchReport(projectId)
+      .then(setBatchReport)
+      .catch((err) => {
+        setBatchReportError(getErrorMessage(err, "fetch batch report"));
+      });
+  }, [projectId, orchestrationStatus, batchReport, batchReportError]);
 
   // Helper for user-friendly error messages
   const getErrorMessage = useCallback((err: unknown, context: string): string => {
@@ -1990,6 +2011,66 @@ function SplitView({
         className="flex-1 overflow-y-auto bg-gradient-to-br from-neutral-50/60 to-white/80 dark:from-zinc-900/60 dark:to-zinc-950/80 backdrop-blur-xl scrollbar-thin min-w-[300px]"
       >
         <div className="p-5 space-y-5">
+          {/* Batch Demo Console */}
+          {orchestrationStatus?.is_batch && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="p-4 rounded-xl bg-white/80 dark:bg-zinc-900/80 border border-white/50 dark:border-white/10 backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.08)]"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-500" />
+                  <h2 className="text-sm font-medium text-neutral-700 dark:text-zinc-300">Batch Demo Console</h2>
+                </div>
+                <span className="text-[11px] text-neutral-500 dark:text-zinc-400">
+                  {orchestrationStatus.completed_scenes ?? 0}/{orchestrationStatus.total_scenes ?? 0} complete
+                </span>
+              </div>
+
+              {orchestrationStatus.scene_progress && orchestrationStatus.scene_progress.length > 0 && (
+                <div className="space-y-2 mb-3">
+                  {orchestrationStatus.scene_progress.map((scene) => (
+                    <div
+                      key={scene.scene_id}
+                      className="flex items-center justify-between text-xs text-neutral-600 dark:text-zinc-400"
+                    >
+                      <span>Scene {scene.scene_index + 1}</span>
+                      <span className="text-[11px]">
+                        {scene.current_phase || scene.orchestration_state || scene.status}
+                        {scene.has_warnings ? " ⚠" : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {batchReport && (
+                <div className="rounded-lg border border-white/50 dark:border-white/10 bg-white/70 dark:bg-zinc-900/60 p-3 text-xs text-neutral-600 dark:text-zinc-300">
+                  <div className="flex items-center justify-between">
+                    <span>Patterns identified</span>
+                    <span className="font-medium">{batchReport.summary.patterns_identified}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span>Average QC score</span>
+                    <span className="font-medium">
+                      {batchReport.summary.average_qc_score?.toFixed(2) ?? "—"}
+                    </span>
+                  </div>
+                  {batchReport.recommendations.length > 0 && (
+                    <div className="mt-2 text-[11px] text-neutral-500 dark:text-zinc-400">
+                      Top rec: {batchReport.recommendations[0].title}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {batchReportError && (
+                <div className="text-[11px] text-red-500 mt-2">{batchReportError}</div>
+              )}
+            </motion.div>
+          )}
+
           {/* Progress Timeline - Clean header */}
           <motion.div
             initial={{ opacity: 0, y: -10 }}

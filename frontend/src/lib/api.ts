@@ -678,6 +678,62 @@ export interface OrchestrationStatusResponse {
   total_scenes?: number;
   completed_scenes?: number;
   is_batch?: boolean;
+  scene_progress?: Array<{
+    scene_id: string;
+    scene_index: number;
+    status: string;
+    current_phase: string | null;
+    orchestration_state: string | null;
+    has_warnings: boolean;
+  }>;
+}
+
+export interface BatchReport {
+  batch_id: string;
+  project_id: string;
+  summary: {
+    total_scenes: number;
+    completed: number;
+    average_qc_score: number | null;
+    started_at: string | null;
+    completed_at: string | null;
+    patterns_identified: number;
+  };
+  patterns: Array<{
+    pattern_type: string;
+    description: string;
+    frequency: number;
+    confidence: number;
+    supporting_scenes: string[];
+  }>;
+  commonalities: Array<{
+    pattern_type: string;
+    description: string;
+    frequency: number;
+    confidence: number;
+    supporting_scenes: string[];
+  }>;
+  differences: Array<{
+    pattern_type: string;
+    description: string;
+    frequency: number;
+    confidence: number;
+    supporting_scenes: string[];
+  }>;
+  recommendations: Array<{
+    title: string;
+    rationale: string;
+    priority: string;
+  }>;
+  individual_scenes: Array<{
+    scene_id: string;
+    scene_index: number;
+    status: string;
+    input_image: string;
+    output_image: string | null;
+    space_type: string | null;
+    has_warnings: boolean;
+  }>;
 }
 
 export interface OrchestrationLogEntry {
@@ -722,6 +778,24 @@ export async function startOrchestration(
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.detail || "Failed to start orchestration");
+  }
+
+  return response.json();
+}
+
+/**
+ * Fetch batch report summary for demo.
+ */
+export async function getBatchReport(
+  projectId: string
+): Promise<BatchReport> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/batch-report`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to fetch batch report");
   }
 
   return response.json();
