@@ -318,6 +318,21 @@ async def get_available_styles():
     }
 
 
+@router.get("/status")
+async def get_browserbase_status():
+    """
+    Get the current status of Browserbase and Stagehand integration.
+    
+    Returns configuration status and available capabilities:
+    - browserbase_configured: Whether Browserbase credentials are set
+    - stagehand_configured: Whether Stagehand AI is fully configured
+    - stagehand_available: Whether Stagehand can be used for AI extraction
+    - mode: Current operation mode (ai_powered or curated_gallery)
+    - capabilities: Available features
+    """
+    return await browserbase_service.get_status()
+
+
 def _get_style_description(style: str) -> str:
     """Get a description for a design style."""
     descriptions = {

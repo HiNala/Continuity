@@ -218,12 +218,15 @@ Copy `.env.example` to `.env` and configure:
 | `DATABASE_URL` | PostgreSQL connection string | Auto-configured |
 | `REDIS_URL` | Redis connection string | Auto-configured |
 | `BROWSERBASE_API_KEY` | Browserbase API for web automation | Optional |
+| `BROWSERBASE_PROJECT_ID` | Browserbase project identifier | Optional |
+| `STAGEHAND_MODEL_API_KEY` | OpenAI/Anthropic key for AI-powered browser automation | Optional |
 
 ### Getting API Keys
 
 1. **Gemini API Key**: Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
 2. **Weights & Biases API Key**: Get from [W&B Settings](https://wandb.ai/authorize)
 3. **Browserbase API Key**: Get from [Browserbase](https://www.browserbase.com/)
+4. **Stagehand Model API Key**: Get from [OpenAI](https://platform.openai.com/api-keys) (optional, enables AI-powered web automation)
 
 ---
 
@@ -504,7 +507,9 @@ This project is organized into missions for the hackathon:
 ### AI & Observability
 - **Google Gemini (Nano Banana Pro)** — Image generation (`gemini-3-pro-image-preview`) and vision analysis (`gemini-2.0-flash`)
 - **Weave (W&B)** — LLM observability, tracing, and the learning substrate for self-improvement
-- **Browserbase** — Web automation platform for future expansion
+- **Browserbase + Stagehand** — AI-powered web automation for design inspiration
+  - Browserbase provides cloud browser infrastructure
+  - Stagehand adds AI layer for natural language browser control
 
 ---
 
@@ -740,15 +745,77 @@ GEMINI_IMAGE_ASPECT_RATIO=16:9
 GEMINI_IMAGE_SIZE=2K
 ```
 
-### Browserbase — Design Inspiration & Web Automation
+### Browserbase + Stagehand — AI-Powered Design Inspiration
 
-Browserbase provides cloud browser automation for fetching design inspiration images during requirements gathering:
+Browserbase provides cloud browser infrastructure, while **Stagehand** adds an AI layer for intelligent browser automation. Together, they fetch design inspiration images during requirements gathering.
 
-**Current Integration:**
-- **Design Inspiration Search**: Fetches relevant design images based on user's goal
-- **Style Exploration**: Searches for style variations (modern, minimalist, industrial, etc.)
-- **Mood Board Generation**: Creates visual mood boards from multiple styles
-- **Smart Fallback**: Curated Unsplash gallery when Browserbase is unavailable
+**Integration Architecture:**
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    BROWSERBASE + STAGEHAND INTEGRATION                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ TIER 1: Full AI-Powered (Stagehand + Browserbase)                    │   │
+│  │ ───────────────────────────────────────────────────────────────────  │   │
+│  │ Requires: BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID               │   │
+│  │           + STAGEHAND_MODEL_API_KEY (OpenAI or Anthropic)            │   │
+│  │                                                                      │   │
+│  │ Capabilities:                                                        │   │
+│  │ ├── AI navigates to design websites using natural language          │   │
+│  │ ├── Stagehand extracts images intelligently from any page           │   │
+│  │ ├── Real-time web scraping with anti-bot handling                   │   │
+│  │ └── Session tracking logged to Weave for observability              │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                      │
+│                          (Missing MODEL_API_KEY?)                           │
+│                                      ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ TIER 2: Session Tracking Only (Browserbase)                          │   │
+│  │ ───────────────────────────────────────────────────────────────────  │   │
+│  │ Requires: BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID               │   │
+│  │                                                                      │   │
+│  │ Capabilities:                                                        │   │
+│  │ ├── Creates browser sessions for analytics tracking                 │   │
+│  │ ├── Logs queries to Weave via session IDs                           │   │
+│  │ └── Returns curated images (fast, reliable)                         │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                      │
+│                          (Missing Browserbase keys?)                        │
+│                                      ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ TIER 3: Curated Gallery (Fallback)                                   │   │
+│  │ ───────────────────────────────────────────────────────────────────  │   │
+│  │ Requires: Nothing (always available)                                 │   │
+│  │                                                                      │   │
+│  │ Capabilities:                                                        │   │
+│  │ ├── High-quality curated Unsplash images by style                   │   │
+│  │ ├── Space-specific images (bathroom, kitchen, etc.)                 │   │
+│  │ └── Instant response, no external dependencies                      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Check Your Integration Status:**
+```bash
+curl http://localhost:8000/api/inspiration/status
+```
+
+**Response:**
+```json
+{
+  "browserbase_configured": true,
+  "stagehand_configured": false,
+  "stagehand_available": false,
+  "mode": "curated_gallery",
+  "capabilities": {
+    "ai_extraction": false,
+    "session_tracking": true,
+    "curated_images": true
+  }
+}
+```
 
 **How It Works in the Pipeline:**
 ```
@@ -763,9 +830,11 @@ Browserbase provides cloud browser automation for fetching design inspiration im
 │                          │                                     │
 │                          ▼                                     │
 │  ┌────────────────────────────────────────────────────────┐   │
-│  │ Browserbase fetches inspiration images                  │   │
-│  │ → Searches: "modern spa bathroom design"                │   │
-│  │ → Returns: 8-12 curated reference images                │   │
+│  │ Browserbase + Stagehand fetches inspiration             │   │
+│  │ → If Stagehand: AI navigates Unsplash, extracts images  │   │
+│  │ → If Browserbase only: Session logged, curated returned │   │
+│  │ → If neither: Curated gallery based on style/space      │   │
+│  │ → Returns: 8-12 design reference images                 │   │
 │  └────────────────────────────────────────────────────────┘   │
 │                          │                                     │
 │                          ▼                                     │
@@ -784,6 +853,7 @@ Browserbase provides cloud browser automation for fetching design inspiration im
 | `POST /api/inspiration/styles` | Get style variations with examples |
 | `POST /api/inspiration/mood-board` | Create mood board from styles |
 | `GET /api/inspiration/project/{id}` | Auto-generated inspiration for project |
+| `GET /api/inspiration/status` | Check Browserbase/Stagehand integration status |
 
 **Supported Design Styles:**
 - Modern, Minimalist, Industrial, Japandi
@@ -792,9 +862,22 @@ Browserbase provides cloud browser automation for fetching design inspiration im
 
 **Configuration:**
 ```bash
+# Tier 2: Session Tracking (Browserbase only)
 BROWSERBASE_API_KEY=bb_live_...
 BROWSERBASE_PROJECT_ID=your-project-id
+
+# Tier 1: Full AI-Powered (add Stagehand)
+STAGEHAND_MODEL_API_KEY=sk-...  # OpenAI or Anthropic API key
 ```
+
+**What is Stagehand?**
+
+[Stagehand](https://stagehand.dev) is an AI browser automation framework that uses natural language to control web browsers. It provides:
+- **act()** — Perform actions like "click the search button"
+- **extract()** — Extract structured data from pages
+- **observe()** — Find interactive elements on a page
+
+Combined with Browserbase's cloud browser infrastructure, Stagehand enables Continuity to intelligently navigate design websites and extract inspiration images without hardcoded selectors.
 
 ---
 

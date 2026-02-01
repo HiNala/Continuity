@@ -12,7 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install minimal system dependencies (psycopg2-binary doesn't need libpq-dev)
+# Install minimal system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 

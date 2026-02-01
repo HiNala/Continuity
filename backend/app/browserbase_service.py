@@ -1,23 +1,25 @@
 """
-Continuity - Browserbase Service
-Web automation service for fetching design inspiration images and reference materials.
+Continuity - Browserbase + Stagehand Service
+AI-powered web automation for fetching design inspiration images and reference materials.
 
-Browserbase provides cloud browser automation to help users:
-1. Find inspiration images based on their design goals
-2. Search for specific design styles (modern, minimalist, etc.)
-3. Gather reference materials from design websites
-4. Fetch mood boards and color palettes
+Uses Stagehand (https://stagehand.dev) for AI-powered browser automation:
+- Natural language instructions for browser actions
+- AI-powered element detection and interaction
+- Intelligent data extraction from web pages
 
-This enables users to better define their vision during requirements gathering.
+Browserbase provides the cloud browser infrastructure, while Stagehand adds
+the AI layer for intelligent automation.
+
+This enables users to:
+1. Find real inspiration images based on their design goals
+2. Search for specific design styles with AI-assisted navigation
+3. Gather reference materials from design websites automatically
+4. Create mood boards with curated design content
 """
 
 import asyncio
-import base64
-import json
-import re
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-from urllib.parse import quote_plus
 
 import httpx
 import weave
@@ -29,20 +31,15 @@ from app.config import settings
 # Design Websites for Inspiration
 # ============================================
 DESIGN_SOURCES = {
-    "pinterest": {
-        "search_url": "https://www.pinterest.com/search/pins/?q={query}",
-        "name": "Pinterest",
-        "type": "inspiration",
+    "unsplash": {
+        "search_url": "https://unsplash.com/s/photos/{query}",
+        "name": "Unsplash",
+        "type": "photos",
     },
-    "houzz": {
-        "search_url": "https://www.houzz.com/photos/query/{query}",
-        "name": "Houzz",
-        "type": "interior_design",
-    },
-    "dezeen": {
-        "search_url": "https://www.dezeen.com/?s={query}",
-        "name": "Dezeen",
-        "type": "architecture",
+    "pexels": {
+        "search_url": "https://www.pexels.com/search/{query}/",
+        "name": "Pexels",
+        "type": "photos",
     },
 }
 
@@ -71,25 +68,52 @@ SPACE_KEYWORDS = {
 }
 
 
-class BrowserbaseService:
+class StagehandBrowserbaseService:
     """
-    Service for fetching design inspiration using Browserbase cloud browsers.
+    AI-powered browser automation service using Stagehand + Browserbase.
+    
+    Stagehand provides the AI layer for intelligent browser automation,
+    while Browserbase provides the cloud browser infrastructure.
     """
     
     def __init__(self):
-        self.api_key = settings.browserbase_api_key
-        self.project_id = settings.browserbase_project_id
+        self.browserbase_api_key = settings.browserbase_api_key
+        self.browserbase_project_id = settings.browserbase_project_id
+        self.model_api_key = settings.stagehand_model_api_key
         self.base_url = "https://www.browserbase.com/v1"
-        self.connect_url = "https://connect.browserbase.com"
+        self._stagehand_available = None
     
     @property
-    def is_configured(self) -> bool:
-        """Check if Browserbase is configured."""
-        return bool(self.api_key and self.project_id)
+    def is_browserbase_configured(self) -> bool:
+        """Check if Browserbase credentials are configured."""
+        return bool(self.browserbase_api_key and self.browserbase_project_id)
     
-    async def _create_session(self) -> Optional[str]:
-        """Create a new Browserbase session."""
-        if not self.is_configured:
+    @property
+    def is_stagehand_configured(self) -> bool:
+        """Check if Stagehand (with model API key) is fully configured."""
+        return self.is_browserbase_configured and bool(self.model_api_key)
+    
+    async def _check_stagehand_availability(self) -> bool:
+        """Check if Stagehand package is available and configured."""
+        if self._stagehand_available is not None:
+            return self._stagehand_available
+        
+        try:
+            from stagehand import Stagehand, StagehandConfig
+            self._stagehand_available = self.is_stagehand_configured
+            if self._stagehand_available:
+                print("[Stagehand] AI-powered browser automation available")
+            else:
+                print("[Stagehand] Package found but STAGEHAND_MODEL_API_KEY not configured")
+            return self._stagehand_available
+        except ImportError as e:
+            print(f"[Stagehand] Package not available: {e}")
+            self._stagehand_available = False
+            return False
+    
+    async def _create_browserbase_session(self) -> Optional[str]:
+        """Create a Browserbase session for tracking (without Stagehand)."""
+        if not self.is_browserbase_configured:
             return None
         
         try:
@@ -97,16 +121,15 @@ class BrowserbaseService:
                 response = await client.post(
                     f"{self.base_url}/sessions",
                     headers={
-                        "x-bb-api-key": self.api_key,
+                        "x-bb-api-key": self.browserbase_api_key,
                         "Content-Type": "application/json",
                     },
                     json={
-                        "projectId": self.project_id,
+                        "projectId": self.browserbase_project_id,
                         "browserSettings": {
                             "fingerprint": {
                                 "devices": ["desktop"],
                                 "locales": ["en-US"],
-                                "operatingSystems": ["macos"],
                             }
                         }
                     },
@@ -117,13 +140,13 @@ class BrowserbaseService:
                     data = response.json()
                     return data.get("id")
                 else:
-                    print(f"Failed to create session: {response.status_code}")
+                    print(f"[Browserbase] Session creation failed: {response.status_code}")
                     return None
         except Exception as e:
-            print(f"Session creation error: {e}")
+            print(f"[Browserbase] Session error: {e}")
             return None
     
-    async def _close_session(self, session_id: str) -> None:
+    async def _close_browserbase_session(self, session_id: str) -> None:
         """Close a Browserbase session."""
         if not session_id:
             return
@@ -132,13 +155,13 @@ class BrowserbaseService:
             async with httpx.AsyncClient() as client:
                 await client.post(
                     f"{self.base_url}/sessions/{session_id}/stop",
-                    headers={"x-bb-api-key": self.api_key},
+                    headers={"x-bb-api-key": self.browserbase_api_key},
                     timeout=10.0,
                 )
         except Exception:
             pass  # Session cleanup is best-effort
     
-    @weave.op(name="browserbase_fetch_inspiration")
+    @weave.op(name="stagehand_fetch_inspiration")
     async def fetch_inspiration_images(
         self,
         query: str,
@@ -147,7 +170,10 @@ class BrowserbaseService:
         limit: int = 12,
     ) -> Dict[str, Any]:
         """
-        Fetch design inspiration images based on user query.
+        Fetch design inspiration images using AI-powered browser automation.
+        
+        If Stagehand is configured, uses AI to intelligently navigate and extract
+        images from design websites. Falls back to curated gallery if not available.
         
         Args:
             query: User's design goal description
@@ -158,116 +184,151 @@ class BrowserbaseService:
         Returns:
             Dict with inspiration images and metadata
         """
-        if not self.is_configured:
-            # Return mock data for development/testing
-            return await self._get_placeholder_inspiration(query, style, space_type, limit)
+        # Try Stagehand-powered extraction first
+        if await self._check_stagehand_availability():
+            try:
+                result = await self._fetch_with_stagehand(query, style, space_type, limit)
+                if result and result.get("images"):
+                    return result
+            except Exception as e:
+                print(f"[Stagehand] Extraction failed, using fallback: {e}")
         
-        # Build enhanced search query
-        search_terms = [query]
+        # Track with Browserbase session (analytics) even without Stagehand
+        session_id = None
+        if self.is_browserbase_configured:
+            session_id = await self._create_browserbase_session()
+            if session_id:
+                print(f"[Browserbase] Session {session_id[:8]}... - Fetching inspiration for: {query}")
+                await self._close_browserbase_session(session_id)
         
-        if style and style in STYLE_KEYWORDS:
-            search_terms.extend(STYLE_KEYWORDS[style][:1])
-        
-        if space_type and space_type in SPACE_KEYWORDS:
-            search_terms.extend(SPACE_KEYWORDS[space_type][:1])
-        
-        search_query = " ".join(search_terms[:3])  # Limit to 3 terms
-        
-        # Create browser session
-        session_id = await self._create_session()
-        
-        if not session_id:
-            return await self._get_placeholder_inspiration(query, style, space_type, limit)
-        
-        try:
-            images = await self._scrape_design_images(session_id, search_query, limit)
-            
-            return {
-                "success": True,
-                "query": query,
-                "style": style,
-                "space_type": space_type,
-                "images": images,
-                "total": len(images),
-                "source": "browserbase",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-        finally:
-            await self._close_session(session_id)
+        # Return curated inspiration images
+        return await self._get_curated_inspiration(query, style, space_type, limit)
     
-    async def _scrape_design_images(
+    async def _fetch_with_stagehand(
         self,
-        session_id: str,
         query: str,
-        limit: int
-    ) -> List[Dict[str, Any]]:
+        style: Optional[str],
+        space_type: Optional[str],
+        limit: int,
+    ) -> Optional[Dict[str, Any]]:
         """
-        Scrape design images using Playwright through Browserbase.
+        Use Stagehand AI to extract inspiration images from the web.
+        
+        This uses natural language instructions to:
+        1. Navigate to a design inspiration website
+        2. Search for relevant content
+        3. Extract image URLs with AI assistance
         """
+        from stagehand import Stagehand, StagehandConfig
+        
+        # Build search query
+        search_terms = [query]
+        if style:
+            search_terms.append(f"{style} style")
+        if space_type:
+            search_terms.append(f"{space_type} design")
+        full_query = " ".join(search_terms).replace(" ", "-")
+        
+        # Use Unsplash as primary source (free, high-quality images)
+        search_url = f"https://unsplash.com/s/photos/{full_query}"
+        
+        # Configure Stagehand with Browserbase
+        config = StagehandConfig(
+            env="BROWSERBASE",
+            api_key=self.browserbase_api_key,
+            project_id=self.browserbase_project_id,
+            model_name="gpt-4o-mini",  # Cost-effective model
+            headless=True,
+            verbose=1,
+        )
+        
+        stagehand = Stagehand(
+            config=config,
+            model_api_key=self.model_api_key,
+        )
+        
         try:
-            # Connect to Browserbase via CDP
-            from playwright.async_api import async_playwright
+            # Initialize Stagehand (creates browser session)
+            await stagehand.init()
+            print(f"[Stagehand] Initialized, navigating to {search_url}")
             
-            ws_url = f"wss://connect.browserbase.com?apiKey={self.api_key}&sessionId={session_id}"
+            # Navigate to the search results
+            page = stagehand.page
+            await page.goto(search_url)
             
-            async with async_playwright() as p:
-                browser = await p.chromium.connect_over_cdp(ws_url)
-                context = browser.contexts[0] if browser.contexts else await browser.new_context()
-                page = await context.new_page()
-                
-                # Search on Google Images for design inspiration
-                encoded_query = quote_plus(f"{query} interior design inspiration")
-                await page.goto(
-                    f"https://www.google.com/search?q={encoded_query}&tbm=isch",
-                    wait_until="networkidle",
-                    timeout=30000,
-                )
-                
-                # Wait for images to load
-                await page.wait_for_timeout(2000)
-                
-                # Extract image data
-                images = await page.evaluate("""
-                    () => {
-                        const images = [];
-                        const imgElements = document.querySelectorAll('img[data-src], img[src]');
-                        
-                        imgElements.forEach((img, index) => {
-                            if (images.length >= 20) return;
-                            
-                            const src = img.getAttribute('data-src') || img.getAttribute('src');
-                            if (src && src.startsWith('http') && !src.includes('google.com/images')) {
-                                images.push({
-                                    url: src,
-                                    alt: img.alt || '',
-                                    index: index,
-                                });
+            # Wait for content to load
+            await asyncio.sleep(3)
+            
+            # Extract image data using Stagehand's AI-powered extraction
+            images_data = await stagehand.extract({
+                "instruction": f"""
+                Find interior design images on this page related to: {query}
+                For each image, extract:
+                1. The image URL (src attribute of img tags)
+                2. A brief description (alt text or inferred from context)
+                Focus on actual room/interior photos, not profile pictures or icons.
+                Return up to {limit} high-quality images.
+                """,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "images": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "url": {"type": "string"},
+                                    "description": {"type": "string"},
+                                },
+                                "required": ["url"]
                             }
-                        });
-                        
-                        return images;
+                        }
                     }
-                """)
-                
-                await browser.close()
-                
-                # Format results
-                return [
-                    {
-                        "id": f"img_{i}",
-                        "url": img.get("url"),
-                        "thumbnail": img.get("url"),
-                        "description": img.get("alt", "Design inspiration image"),
-                        "source": "web_search",
+                }
+            })
+            
+            # Process extracted data
+            if images_data and isinstance(images_data, dict):
+                images = images_data.get("images", [])
+                if images:
+                    formatted = [
+                        {
+                            "id": f"stagehand_{i}",
+                            "url": img.get("url", ""),
+                            "thumbnail": img.get("url", ""),
+                            "description": img.get("description", "Design inspiration"),
+                            "source": "unsplash_stagehand",
+                        }
+                        for i, img in enumerate(images[:limit])
+                        if img.get("url")
+                    ]
+                    
+                    print(f"[Stagehand] Extracted {len(formatted)} images")
+                    
+                    return {
+                        "success": True,
+                        "query": query,
+                        "style": style,
+                        "space_type": space_type,
+                        "images": formatted,
+                        "total": len(formatted),
+                        "source": "stagehand_ai_extraction",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
-                    for i, img in enumerate(images[:limit])
-                ]
-                
+            
         except Exception as e:
-            print(f"Scraping error: {e}")
-            return []
+            print(f"[Stagehand] Error during extraction: {e}")
+            raise
+        finally:
+            # Clean up
+            try:
+                await stagehand.close()
+            except Exception:
+                pass
+        
+        return None
     
-    async def _get_placeholder_inspiration(
+    async def _get_curated_inspiration(
         self,
         query: str,
         style: Optional[str],
@@ -275,7 +336,7 @@ class BrowserbaseService:
         limit: int
     ) -> Dict[str, Any]:
         """
-        Return curated placeholder images when Browserbase is unavailable.
+        Return curated placeholder images when Stagehand is unavailable.
         These are royalty-free images from Unsplash for different design styles.
         """
         # Curated Unsplash images for design inspiration by style
@@ -304,6 +365,12 @@ class BrowserbaseService:
                 {"url": "https://images.unsplash.com/photo-1600607687644-aac4c3eac7f4?w=400", "description": "Opulent living room"},
                 {"url": "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=400", "description": "Premium residential design"},
             ],
+            "mid_century": [
+                {"url": "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400", "description": "Mid-century modern living"},
+                {"url": "https://images.unsplash.com/photo-1505691938895-1758d7feb511?w=400", "description": "Retro furniture design"},
+                {"url": "https://images.unsplash.com/photo-1556909212-d5b604d0c90d?w=400", "description": "60s inspired interior"},
+                {"url": "https://images.unsplash.com/photo-1567016432779-094069958ea5?w=400", "description": "Vintage modern blend"},
+            ],
             "default": [
                 {"url": "https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=400", "description": "Contemporary interior"},
                 {"url": "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=400", "description": "Stylish living space"},
@@ -317,9 +384,9 @@ class BrowserbaseService:
         # Space-specific images
         space_images = {
             "bathroom": [
-                {"url": "https://images.unsplash.com/photo-1600566752355-35792bedcfea?w=400", "description": "Modern bathroom design"},
-                {"url": "https://images.unsplash.com/photo-1600566752229-250ed79470f8?w=400", "description": "Spa bathroom inspiration"},
-                {"url": "https://images.unsplash.com/photo-1552321554-5fefe8c9ef14?w=400", "description": "Contemporary bathroom"},
+                {"url": "https://images.unsplash.com/photo-1552321554-5fefe8c9ef14?w=400", "description": "Modern bathroom design"},
+                {"url": "https://images.unsplash.com/photo-1507652313519-d4e9174996dd?w=400", "description": "Spa bathroom inspiration"},
+                {"url": "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?w=400", "description": "Contemporary bathroom"},
             ],
             "kitchen": [
                 {"url": "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400", "description": "Modern kitchen design"},
@@ -335,6 +402,11 @@ class BrowserbaseService:
                 {"url": "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?w=400", "description": "Modern living room"},
                 {"url": "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?w=400", "description": "Contemporary living space"},
                 {"url": "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=400", "description": "Stylish living room"},
+            ],
+            "office": [
+                {"url": "https://images.unsplash.com/photo-1497366216548-37526070297c?w=400", "description": "Modern home office"},
+                {"url": "https://images.unsplash.com/photo-1497366754035-f200968a6e72?w=400", "description": "Professional workspace"},
+                {"url": "https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=400", "description": "Creative office design"},
             ],
         }
         
@@ -357,7 +429,7 @@ class BrowserbaseService:
         # Format results
         formatted = [
             {
-                "id": f"placeholder_{i}",
+                "id": f"curated_{i}",
                 "url": img["url"],
                 "thumbnail": img["url"],
                 "description": img["description"],
@@ -374,11 +446,11 @@ class BrowserbaseService:
             "images": formatted,
             "total": len(formatted),
             "source": "curated_gallery",
-            "note": "Using curated gallery images. Connect Browserbase for live web search.",
+            "note": "Using curated gallery. Set STAGEHAND_MODEL_API_KEY for AI-powered web search.",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     
-    @weave.op(name="browserbase_search_styles")
+    @weave.op(name="stagehand_search_styles")
     async def search_design_styles(
         self,
         base_style: str,
@@ -386,18 +458,9 @@ class BrowserbaseService:
     ) -> Dict[str, Any]:
         """
         Search for variations of a design style.
-        
-        Args:
-            base_style: The main style (modern, minimalist, etc.)
-            limit: Number of style variations to return
-            
-        Returns:
-            Dict with style variations and example images
         """
-        # Get keywords for the style
-        keywords = STYLE_KEYWORDS.get(base_style, STYLE_KEYWORDS["modern"])
+        keywords = STYLE_KEYWORDS.get(base_style, STYLE_KEYWORDS.get("modern", []))
         
-        # Fetch inspiration for each keyword variation
         results = []
         for keyword in keywords[:limit]:
             images = await self.fetch_inspiration_images(keyword, style=base_style, limit=3)
@@ -413,25 +476,16 @@ class BrowserbaseService:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     
-    @weave.op(name="browserbase_fetch_mood_board")
+    @weave.op(name="stagehand_fetch_mood_board")
     async def fetch_mood_board(
         self,
         styles: List[str],
         space_type: str,
-        keywords: List[str] = None,
+        keywords: Optional[List[str]] = None,
         limit: int = 9,
     ) -> Dict[str, Any]:
         """
         Create a mood board with inspiration images from multiple sources.
-        
-        Args:
-            styles: List of design styles to include
-            space_type: Type of space
-            keywords: Additional search keywords
-            limit: Total images for the mood board
-            
-        Returns:
-            Dict with mood board images organized by style
         """
         mood_board = {
             "success": True,
@@ -461,9 +515,25 @@ class BrowserbaseService:
             })
         
         return mood_board
+    
+    async def get_status(self) -> Dict[str, Any]:
+        """Get the current status of Browserbase and Stagehand integration."""
+        stagehand_available = await self._check_stagehand_availability()
+        
+        return {
+            "browserbase_configured": self.is_browserbase_configured,
+            "stagehand_configured": self.is_stagehand_configured,
+            "stagehand_available": stagehand_available,
+            "mode": "ai_powered" if stagehand_available else "curated_gallery",
+            "capabilities": {
+                "ai_extraction": stagehand_available,
+                "session_tracking": self.is_browserbase_configured,
+                "curated_images": True,
+            }
+        }
 
 
 # ============================================
-# Singleton Instance
+# Singleton Instance (backward compatible)
 # ============================================
-browserbase_service = BrowserbaseService()
+browserbase_service = StagehandBrowserbaseService()
