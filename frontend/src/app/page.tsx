@@ -2603,22 +2603,16 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
             { 
               label: "Multi-Agent Pipeline", 
               desc: "Weave-traced orchestration", 
-              tint: "from-pink-200/55 via-white/45 to-white/35",
-              darkTint: "dark:from-pink-500/15 dark:via-zinc-900/50 dark:to-zinc-950/70",
               icon: "🎯"
             },
             { 
               label: "Self-Improving AI", 
               desc: "Learns from each iteration", 
-              tint: "from-violet-200/55 via-white/45 to-white/35",
-              darkTint: "dark:from-violet-500/15 dark:via-zinc-900/50 dark:to-zinc-950/70",
               icon: "🧠"
             },
             { 
               label: "Real-time Streaming", 
               desc: "Watch agents think & work", 
-              tint: "from-cyan-200/55 via-white/45 to-white/35",
-              darkTint: "dark:from-cyan-500/15 dark:via-zinc-900/50 dark:to-zinc-950/70",
               icon: "⚡"
             },
           ].map((item) => (
@@ -2627,12 +2621,11 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               className={cn(
-                "p-4 rounded-xl border backdrop-blur-2xl transition-all cursor-default",
-                "bg-gradient-to-br shadow-[0_12px_36px_rgba(15,23,42,0.12),0_6px_16px_rgba(15,23,42,0.08)]",
-                "ring-1 ring-white/50 dark:ring-white/10",
-                "border-white/60 dark:border-white/10",
-                item.tint,
-                item.darkTint
+                "p-4 rounded-xl border backdrop-blur-xl transition-all cursor-default",
+                "bg-white/70 dark:bg-zinc-900/60",
+                "shadow-sm",
+                "ring-1 ring-neutral-200/50 dark:ring-white/10",
+                "border-neutral-200/60 dark:border-white/10"
               )}
             >
               <div className="flex items-center gap-2 mb-1">
@@ -2847,8 +2840,8 @@ function SplitView({
         </div>
 
         {/* Messages area - modern chat feel */}
-        <div ref={chatScrollRef} className="flex-1 overflow-y-auto scrollbar-invisible pb-24">
-          <div className="max-w-xl mx-auto px-5 py-5">
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto scrollbar-invisible pb-24 flex flex-col">
+          <div className="max-w-xl mx-auto px-5 py-5 mt-auto w-full">
             {/* Uploaded Images - Elegant display */}
             {uploadedImages.length > 0 && (
               <motion.div 
@@ -3076,7 +3069,8 @@ function SplitView({
         </div>
         
         {/* Scrollable content */}
-        <div ref={activityScrollRef} className="flex-1 overflow-y-auto scrollbar-invisible p-4 space-y-4">
+        <div ref={activityScrollRef} className="flex-1 overflow-y-auto scrollbar-invisible p-4 flex flex-col">
+          <div className="mt-auto space-y-4">
           {/* Batch Demo Console */}
           {orchestrationStatus?.is_batch && (
             <motion.div
@@ -3263,6 +3257,7 @@ function SplitView({
             )}
             
             <div ref={cardsEndRef} className="h-2" />
+          </div>
           </div>
         </div>
       </motion.div>

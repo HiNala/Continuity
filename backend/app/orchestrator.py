@@ -391,6 +391,8 @@ class Orchestrator:
             async with semaphore:
                 async with AsyncSessionLocal() as session:
                     orchestrator = Orchestrator(session, self.project_id, self.config)
+                    # Must load project before processing scene
+                    await orchestrator.load_project()
                     result = await session.execute(
                         select(Scene).where(Scene.id == scene_id)
                     )
@@ -547,10 +549,17 @@ class Orchestrator:
         Process a single scene through the complete pipeline.
         Each scene gets its own spatial analysis and generation phases.
         """
+        # Ensure project is loaded
+        if not self.project:
+            await self.load_project()
+        
         scene.status = SceneStatus.ANALYZING
         scene.orchestration_state = OrchestrationState.ANALYZING_SPACE
         scene.started_at = datetime.now(timezone.utc)
         await self.session.flush()
+        
+        # Get total scenes count safely
+        total_scenes = self.project.total_scenes or 1
         
         try:
             # Step 1: Spatial analysis for this scene
@@ -558,7 +567,7 @@ class Orchestrator:
                 scene=scene,
                 to_state=OrchestrationState.ANALYZING_SPACE,
                 trigger=OrchestrationTrigger.START,
-                message=f"Analyzing scene {scene.scene_index + 1} of {self.project.total_scenes}",
+                message=f"Analyzing scene {scene.scene_index + 1} of {total_scenes}",
                 details={"scene_index": scene.scene_index, "input_image": scene.input_image_path},
             )
             analysis_result = await spatial_agent.analyze_images(

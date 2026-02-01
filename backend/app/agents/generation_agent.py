@@ -163,6 +163,75 @@ class GenerationAgent:
         self.output_dir = Path("generated_images")
         self.output_dir.mkdir(exist_ok=True)
     
+    def _prepare_image_for_api(self, image_path: str) -> Optional[Dict[str, Any]]:
+        """
+        Prepare an image for API calls. Handles data URLs, localhost URLs, and local files.
+        Returns dict with 'mime_type' and 'data' (base64), or None if failed.
+        """
+        try:
+            # Handle data URLs (base64 encoded)
+            if image_path.startswith("data:"):
+                header, encoded = image_path.split(",", 1)
+                mime_type = "image/jpeg"
+                if ";base64" in header:
+                    mime_type = header[5:].split(";")[0] or mime_type
+                if encoded:
+                    return {"mime_type": mime_type, "data": encoded}
+                return None
+            
+            # Handle localhost URLs - convert to local file path
+            # External APIs cannot access localhost URLs
+            if image_path.startswith(('http://localhost', 'http://127.0.0.1')):
+                if '/uploaded_images/' in image_path:
+                    filename = image_path.split('/uploaded_images/')[-1]
+                    local_path = Path("uploaded_images") / filename
+                    if local_path.exists():
+                        return self._read_image_file(local_path)
+                elif '/generated_images/' in image_path:
+                    filename = image_path.split('/generated_images/')[-1]
+                    local_path = Path("generated_images") / filename
+                    if local_path.exists():
+                        return self._read_image_file(local_path)
+                print(f"Warning: Could not resolve localhost URL: {image_path}")
+                return None
+            
+            # Handle external URLs - would need to fetch, but for now skip
+            if image_path.startswith(('http://', 'https://')):
+                # For external URLs, we'd need to download first
+                # For now, return None and let the caller handle it
+                print(f"Warning: External URLs not yet supported for image input: {image_path}")
+                return None
+            
+            # Handle local file paths
+            path = Path(image_path)
+            if path.exists():
+                return self._read_image_file(path)
+            
+            return None
+        except Exception as e:
+            print(f"Error preparing image {image_path}: {e}")
+            return None
+    
+    def _read_image_file(self, path: Path) -> Optional[Dict[str, Any]]:
+        """Read an image file and return base64 encoded data."""
+        try:
+            with open(path, "rb") as f:
+                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+            
+            suffix = path.suffix.lower()
+            mime_type = {
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".webp": "image/webp",
+                ".gif": "image/gif",
+            }.get(suffix, "image/jpeg")
+            
+            return {"mime_type": mime_type, "data": image_data}
+        except Exception as e:
+            print(f"Error reading image file {path}: {e}")
+            return None
+    
     @weave.op(name="generation_agent_load_policy")
     async def load_policy(
         self,
@@ -425,40 +494,12 @@ class GenerationAgent:
             
             # Add input image if provided
             if input_image_path:
-                if input_image_path.startswith("data:"):
-                    header, encoded = input_image_path.split(",", 1)
-                    mime_type = "image/jpeg"
-                    if ";base64" in header:
-                        mime_type = header[5:].split(";")[0] or mime_type
-                    if encoded:
-                        parts.insert(0, {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": encoded
-                            }
-                        })
-                elif input_image_path.startswith(('http://', 'https://')):
-                    # For URL images, instruct model to reference them
-                    parts.insert(0, {
-                        "text": f"Reference image URL: {input_image_path}\n\nBased on this reference:"
-                    })
-                elif Path(input_image_path).exists():
-                    # Load and encode local file
-                    with open(input_image_path, "rb") as f:
-                        image_data = base64.standard_b64encode(f.read()).decode("utf-8")
-                    
-                    suffix = Path(input_image_path).suffix.lower()
-                    mime_type = {
-                        ".jpg": "image/jpeg",
-                        ".jpeg": "image/jpeg",
-                        ".png": "image/png",
-                        ".webp": "image/webp",
-                    }.get(suffix, "image/jpeg")
-                    
+                image_data_result = self._prepare_image_for_api(input_image_path)
+                if image_data_result:
                     parts.insert(0, {
                         "inline_data": {
-                            "mime_type": mime_type,
-                            "data": image_data
+                            "mime_type": image_data_result["mime_type"],
+                            "data": image_data_result["data"]
                         }
                     })
             

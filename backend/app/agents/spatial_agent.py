@@ -140,7 +140,7 @@ class SpatialAnalysisAgent:
             Dict with image data ready for API, or None if failed
         """
         try:
-            # Handle URL vs local file
+            # Handle data URLs (base64 encoded)
             if image_path.startswith("data:"):
                 header, encoded = image_path.split(",", 1)
                 mime_type = "image/jpeg"
@@ -153,38 +153,67 @@ class SpatialAnalysisAgent:
                     "data": encoded,
                     "mime_type": mime_type,
                 }
+            
+            # Handle localhost URLs - convert to local file path
+            # Gemini cannot access localhost URLs, so we read the file directly
+            if image_path.startswith(('http://localhost', 'http://127.0.0.1')):
+                # Extract filename from URL like http://localhost:8000/uploaded_images/filename.jpg
+                if '/uploaded_images/' in image_path:
+                    filename = image_path.split('/uploaded_images/')[-1]
+                    local_path = Path("uploaded_images") / filename
+                    if local_path.exists():
+                        return self._read_local_file(local_path)
+                elif '/generated_images/' in image_path:
+                    filename = image_path.split('/generated_images/')[-1]
+                    local_path = Path("generated_images") / filename
+                    if local_path.exists():
+                        return self._read_local_file(local_path)
+                # Fallback: try to read as-is if it's a local path
+                print(f"Warning: Could not resolve localhost URL to local file: {image_path}")
+                return None
+            
+            # Handle external URLs - Gemini can access these directly
             if image_path.startswith(('http://', 'https://')):
                 return {
                     "type": "url",
                     "url": image_path,
                 }
-            else:
-                # Read local file and encode as base64
-                path = Path(image_path)
-                if not path.exists():
-                    return None
-                
-                with open(path, "rb") as f:
-                    image_data = base64.standard_b64encode(f.read()).decode("utf-8")
-                
-                # Determine mime type
-                suffix = path.suffix.lower()
-                mime_types = {
-                    ".jpg": "image/jpeg",
-                    ".jpeg": "image/jpeg",
-                    ".png": "image/png",
-                    ".gif": "image/gif",
-                    ".webp": "image/webp",
-                }
-                mime_type = mime_types.get(suffix, "image/jpeg")
-                
-                return {
-                    "type": "base64",
-                    "mime_type": mime_type,
-                    "data": image_data,
-                }
+            
+            # Handle local file paths
+            path = Path(image_path)
+            if path.exists():
+                return self._read_local_file(path)
+            
+            return None
+            
         except Exception as e:
             print(f"Error preparing image {image_path}: {e}")
+            return None
+    
+    def _read_local_file(self, path: Path) -> Optional[Dict[str, Any]]:
+        """Read a local file and encode as base64."""
+        try:
+            with open(path, "rb") as f:
+                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+            
+            # Determine mime type
+            suffix = path.suffix.lower()
+            mime_types = {
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+            }
+            mime_type = mime_types.get(suffix, "image/jpeg")
+            
+            return {
+                "type": "base64",
+                "mime_type": mime_type,
+                "data": image_data,
+            }
+        except Exception as e:
+            print(f"Error reading local file {path}: {e}")
             return None
     
     @weave.op(name="spatial_agent_analyze_image")
