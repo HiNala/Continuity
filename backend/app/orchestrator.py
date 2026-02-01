@@ -326,17 +326,30 @@ class Orchestrator:
     async def _handle_gathering_requirements(self) -> None:
         """Handle GATHERING_REQUIREMENTS - run requirements agent."""
         try:
+            # Skip if requirements already exist
+            existing_req = await self.session.execute(
+                select(Requirements).where(Requirements.project_id == self.project_id)
+            )
+            if existing_req.scalar_one_or_none():
+                await self.transition(
+                    OrchestrationState.ANALYZING_SPACE,
+                    OrchestrationTrigger.SKIP,
+                    {"message": "Requirements already available, skipping clarification"}
+                )
+                return
+
             # Analyze the goal
             if self.project.goal:
-                analysis = await requirements_agent.analyze_goal(self.project.goal)
-                
-                if analysis.get("questions_needed") and analysis.get("questions"):
+                analysis = requirements_agent.analyze_goal(self.project.goal)
+                questions = requirements_agent.generate_questions(analysis)
+
+                if questions:
                     # Need clarification
                     await self.transition(
                         OrchestrationState.AWAITING_CLARIFICATION,
                         OrchestrationTrigger.SUCCESS,
                         {
-                            "questions_count": len(analysis.get("questions", [])),
+                            "questions_count": len(questions),
                             "identified": analysis.get("identified", {}),
                         }
                     )
@@ -709,8 +722,10 @@ class Orchestrator:
         
         try:
             # Process answers and finalize requirements
-            await requirements_agent.process_responses(
-                self.session, self.project_id, answers
+            analysis = requirements_agent.analyze_goal(self.project.goal or "")
+            specification = requirements_agent.process_responses(analysis, answers)
+            await requirements_agent.save_requirements(
+                self.session, self.project_id, specification
             )
             
             # Transition to analysis

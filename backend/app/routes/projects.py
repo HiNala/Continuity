@@ -3,20 +3,23 @@ Continuity - Projects API Routes
 Handles project creation, requirements gathering, spatial analysis, and project management.
 """
 
+import asyncio
+import json
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, AsyncGenerator
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload
 
 from app.database import get_async_session
 from app.models import (
     Project, Requirements, ProjectStatus, Constraint, ProjectAnalysis,
-    Iteration, EvaluationDetail,
+    Iteration, EvaluationDetail, OrchestrationLog,
     EvaluationStatus, OrchestrationState
 )
 from app.agents.requirements_agent import requirements_agent
@@ -1316,3 +1319,327 @@ async def get_orchestration_log(
         return [OrchestrationLogEntry(**entry) for entry in log]
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# ============================================
+# Streaming Updates Endpoint (SSE)
+# ============================================
+class StreamEvent(BaseModel):
+    """Event sent via SSE stream."""
+    event: str  # "agent", "thinking", "progress", "error", "complete"
+    agent: Optional[str] = None  # "requirements", "spatial", "generation", "qc", "orchestrator"
+    action: Optional[str] = None  # "analyzing", "generating", "evaluating", etc.
+    message: str
+    details: Optional[Dict[str, Any]] = None
+    timestamp: str
+
+
+async def generate_orchestration_stream(
+    session: AsyncSession,
+    project_id: UUID
+) -> AsyncGenerator[str, None]:
+    """
+    Generator for streaming orchestration progress events.
+    Sends Server-Sent Events (SSE) format.
+    """
+    from app.models import OrchestrationLog, Project, OrchestrationState
+    
+    def format_sse(event: str, data: dict) -> str:
+        """Format data as SSE event."""
+        return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+    
+    # Get project
+    result = await session.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        yield format_sse("error", {
+            "event": "error",
+            "message": "Project not found",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        return
+    
+    # Send initial state
+    yield format_sse("progress", {
+        "event": "progress",
+        "agent": "orchestrator",
+        "action": "starting",
+        "message": f"Starting orchestration. Current state: {project.orchestration_state}",
+        "details": {"state": project.orchestration_state, "phase": project.current_phase},
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Track last log entry
+    last_log_id = None
+    result = await session.execute(
+        select(OrchestrationLog)
+        .where(OrchestrationLog.project_id == project_id)
+        .order_by(desc(OrchestrationLog.created_at))
+        .limit(1)
+    )
+    last_log = result.scalar_one_or_none()
+    if last_log:
+        last_log_id = last_log.id
+    
+    # Poll for updates
+    max_iterations = 300  # 5 minutes max
+    iteration = 0
+    terminal_states = {
+        OrchestrationState.COMPLETED,
+        OrchestrationState.COMPLETED_WITH_WARNINGS,
+        OrchestrationState.FAILED,
+        OrchestrationState.AWAITING_CLARIFICATION,
+    }
+    
+    while iteration < max_iterations:
+        iteration += 1
+        
+        # Refresh project state
+        await session.refresh(project)
+        
+        # Get new log entries
+        query = select(OrchestrationLog).where(
+            OrchestrationLog.project_id == project_id
+        ).order_by(OrchestrationLog.created_at)
+        
+        if last_log_id:
+            query = query.where(OrchestrationLog.id > last_log_id)
+        
+        result = await session.execute(query)
+        new_logs = result.scalars().all()
+        
+        # Process new log entries
+        for log in new_logs:
+            # Determine agent and action from state
+            agent = "orchestrator"
+            action = "thinking"
+            
+            if "requirements" in log.to_state or "clarification" in log.to_state:
+                agent = "requirements"
+                action = "analyzing" if "gathering" in log.to_state else "question"
+            elif "analyzing_space" in log.to_state:
+                agent = "spatial"
+                action = "analyzing"
+            elif "generating" in log.to_state:
+                agent = "generation"
+                action = "generating"
+                # Extract phase
+                phase = log.to_state.replace("generating_", "")
+                action = f"generating_{phase}"
+            elif "evaluating" in log.to_state:
+                agent = "qc"
+                action = "evaluating"
+            elif "retrying" in log.to_state:
+                agent = "qc"
+                action = "policy_update"
+            elif log.to_state in ["completed", "completed_with_warnings"]:
+                agent = "orchestrator"
+                action = "success"
+            elif log.to_state == "failed":
+                agent = "orchestrator"
+                action = "error"
+            
+            # Create message
+            message = f"Transitioning from {log.from_state} to {log.to_state}"
+            if log.details:
+                if log.details.get("message"):
+                    message = log.details["message"]
+                elif log.details.get("error"):
+                    message = f"Error: {log.details['error']}"
+            
+            yield format_sse("agent", {
+                "event": "agent",
+                "agent": agent,
+                "action": action,
+                "message": message,
+                "details": {
+                    "from_state": log.from_state,
+                    "to_state": log.to_state,
+                    "trigger": log.trigger,
+                    "duration_ms": log.duration_ms,
+                    **log.details
+                },
+                "timestamp": log.created_at.isoformat()
+            })
+            
+            last_log_id = log.id
+        
+        # Check for terminal state
+        if project.orchestration_state in terminal_states:
+            event_type = "complete"
+            if project.orchestration_state == OrchestrationState.FAILED:
+                event_type = "error"
+            elif project.orchestration_state == OrchestrationState.AWAITING_CLARIFICATION:
+                event_type = "question"
+            
+            yield format_sse(event_type, {
+                "event": event_type,
+                "agent": "orchestrator",
+                "action": "complete" if event_type == "complete" else event_type,
+                "message": f"Orchestration {project.orchestration_state}",
+                "details": {
+                    "state": project.orchestration_state,
+                    "has_warnings": project.has_warnings,
+                    "warning_details": project.warning_details,
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+            break
+        
+        # Send heartbeat
+        if iteration % 10 == 0:
+            yield format_sse("heartbeat", {
+                "event": "heartbeat",
+                "message": "Connection alive",
+                "details": {"state": project.orchestration_state},
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+        
+        await asyncio.sleep(1)
+    
+    # Final message if max iterations reached
+    if iteration >= max_iterations:
+        yield format_sse("error", {
+            "event": "error",
+            "message": "Stream timeout - orchestration still running",
+            "details": {"state": project.orchestration_state},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+
+
+@router.get("/{project_id}/stream")
+async def stream_orchestration(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Stream orchestration progress updates via Server-Sent Events.
+    
+    Use this for real-time UI updates showing agent reasoning and progress.
+    
+    Events:
+    - agent: Agent activity (analyzing, generating, evaluating)
+    - thinking: Agent reasoning/thought process
+    - progress: General progress updates
+    - question: Clarification needed from user
+    - error: Error occurred
+    - complete: Orchestration complete
+    - heartbeat: Connection keepalive
+    """
+    return StreamingResponse(
+        generate_orchestration_stream(session, project_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+# ============================================
+# Agent Reasoning Endpoint
+# ============================================
+class AgentReasoningResponse(BaseModel):
+    """Response containing agent reasoning traces."""
+    project_id: str
+    reasoning_steps: List[Dict[str, Any]]
+    weave_trace_url: Optional[str] = None
+
+
+@router.get("/{project_id}/reasoning", response_model=AgentReasoningResponse)
+async def get_agent_reasoning(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Get all agent reasoning and tool calls for a project.
+    
+    Returns the chain of thought from all agents.
+    """
+    from app.config import settings
+    
+    # Get orchestration log
+    result = await session.execute(
+        select(OrchestrationLog)
+        .where(OrchestrationLog.project_id == project_id)
+        .order_by(OrchestrationLog.created_at)
+    )
+    logs = result.scalars().all()
+    
+    # Get iterations for more detail
+    iterations_result = await session.execute(
+        select(Iteration)
+        .where(Iteration.project_id == project_id)
+        .order_by(Iteration.created_at)
+    )
+    iterations = iterations_result.scalars().all()
+    
+    reasoning_steps = []
+    
+    # Add orchestration transitions as reasoning steps
+    for log in logs:
+        step = {
+            "type": "transition",
+            "agent": "orchestrator",
+            "from_state": log.from_state,
+            "to_state": log.to_state,
+            "trigger": log.trigger,
+            "details": log.details,
+            "duration_ms": log.duration_ms,
+            "timestamp": log.created_at.isoformat(),
+        }
+        
+        # Add agent-specific reasoning
+        if "requirements" in log.to_state:
+            step["agent"] = "requirements"
+            step["reasoning"] = "Analyzing user goal to extract structured requirements"
+        elif "analyzing_space" in log.to_state:
+            step["agent"] = "spatial"
+            step["reasoning"] = "Examining images to identify physical constraints"
+        elif "generating" in log.to_state:
+            step["agent"] = "generation"
+            phase = log.to_state.replace("generating_", "")
+            step["reasoning"] = f"Generating {phase} phase transformation"
+        elif "evaluating" in log.to_state:
+            step["agent"] = "qc"
+            step["reasoning"] = "Evaluating output quality against criteria"
+        elif "retrying" in log.to_state:
+            step["agent"] = "qc"
+            step["reasoning"] = "Analyzing failure and updating policy for retry"
+        
+        reasoning_steps.append(step)
+    
+    # Add iteration details
+    for iteration in iterations:
+        step = {
+            "type": "generation",
+            "agent": "generation",
+            "phase": iteration.phase,
+            "iteration_number": iteration.iteration_number,
+            "prompt_used": iteration.prompt_used[:500] if iteration.prompt_used else None,
+            "status": iteration.status,
+            "latency_ms": iteration.generation_latency_ms,
+            "evaluation_score": iteration.evaluation_score,
+            "evaluation_status": iteration.evaluation_status,
+            "timestamp": iteration.created_at.isoformat(),
+            "reasoning": f"Executed {iteration.phase} generation (iteration {iteration.iteration_number})"
+        }
+        reasoning_steps.append(step)
+    
+    # Sort by timestamp
+    reasoning_steps.sort(key=lambda x: x.get("timestamp", ""))
+    
+    # Build Weave trace URL if available
+    weave_url = None
+    if settings.wandb_api_key and settings.weave_project_name:
+        weave_url = f"https://wandb.ai/{settings.weave_project_name}/weave"
+    
+    return AgentReasoningResponse(
+        project_id=str(project_id),
+        reasoning_steps=reasoning_steps,
+        weave_trace_url=weave_url,
+    )

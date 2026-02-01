@@ -930,3 +930,116 @@ export async function testAllAPIs(): Promise<AllAPITestsResult> {
 
   return response.json();
 }
+
+// ============================================
+// Streaming Types
+// ============================================
+export interface StreamEvent {
+  event: "agent" | "thinking" | "progress" | "question" | "error" | "complete" | "heartbeat";
+  agent?: "requirements" | "spatial" | "generation" | "qc" | "orchestrator";
+  action?: string;
+  message: string;
+  details?: Record<string, unknown>;
+  timestamp: string;
+}
+
+export interface AgentReasoningStep {
+  type: string;
+  agent: string;
+  reasoning?: string;
+  from_state?: string;
+  to_state?: string;
+  trigger?: string;
+  details?: Record<string, unknown>;
+  duration_ms?: number;
+  timestamp: string;
+  phase?: string;
+  iteration_number?: number;
+  prompt_used?: string;
+  status?: string;
+  latency_ms?: number;
+  evaluation_score?: number;
+  evaluation_status?: string;
+}
+
+export interface AgentReasoningResponse {
+  project_id: string;
+  reasoning_steps: AgentReasoningStep[];
+  weave_trace_url: string | null;
+}
+
+// ============================================
+// Streaming Functions
+// ============================================
+
+/**
+ * Subscribe to orchestration progress updates via SSE.
+ */
+export function subscribeToOrchestration(
+  projectId: string,
+  onEvent: (event: StreamEvent) => void,
+  onError?: (error: Error) => void
+): () => void {
+  const eventSource = new EventSource(`${API_URL}/api/projects/${projectId}/stream`);
+  let closedByClient = false;
+  
+  const handleEvent = (e: MessageEvent) => {
+    if (!e.data || e.data === "undefined" || e.data === "null") {
+      return;
+    }
+
+    try {
+      const data = JSON.parse(e.data) as StreamEvent;
+      onEvent(data);
+    } catch (err) {
+      console.warn("Failed to parse SSE event:", err, e.data);
+    }
+  };
+  
+  // Listen to all event types
+  eventSource.addEventListener("agent", handleEvent);
+  eventSource.addEventListener("thinking", handleEvent);
+  eventSource.addEventListener("progress", handleEvent);
+  eventSource.addEventListener("question", handleEvent);
+  eventSource.addEventListener("error", handleEvent);
+  eventSource.addEventListener("complete", handleEvent);
+  eventSource.addEventListener("heartbeat", handleEvent);
+  
+  eventSource.onerror = (err) => {
+    if (closedByClient) {
+      return;
+    }
+
+    const isClosed = eventSource.readyState === EventSource.CLOSED;
+    if (isClosed) {
+      console.error("SSE connection error:", err);
+      onError?.(new Error("Connection lost"));
+    } else {
+      console.warn("SSE connection interrupted, retrying...", err);
+    }
+  };
+  
+  // Return cleanup function
+  return () => {
+    closedByClient = true;
+    eventSource.close();
+  };
+}
+
+/**
+ * Get agent reasoning and tool call history.
+ */
+export async function getAgentReasoning(
+  projectId: string
+): Promise<AgentReasoningResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/reasoning`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get reasoning");
+  }
+
+  return response.json();
+}

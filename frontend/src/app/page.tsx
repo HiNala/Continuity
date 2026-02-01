@@ -2,20 +2,26 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
-import { RotateCcw, ChevronRight, Sparkles } from "lucide-react";
+import { RotateCcw, ChevronRight, Sparkles, WifiOff } from "lucide-react";
 import { AnimatedBackground } from "@/components/ui/animated-background";
 import { PromptInputBox } from "@/components/ui/ai-prompt-box";
 import { ContinuityLogo, ContinuityIcon } from "@/components/ui/continuity-logo";
 import { AgentWorkCard, QuestionCard, ImageDisplayCard, type AgentWorkCardProps } from "@/components/ui/agent-work-card";
 import { SettingsDropdown } from "@/components/SettingsDropdown";
+import { StreamingChatMessage, ThinkingIndicator, LiveBadge } from "@/components/ui/streaming-text";
 import { 
   createProject, 
   analyzeGoal, 
   submitAnswers,
   startOrchestration,
   getOrchestrationStatus,
+  subscribeToOrchestration,
+  submitOrchestrationClarification,
+  getAgentReasoning,
   type AnalyzeGoalResponse,
   type OrchestrationStatusResponse,
+  type StreamEvent,
+  type AgentReasoningResponse,
 } from "@/lib/api";
 
 const cn = (...classes: (string | undefined | null | false)[]) =>
@@ -50,6 +56,7 @@ type AppState = "welcome" | "active";
 
 interface AgentCard extends Omit<AgentWorkCardProps, 'id'> {
   id: string;
+  reasoning?: string;
 }
 
 interface ChatMessage {
@@ -58,6 +65,8 @@ interface ChatMessage {
   content: string;
   timestamp: string;
   images?: string[];
+  isStreaming?: boolean;
+  isNew?: boolean;
 }
 
 export default function ContinuityApp() {
@@ -71,10 +80,20 @@ export default function ContinuityApp() {
   const [orchestrationStatus, setOrchestrationStatus] = useState<OrchestrationStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [currentThinking, setCurrentThinking] = useState<{ agent: string; action: string } | null>(null);
+  const [weaveTraceUrl, setWeaveTraceUrl] = useState<string | null>(null);
   
   const cardsEndRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const streamCleanupRef = useRef<(() => void) | null>(null);
+  const messageCounterRef = useRef(0);
+
+  const getMessageId = useCallback(() => {
+    messageCounterRef.current += 1;
+    return `msg-${Date.now()}-${messageCounterRef.current}`;
+  }, []);
 
   // Auto-scroll to latest card with slight delay for animation
   useEffect(() => {
@@ -116,12 +135,203 @@ export default function ContinuityApp() {
   const addChatMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
     const newMessage = {
       ...message,
-      id: `msg-${Date.now()}`,
+      id: getMessageId(),
       timestamp: new Date().toLocaleTimeString(),
+      isNew: true,
     };
     setChatMessages(prev => [...prev, newMessage]);
+    // Mark as not new after animation
+    setTimeout(() => {
+      setChatMessages(prev => prev.map(m => 
+        m.id === newMessage.id ? { ...m, isNew: false } : m
+      ));
+    }, 2000);
     return newMessage.id;
+  }, [getMessageId]);
+
+  // Handle streaming events from SSE
+  const handleStreamEvent = useCallback((event: StreamEvent) => {
+    setIsConnected(true);
+    
+    switch (event.event) {
+      case "agent":
+      case "thinking":
+        // Update current thinking state
+        if (event.agent && event.action) {
+          setCurrentThinking({ agent: event.agent, action: event.action });
+        }
+        
+        // Add or update agent card based on state
+        setAgentCards(prev => {
+          const cardExists = prev.some(c => 
+            c.details?.to_state === event.details?.to_state
+          );
+          
+          if (!cardExists && event.agent) {
+            return [...prev, {
+              id: `card-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              agent: event.agent as AgentCard["agent"],
+              title: event.message,
+              content: getAgentDescription(event.agent, event.action || ""),
+              status: "running" as const,
+              action: mapActionToCardAction(event.action || ""),
+              timestamp: new Date(event.timestamp).toLocaleTimeString(),
+              details: event.details,
+            }];
+          }
+          return prev;
+        });
+        break;
+        
+      case "progress":
+        // Add assistant message for progress updates
+        if (event.message && !event.message.includes("heartbeat")) {
+          addChatMessage({
+            type: "assistant",
+            content: event.message,
+          });
+        }
+        break;
+        
+      case "question":
+        setCurrentThinking(null);
+        if (streamCleanupRef.current) {
+          streamCleanupRef.current();
+          streamCleanupRef.current = null;
+        }
+        addChatMessage({
+          type: "assistant",
+          content: "I need some clarification to proceed. Please answer the questions below.",
+        });
+        break;
+        
+      case "error":
+        setCurrentThinking(null);
+        setError(event.message);
+        if (streamCleanupRef.current) {
+          streamCleanupRef.current();
+          streamCleanupRef.current = null;
+        }
+        addChatMessage({
+          type: "system",
+          content: `Error: ${event.message}`,
+        });
+        break;
+        
+      case "complete":
+        setCurrentThinking(null);
+        if (streamCleanupRef.current) {
+          streamCleanupRef.current();
+          streamCleanupRef.current = null;
+        }
+        // Mark last agent card as completed
+        setAgentCards(prev => {
+          const updated = [...prev];
+          if (updated.length > 0) {
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              status: "completed",
+            };
+          }
+          return updated;
+        });
+        addChatMessage({
+          type: "assistant",
+          content: event.details?.has_warnings 
+            ? "Transformation complete with some minor adjustments. Check the results on the right."
+            : "Your visualization is ready! Check the results on the right.",
+        });
+        break;
+        
+      case "heartbeat":
+        // Just update connection status
+        setIsConnected(true);
+        break;
+    }
+  }, [addChatMessage]);
+
+  // Helper functions for streaming
+  const getAgentDescription = (agent: string, action: string): string => {
+    const descriptions: Record<string, Record<string, string>> = {
+      requirements: {
+        analyzing: "Parsing your design goals and extracting structured requirements...",
+        question: "Need additional information to understand your preferences...",
+        default: "Processing requirements specification...",
+      },
+      spatial: {
+        analyzing: "Examining images to identify physical constraints, fixtures, and boundaries...",
+        default: "Analyzing spatial layout...",
+      },
+      generation: {
+        generating_cleanup: "Removing visual noise and preparing the base image...",
+        generating_structural: "Adding structural elements while respecting constraints...",
+        generating_fixture: "Placing fixtures and furniture according to specifications...",
+        generating_style: "Applying style and aesthetic transformations...",
+        default: "Generating visualization...",
+      },
+      qc: {
+        evaluating: "Checking output against quality criteria and constraints...",
+        policy_update: "Analyzing results and adjusting generation parameters...",
+        default: "Evaluating quality...",
+      },
+      orchestrator: {
+        starting: "Initializing the multi-agent pipeline...",
+        success: "All phases completed successfully!",
+        error: "An error occurred during processing.",
+        default: "Coordinating agent workflow...",
+      },
+    };
+    
+    return descriptions[agent]?.[action] || descriptions[agent]?.default || "Processing...";
+  };
+
+  const mapActionToCardAction = (action: string): AgentCard["action"] => {
+    if (action.includes("generating")) return "generating";
+    if (action.includes("analyzing")) return "analyzing";
+    if (action.includes("evaluating")) return "evaluating";
+    if (action.includes("policy")) return "policy_update";
+    if (action.includes("question")) return "question";
+    if (action.includes("success")) return "success";
+    if (action.includes("error")) return "error";
+    return "thinking";
+  };
+
+  // Fetch agent reasoning data including Weave trace URL
+  const fetchAgentReasoning = useCallback(async (pId: string) => {
+    try {
+      const reasoning: AgentReasoningResponse = await getAgentReasoning(pId);
+      if (reasoning.weave_trace_url) {
+        setWeaveTraceUrl(reasoning.weave_trace_url);
+      }
+      // Update agent cards with reasoning details
+      if (reasoning.reasoning_steps && reasoning.reasoning_steps.length > 0) {
+        setAgentCards(prev => {
+          const updated = [...prev];
+          reasoning.reasoning_steps.forEach(step => {
+            const matchingCard = updated.find(c => 
+              c.agent === step.agent && 
+              c.details?.to_state === step.to_state
+            );
+            if (matchingCard && step.reasoning) {
+              matchingCard.reasoning = step.reasoning;
+            }
+          });
+          return updated;
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch agent reasoning:", err);
+    }
   }, []);
+
+  // Fetch reasoning when orchestration completes
+  useEffect(() => {
+    if (projectId && orchestrationStatus?.state && 
+        (orchestrationStatus.state === "completed" || 
+         orchestrationStatus.state === "completed_with_warnings")) {
+      fetchAgentReasoning(projectId);
+    }
+  }, [projectId, orchestrationStatus?.state, fetchAgentReasoning]);
 
   const handleSend = async (message: string, files?: File[]) => {
     setIsLoading(true);
@@ -263,7 +473,20 @@ export default function ContinuityApp() {
     });
 
     try {
-      await submitAnswers(projectId, { responses: answers });
+      // Check if we're in orchestration clarification mode
+      const isOrchestrationClarification = orchestrationStatus?.state === "awaiting_clarification";
+      
+      if (isOrchestrationClarification) {
+        // Convert answers to string map for orchestration endpoint
+        const stringAnswers: Record<string, string> = {};
+        for (const [key, value] of Object.entries(answers)) {
+          stringAnswers[key] = Array.isArray(value) ? value.join(", ") : String(value);
+        }
+        await submitOrchestrationClarification(projectId, stringAnswers);
+      } else {
+        // Initial requirements submission
+        await submitAnswers(projectId, { responses: answers });
+      }
       
       updateAgentCard(submitCardId, {
         status: "completed",
@@ -272,11 +495,17 @@ export default function ContinuityApp() {
 
       addChatMessage({
         type: "assistant",
-        content: "Perfect! Starting the transformation pipeline now...",
+        content: isOrchestrationClarification 
+          ? "Thanks! Continuing with the transformation..."
+          : "Perfect! Starting the transformation pipeline now...",
       });
 
       setQuestions(null);
-      await startPipeline(projectId);
+      
+      // Only start pipeline if not already in orchestration
+      if (!isOrchestrationClarification) {
+        await startPipeline(projectId);
+      }
 
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit answers");
@@ -305,10 +534,29 @@ export default function ContinuityApp() {
       
       updateAgentCard(orchestrateCardId, {
         status: "completed",
-        content: "Pipeline active. Monitoring progress...",
+        content: "Pipeline active. Streaming real-time updates...",
       });
 
-      startStatusPolling(pId);
+      // Subscribe to SSE stream for real-time updates
+      const cleanup = subscribeToOrchestration(
+        pId,
+        handleStreamEvent,
+        (error) => {
+          setIsConnected(false);
+          console.error("Stream error:", error);
+          // Fall back to polling if SSE fails
+          if (streamCleanupRef.current) {
+            streamCleanupRef.current();
+            streamCleanupRef.current = null;
+          }
+          if (!pollingRef.current) {
+            startStatusPolling(pId);
+          }
+        }
+      );
+      
+      streamCleanupRef.current = cleanup;
+      setIsConnected(true);
 
     } catch (err) {
       updateAgentCard(orchestrateCardId, {
@@ -316,6 +564,8 @@ export default function ContinuityApp() {
         content: `Error: ${err instanceof Error ? err.message : "Failed to start pipeline"}`,
         action: "error",
       });
+      // Fall back to polling
+      startStatusPolling(pId);
     }
   };
 
@@ -408,6 +658,10 @@ export default function ContinuityApp() {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
     }
+    if (streamCleanupRef.current) {
+      streamCleanupRef.current();
+      streamCleanupRef.current = null;
+    }
     setAppState("welcome");
     setProjectId(null);
     setAgentCards([]);
@@ -417,6 +671,9 @@ export default function ContinuityApp() {
     setOrchestrationStatus(null);
     setError(null);
     setChatMessages([]);
+    setIsConnected(false);
+    setCurrentThinking(null);
+    setWeaveTraceUrl(null);
   };
 
   const allQuestionsAnswered = questions 
@@ -426,7 +683,11 @@ export default function ContinuityApp() {
   return (
     <LayoutGroup>
       <div className="min-h-screen text-foreground dark">
-        <AnimatedBackground isActive={appState === "active"} intensity={appState === "active" ? "intense" : "normal"} />
+            <AnimatedBackground 
+              isActive={appState === "active"} 
+              intensity={appState === "active" ? "intense" : "normal"} 
+              isLoading={isLoading}
+            />
 
         <div className="relative z-10 min-h-screen flex flex-col">
           {/* Animated Header */}
@@ -495,6 +756,9 @@ export default function ContinuityApp() {
                   chatMessages={chatMessages}
                   error={error}
                   onSend={handleSend}
+                  isConnected={isConnected}
+                  currentThinking={currentThinking}
+                  weaveTraceUrl={weaveTraceUrl}
                 />
               )}
             </AnimatePresence>
@@ -580,13 +844,13 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
           </motion.div>
           <motion.h1
             variants={itemVariants}
-            className="text-4xl md:text-5xl font-semibold tracking-tight text-balance bg-gradient-to-b from-foreground via-foreground/90 to-foreground/70 bg-clip-text text-transparent"
+            className="text-4xl md:text-5xl font-bold tracking-tight text-balance text-foreground"
           >
             Transform any space
           </motion.h1>
           <motion.p
             variants={itemVariants}
-            className="text-muted-foreground mt-4 text-base"
+            className="text-foreground/70 mt-4 text-base font-medium"
           >
             Upload photos and describe your ideal renovation
           </motion.p>
@@ -616,32 +880,28 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
           </span>
         </motion.div>
 
-        {/* Features */}
+        {/* Features - more vibrant */}
         <motion.div
           variants={itemVariants}
-          className="mt-14 grid grid-cols-3 gap-3"
+          className="mt-12 grid grid-cols-3 gap-3"
         >
           {[
-            { label: "Spatial analysis", desc: "Constraint detection", gradient: "from-pink-500/20 to-rose-500/10" },
-            { label: "Multi-agent", desc: "Progressive refinement", gradient: "from-cyan-500/20 to-sky-500/10" },
-            { label: "Photorealistic", desc: "High-fidelity renders", gradient: "from-violet-500/20 to-purple-500/10" },
+            { label: "Spatial analysis", desc: "Constraint detection", color: "bg-pink-50 border-pink-200/60 hover:border-pink-300", icon: "from-pink-400 to-rose-500" },
+            { label: "Multi-agent", desc: "Progressive refinement", color: "bg-sky-50 border-sky-200/60 hover:border-sky-300", icon: "from-sky-400 to-cyan-500" },
+            { label: "Photorealistic", desc: "High-fidelity renders", color: "bg-violet-50 border-violet-200/60 hover:border-violet-300", icon: "from-violet-400 to-purple-500" },
           ].map((item) => (
             <motion.div
               key={item.label}
-              whileHover={{ scale: 1.02, y: -2 }}
+              whileHover={{ scale: 1.03, y: -3 }}
               whileTap={{ scale: 0.98 }}
-              className="group relative p-4 rounded-2xl border border-white/50 bg-white/30 backdrop-blur-xl transition-colors duration-300 cursor-default overflow-hidden shadow-sm hover:bg-white/40 hover:border-white/70"
+              className={cn(
+                "relative p-4 rounded-xl border transition-all duration-200 cursor-default shadow-sm hover:shadow-md",
+                item.color
+              )}
             >
-              <motion.div
-                initial={{ opacity: 0 }}
-                whileHover={{ opacity: 1 }}
-                transition={{ duration: 0.3 }}
-                className={cn("absolute inset-0 bg-gradient-to-br", item.gradient)}
-              />
-              <div className="relative">
-                <p className="text-sm font-medium text-foreground/90">{item.label}</p>
-                <p className="text-xs text-muted-foreground/70 mt-0.5">{item.desc}</p>
-              </div>
+              <div className={cn("w-2 h-2 rounded-full bg-gradient-to-br mb-2", item.icon)} />
+              <p className="text-sm font-semibold text-foreground">{item.label}</p>
+              <p className="text-xs text-muted-foreground/80 mt-0.5">{item.desc}</p>
             </motion.div>
           ))}
         </motion.div>
@@ -666,6 +926,9 @@ interface SplitViewProps {
   chatMessages: ChatMessage[];
   error: string | null;
   onSend: (message: string, files?: File[]) => void;
+  isConnected: boolean;
+  currentThinking: { agent: string; action: string } | null;
+  weaveTraceUrl: string | null;
 }
 
 function SplitView({
@@ -683,6 +946,9 @@ function SplitView({
   chatMessages,
   error,
   onSend,
+  isConnected,
+  currentThinking,
+  weaveTraceUrl,
 }: SplitViewProps) {
   return (
     <motion.div
@@ -692,37 +958,33 @@ function SplitView({
       transition={{ duration: 0.3 }}
       className="flex-1 flex overflow-hidden"
     >
-      {/* Left Panel - Chat Interface */}
+      {/* Left Panel - Conversation (Claude-style: narrower, cleaner) */}
       <motion.div
         {...slideInLeft}
         transition={{ ...smoothTransition, delay: 0.1 }}
-        className="w-[420px] min-w-[380px] border-r border-white/20 flex flex-col bg-gradient-to-b from-white/5 to-white/10 backdrop-blur-sm"
+        className="w-[360px] min-w-[320px] max-w-[400px] flex flex-col border-r border-black/[0.06]"
       >
-        {/* Chat header */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="px-5 py-4 border-b border-white/10"
-        >
-          <div className="flex items-center gap-3">
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.3, type: "spring", stiffness: 400 }}
-              className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center"
-            >
-              <ContinuityIcon size={16} />
-            </motion.div>
-            <div>
-              <h2 className="text-sm font-medium text-foreground/90">Design Assistant</h2>
-              <p className="text-xs text-muted-foreground/60">Interactive workspace</p>
+        {/* Minimal header */}
+        <div className="shrink-0 h-14 flex items-center justify-between px-4 border-b border-black/[0.04] bg-white/60 backdrop-blur-sm">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary/30 to-accent/30 flex items-center justify-center shadow-sm">
+              <ContinuityIcon size={14} />
             </div>
+            <span className="text-sm font-semibold text-foreground">Continuity</span>
           </div>
-        </motion.div>
+          {isConnected ? (
+            <LiveBadge />
+          ) : (
+            <div className="flex items-center gap-1 text-[10px] text-muted-foreground/50">
+              <WifiOff className="w-3 h-3" />
+              <span>Offline</span>
+            </div>
+          )}
+        </div>
 
-        {/* Chat messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
+        {/* Messages area - clean, minimal */}
+        <div className="flex-1 overflow-y-auto scrollbar-thin">
+          <div className="p-4 space-y-3">
           {/* Uploaded Images */}
           <AnimatePresence>
             {uploadedImages.length > 0 && (
@@ -762,19 +1024,19 @@ function SplitView({
                   </motion.div>
                 ))}
                 
-                {/* Submit button */}
+                {/* Submit button - clean style */}
                 <motion.button
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  whileHover={allQuestionsAnswered && !isLoading ? { scale: 1.02 } : {}}
-                  whileTap={allQuestionsAnswered && !isLoading ? { scale: 0.98 } : {}}
+                  whileHover={allQuestionsAnswered && !isLoading ? { scale: 1.01 } : {}}
+                  whileTap={allQuestionsAnswered && !isLoading ? { scale: 0.99 } : {}}
                   onClick={onSubmitAnswers}
                   disabled={!allQuestionsAnswered || isLoading}
                   className={cn(
-                    "w-full py-3 rounded-xl font-medium text-sm transition-all duration-300 flex items-center justify-center gap-2",
+                    "w-full py-2.5 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2",
                     allQuestionsAnswered && !isLoading
-                      ? "bg-gradient-to-br from-primary to-accent text-white shadow-lg hover:shadow-xl"
-                      : "bg-white/20 text-muted-foreground/40 cursor-not-allowed"
+                      ? "bg-foreground text-background hover:bg-foreground/90"
+                      : "bg-black/[0.04] text-muted-foreground/40 cursor-not-allowed"
                   )}
                 >
                   {isLoading ? (
@@ -782,14 +1044,14 @@ function SplitView({
                       <motion.div
                         animate={{ rotate: 360 }}
                         transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                        className="w-4 h-4 border-2 border-current border-t-transparent rounded-full"
+                        className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full"
                       />
                       Processing...
                     </>
                   ) : (
                     <>
                       Continue
-                      <ChevronRight className="w-4 h-4" />
+                      <ChevronRight className="w-3.5 h-3.5" />
                     </>
                   )}
                 </motion.button>
@@ -804,75 +1066,117 @@ function SplitView({
             )}
           </AnimatePresence>
 
-          {/* Error display */}
+          {/* Thinking indicator - cleaner */}
+          <AnimatePresence>
+            {currentThinking && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="flex gap-2.5"
+              >
+                <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary/25 to-accent/25 flex items-center justify-center shrink-0">
+                  <ContinuityIcon size={12} />
+                </div>
+                <div className="rounded-xl px-3 py-2 bg-black/[0.02] border border-black/[0.04] text-sm">
+                  <ThinkingIndicator 
+                    agent={currentThinking.agent} 
+                    action={currentThinking.action} 
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Error display - cleaner */}
           <AnimatePresence>
             {error && (
               <motion.div
-                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="rounded-lg border border-red-200 bg-red-50 p-3"
               >
-                <p className="text-sm text-red-700">{error}</p>
+                <p className="text-xs text-red-700">{error}</p>
               </motion.div>
             )}
           </AnimatePresence>
 
           <div ref={chatEndRef} />
+          </div>
         </div>
 
-        {/* Bottom input */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="p-4 border-t border-white/10"
-        >
-          <PromptInputBox 
+        {/* Input - Claude-style minimal */}
+        <div className="shrink-0 p-3 border-t border-black/[0.04] bg-white/60 backdrop-blur-sm">
+          <PromptInputBox
             onSend={onSend}
             isLoading={isLoading}
-            placeholder="Ask a follow-up question..."
+            placeholder="Ask a follow-up..."
             compact
           />
-        </motion.div>
+        </div>
       </motion.div>
 
-      {/* Right Panel - Agent Work Cards */}
+      {/* Right Panel - Agent Activity (wider, cleaner) */}
       <motion.div
         {...slideInRight}
         transition={{ ...smoothTransition, delay: 0.15 }}
-        className="flex-1 overflow-y-auto scrollbar-thin"
+        className="flex-1 overflow-y-auto bg-gradient-to-br from-slate-50/30 to-white scrollbar-thin"
       >
-        <div className="p-6">
-          {/* Panel header */}
+        <div className="p-6 max-w-3xl mx-auto">
+          {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25 }}
-            className="mb-6"
+            transition={{ delay: 0.2 }}
+            className="mb-5 flex items-center justify-between"
           >
-            <h2 className="text-lg font-semibold text-foreground/90">Agent Activity</h2>
-            <p className="text-sm text-muted-foreground/60">Real-time pipeline progress</p>
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Agent Activity</h2>
+              <p className="text-xs text-muted-foreground/70 mt-0.5">Real-time pipeline progress</p>
+            </div>
+            {weaveTraceUrl && (
+              <a
+                href={weaveTraceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
+              >
+                View in Weave →
+              </a>
+            )}
           </motion.div>
 
-          {/* Cards with staggered animation */}
-          <div className="max-w-2xl space-y-4">
+          {/* Agent cards */}
+          <div className="space-y-3">
             <AnimatePresence mode="popLayout">
               {agentCards.map((card, index) => (
                 <motion.div
                   key={card.id}
-                  initial={{ opacity: 0, y: 30, scale: 0.95 }}
+                  initial={{ opacity: 0, y: 20, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
                   transition={{
                     ...smoothTransition,
-                    delay: Math.min(index * 0.05, 0.3), // Cap delay at 0.3s
+                    delay: Math.min(index * 0.04, 0.2),
                   }}
                 >
-                  <AgentWorkCard {...card} />
+                  <AgentWorkCard {...card} weaveTraceUrl={weaveTraceUrl || undefined} />
                 </motion.div>
               ))}
             </AnimatePresence>
+            
+            {agentCards.length === 0 && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-center py-16 text-muted-foreground/40"
+              >
+                <Sparkles className="w-8 h-8 mx-auto mb-3 opacity-40" />
+                <p className="text-sm">Agents will appear here as they work</p>
+              </motion.div>
+            )}
+            
             <div ref={cardsEndRef} className="h-4" />
           </div>
         </div>
@@ -881,71 +1185,76 @@ function SplitView({
   );
 }
 
-// Chat Bubble with smooth animations
+// Chat Bubble with clean design and streaming text
 function ChatBubble({ message, index }: { message: ChatMessage; index: number }) {
   const isUser = message.type === "user";
   const isSystem = message.type === "system";
+  const isAssistant = message.type === "assistant";
+  const shouldStream = isAssistant && message.isNew;
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 15, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
       transition={{
-        ...smoothTransition,
-        delay: Math.min(index * 0.05, 0.2),
+        duration: 0.25,
+        delay: Math.min(index * 0.03, 0.15),
       }}
       className={cn(
-        "flex gap-3",
+        "flex gap-2.5",
         isUser ? "flex-row-reverse" : "flex-row"
       )}
     >
       {!isUser && (
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.1, type: "spring", stiffness: 400 }}
+        <div
           className={cn(
-            "w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
-            isSystem ? "bg-amber-500/20" : "bg-gradient-to-br from-primary/20 to-accent/20"
+            "w-6 h-6 rounded-md flex items-center justify-center shrink-0 mt-0.5",
+            isSystem ? "bg-amber-100" : "bg-gradient-to-br from-primary/20 to-accent/20"
           )}
         >
           {isSystem ? (
-            <span className="text-amber-600 text-xs">!</span>
+            <span className="text-amber-600 text-[10px] font-bold">!</span>
           ) : (
-            <ContinuityIcon size={14} />
+            <ContinuityIcon size={12} />
           )}
-        </motion.div>
+        </div>
       )}
-      <motion.div
-        whileHover={{ scale: 1.01 }}
+      <div
         className={cn(
-          "rounded-2xl px-4 py-3 max-w-[85%]",
+          "rounded-xl px-3 py-2 max-w-[85%]",
           isUser 
-            ? "bg-gradient-to-br from-primary to-accent text-white rounded-br-md"
+            ? "bg-foreground text-background rounded-br-sm"
             : isSystem
-              ? "bg-amber-500/10 border border-amber-500/20 text-amber-800"
-              : "bg-white/40 border border-white/50 text-foreground/80 rounded-bl-md"
+              ? "bg-amber-50 border border-amber-200 text-amber-900"
+              : "bg-black/[0.02] border border-black/[0.04] text-foreground rounded-bl-sm"
         )}
       >
-        <p className="text-sm leading-relaxed">{message.content}</p>
+        {shouldStream ? (
+          <StreamingChatMessage 
+            content={message.content}
+            isNew={true}
+            speed={60}
+            className="text-[13px] leading-relaxed"
+          />
+        ) : (
+          <p className="text-[13px] leading-relaxed">{message.content}</p>
+        )}
+        {/* Compact image thumbnails in messages */}
         {message.images && message.images.length > 0 && (
-          <div className="mt-2 grid grid-cols-2 gap-1.5">
+          <div className="mt-2 flex gap-1.5 flex-wrap">
             {message.images.map((img, i) => (
-              <motion.div
+              <div
                 key={i}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: i * 0.1 }}
-                className="rounded-lg overflow-hidden aspect-video"
+                className="w-10 h-10 rounded-md overflow-hidden border border-black/10"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={img} alt="" className="w-full h-full object-cover" />
-              </motion.div>
+              </div>
             ))}
           </div>
         )}
-      </motion.div>
+      </div>
     </motion.div>
   );
 }

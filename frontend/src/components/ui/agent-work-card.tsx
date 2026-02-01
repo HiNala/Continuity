@@ -67,6 +67,13 @@ export interface AgentWorkCardProps {
   details?: Record<string, unknown>;
   imageUrl?: string;
   children?: React.ReactNode;
+  reasoning?: string;
+  toolCall?: {
+    name: string;
+    input?: Record<string, unknown>;
+    output?: string;
+  };
+  weaveTraceUrl?: string;
 }
 
 const agentConfig: Record<AgentType, { label: string; icon: React.ElementType; gradient: string; accentColor: string }> = {
@@ -130,6 +137,9 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
   details,
   imageUrl,
   children,
+  reasoning,
+  toolCall,
+  weaveTraceUrl,
 }) => {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const agentInfo = agentConfig[agent];
@@ -137,20 +147,20 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
   const AgentIcon = agentInfo.icon;
   const ActionIcon = actionInfo.icon;
 
-  const hasExpandableContent = details && Object.keys(details).length > 0;
+  const hasExpandableContent = (details && Object.keys(details).length > 0) || reasoning || toolCall;
 
   const getStatusStyles = () => {
     switch (status) {
       case "running":
-        return "border-l-4 border-l-primary/60";
+        return "border-l-2 border-l-primary";
       case "completed":
-        return "border-l-4 border-l-emerald-500/60";
+        return "border-l-2 border-l-emerald-500";
       case "error":
-        return "border-l-4 border-l-red-500/60";
+        return "border-l-2 border-l-red-500";
       case "warning":
-        return "border-l-4 border-l-amber-500/60";
+        return "border-l-2 border-l-amber-500";
       default:
-        return "border-l-4 border-l-slate-300/40";
+        return "border-l-2 border-l-slate-200";
     }
   };
 
@@ -158,47 +168,40 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
     <motion.div
       initial={false}
       className={cn(
-        "relative rounded-2xl border border-white/40 bg-white/30 backdrop-blur-xl overflow-hidden shadow-sm",
-        "hover:bg-white/40 hover:border-white/50 hover:shadow-md transition-colors duration-200",
+        "relative rounded-lg border border-black/[0.06] bg-white overflow-hidden shadow-sm",
+        "hover:shadow-md transition-shadow duration-200",
         getStatusStyles()
       )}
     >
-      {/* Header */}
-      <div className="px-4 pt-4 pb-2">
+      {/* Header - cleaner design */}
+      <div className="px-4 pt-3 pb-2">
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
-            {/* Agent icon with gradient background */}
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={springTransition}
+          <div className="flex items-start gap-2.5 min-w-0 flex-1">
+            {/* Smaller, cleaner agent icon */}
+            <div
               className={cn(
-                "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br shadow-sm",
+                "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-gradient-to-br",
                 agentInfo.gradient
               )}
             >
-              <AgentIcon className="w-5 h-5 text-white" />
-            </motion.div>
+              <AgentIcon className="w-4 h-4 text-white" />
+            </div>
             
             <div className="min-w-0 flex-1">
-              {/* Agent label and action */}
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
+              {/* Agent label and action - more compact */}
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wide">
                   {agentInfo.label}
                 </span>
                 <span className="text-muted-foreground/30">•</span>
-                <motion.span
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="text-[11px] text-muted-foreground/50 flex items-center gap-1"
-                >
-                  <ActionIcon className="w-3 h-3" />
+                <span className="text-[10px] text-muted-foreground/50 flex items-center gap-0.5">
+                  <ActionIcon className="w-2.5 h-2.5" />
                   {actionInfo.label}
-                </motion.span>
+                </span>
               </div>
               
               {/* Title */}
-              <h3 className="text-sm font-semibold text-foreground/90 truncate">
+              <h3 className="text-[13px] font-semibold text-foreground truncate">
                 {title}
               </h3>
             </div>
@@ -207,27 +210,21 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
           {/* Timestamp and status */}
           <div className="flex flex-col items-end gap-1 shrink-0">
             {timestamp && (
-              <span className="text-[10px] text-muted-foreground/40 font-mono">
+              <span className="text-[9px] text-muted-foreground/40 font-mono">
                 {timestamp}
               </span>
             )}
-            {/* Status badge */}
             <StatusBadge status={status} />
           </div>
         </div>
       </div>
 
-      {/* Content */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.1 }}
-        className="px-4 pb-3"
-      >
-        <p className="text-sm text-muted-foreground/70 leading-relaxed">
+      {/* Content - cleaner */}
+      <div className="px-4 pb-3">
+        <p className="text-xs text-muted-foreground/70 leading-relaxed">
           {content}
         </p>
-      </motion.div>
+      </div>
 
       {/* Image preview */}
       <AnimatePresence>
@@ -270,7 +267,7 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
             >
               <ChevronDown className="w-3.5 h-3.5" />
             </motion.div>
-            {isExpanded ? "Hide details" : `Show details (${Object.keys(details).length})`}
+            {isExpanded ? "Hide details" : `Show details (${details ? Object.keys(details).length : 0})`}
           </motion.button>
           
           <AnimatePresence initial={false}>
@@ -296,27 +293,93 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
                 }}
                 className="overflow-hidden"
               >
-                <div className="px-4 pb-4">
-                  <div className="rounded-xl bg-white/20 border border-white/30 p-3">
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                      {Object.entries(details).map(([key, value], index) => (
-                        <motion.div
-                          key={key}
-                          initial={{ opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.05 }}
-                          className="flex flex-col"
-                        >
-                          <span className="text-muted-foreground/50 capitalize text-[10px] uppercase tracking-wider">
-                            {key.replace(/_/g, ' ')}
-                          </span>
-                          <span className="text-foreground/70 font-medium truncate">
-                            {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                          </span>
-                        </motion.div>
-                      ))}
+                <div className="px-4 pb-4 space-y-3">
+                  {/* Reasoning section */}
+                  {reasoning && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="rounded-xl bg-gradient-to-br from-blue-500/5 to-cyan-500/5 border border-blue-500/10 p-3"
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Brain className="w-3.5 h-3.5 text-blue-500/70" />
+                        <span className="text-[10px] font-medium text-blue-600/70 uppercase tracking-wider">
+                          Reasoning
+                        </span>
+                      </div>
+                      <p className="text-xs text-foreground/70 leading-relaxed">
+                        {reasoning}
+                      </p>
+                    </motion.div>
+                  )}
+                  
+                  {/* Tool call section */}
+                  {toolCall && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.05 }}
+                      className="rounded-xl bg-gradient-to-br from-purple-500/5 to-pink-500/5 border border-purple-500/10 p-3"
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Wand2 className="w-3.5 h-3.5 text-purple-500/70" />
+                        <span className="text-[10px] font-medium text-purple-600/70 uppercase tracking-wider">
+                          Tool: {toolCall.name}
+                        </span>
+                      </div>
+                      {toolCall.input && (
+                        <div className="mb-2">
+                          <span className="text-[10px] text-muted-foreground/50">Input:</span>
+                          <pre className="text-[10px] text-foreground/60 bg-white/30 rounded-lg p-2 mt-1 overflow-x-auto">
+                            {JSON.stringify(toolCall.input, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      {toolCall.output && (
+                        <div>
+                          <span className="text-[10px] text-muted-foreground/50">Output:</span>
+                          <p className="text-xs text-foreground/70 mt-1">{toolCall.output}</p>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                  
+                  {/* Details grid */}
+                  {details && Object.keys(details).length > 0 && (
+                    <div className="rounded-xl bg-white/20 border border-white/30 p-3">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                        {Object.entries(details).map(([key, value], index) => (
+                          <motion.div
+                            key={key}
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: index * 0.05 }}
+                            className="flex flex-col"
+                          >
+                            <span className="text-muted-foreground/50 capitalize text-[10px] uppercase tracking-wider">
+                              {key.replace(/_/g, ' ')}
+                            </span>
+                            <span className="text-foreground/70 font-medium truncate">
+                              {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                            </span>
+                          </motion.div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
+                  
+                  {/* Weave trace link */}
+                  {weaveTraceUrl && (
+                    <a
+                      href={weaveTraceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-[10px] text-primary/70 hover:text-primary transition-colors"
+                    >
+                      <Eye className="w-3 h-3" />
+                      View in Weave
+                    </a>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -445,32 +508,32 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={smoothTransition}
-      className="rounded-2xl border border-white/40 bg-white/30 backdrop-blur-xl p-4"
+      className="rounded-lg border border-black/[0.06] bg-white/60 p-3"
     >
-      <p className="text-sm font-medium text-foreground/90 mb-1">{question.question_text}</p>
+      <p className="text-[13px] font-medium text-foreground mb-2">{question.question_text}</p>
       {question.multi_select && (
-        <p className="text-[11px] text-muted-foreground/50 mb-3">Select all that apply</p>
+        <p className="text-[10px] text-muted-foreground/60 mb-2">Select all that apply</p>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {question.possible_answers.map((answer, index) => (
           <motion.button
             key={answer.answer_id}
-            initial={{ opacity: 0, scale: 0.9 }}
+            initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: index * 0.05 }}
-            whileHover={!disabled ? { scale: 1.03 } : {}}
-            whileTap={!disabled ? { scale: 0.97 } : {}}
+            transition={{ delay: index * 0.03 }}
+            whileHover={!disabled ? { scale: 1.02 } : {}}
+            whileTap={!disabled ? { scale: 0.98 } : {}}
             onClick={() => handleSelect(answer.answer_id)}
             disabled={disabled}
             className={cn(
-              "px-3 py-2 rounded-xl text-sm font-medium transition-colors duration-200",
+              "px-2.5 py-1.5 rounded-md text-xs font-medium transition-all duration-150",
               "border",
               selected.includes(answer.answer_id)
-                ? "bg-gradient-to-br from-primary/20 to-accent/20 border-primary/30 text-foreground shadow-sm"
-                : "bg-white/30 border-white/40 text-muted-foreground/70 hover:bg-white/50 hover:border-white/60",
+                ? "bg-foreground text-background border-foreground"
+                : "bg-white border-black/[0.08] text-foreground/70 hover:bg-black/[0.02] hover:border-black/[0.12]",
               disabled && "opacity-50 cursor-not-allowed"
             )}
           >
@@ -482,7 +545,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   );
 };
 
-// Image display card
+// Compact image display card - small thumbnails in a row
 interface ImageDisplayCardProps {
   images: string[];
   title?: string;
@@ -490,7 +553,7 @@ interface ImageDisplayCardProps {
 
 export const ImageDisplayCard: React.FC<ImageDisplayCardProps> = ({
   images,
-  title = "Uploaded Images",
+  title = "Your space",
 }) => {
   if (images.length === 0) return null;
 
@@ -500,35 +563,27 @@ export const ImageDisplayCard: React.FC<ImageDisplayCardProps> = ({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={smoothTransition}
-      className="rounded-2xl border border-white/40 bg-white/30 backdrop-blur-xl p-4"
+      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-white/40 bg-white/30 backdrop-blur-xl"
     >
-      <p className="text-sm font-medium text-foreground/80 mb-3 flex items-center gap-2">
-        <ImageIcon className="w-4 h-4 text-muted-foreground/60" />
-        {title}
-      </p>
-      <div className={cn(
-        "grid gap-2",
-        images.length === 1 ? "grid-cols-1" : "grid-cols-2"
-      )}>
+      <div className="flex items-center gap-2">
+        <ImageIcon className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
+        <span className="text-xs font-medium text-foreground/70">{title}</span>
+      </div>
+      <div className="flex gap-2 flex-wrap">
         {images.map((img, index) => (
           <motion.div
             key={index}
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: index * 0.1 }}
-            whileHover={{ scale: 1.02 }}
-            className="relative rounded-xl overflow-hidden border border-white/30 aspect-video bg-white/10 group cursor-pointer"
+            transition={{ delay: index * 0.05 }}
+            whileHover={{ scale: 1.05 }}
+            className="relative w-12 h-12 rounded-lg overflow-hidden border border-white/40 bg-white/20 group cursor-pointer shadow-sm"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={img}
               alt={`Image ${index + 1}`}
-              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-            />
-            <motion.div
-              initial={{ opacity: 0 }}
-              whileHover={{ opacity: 1 }}
-              className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent"
+              className="w-full h-full object-cover"
             />
           </motion.div>
         ))}

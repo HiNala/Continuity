@@ -305,7 +305,8 @@ class RequirementsAgent:
         
         # Ensure style_targets is a list
         if isinstance(spec["style_targets"], str):
-            spec["style_targets"] = [spec["style_targets"]]
+            styles = [s.strip() for s in spec["style_targets"].split(",") if s.strip()]
+            spec["style_targets"] = styles or [spec["style_targets"]]
         
         return spec
     
