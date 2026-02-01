@@ -524,7 +524,7 @@ class SpatialAnalysisAgent:
         classified = self.classify_elements(elements)
         
         # Step 4: Determine construction state
-        construction_state = self.assess_construction_state(elements)
+        construction_state = self.assess_construction_state(merged)
         merged["construction_state"] = construction_state
         
         # Step 5: Save to database
