@@ -224,10 +224,10 @@ const PromptInput = React.forwardRef<HTMLDivElement, PromptInputProps>(
             transition={springTransition}
             className={cn(
               "relative rounded-2xl border backdrop-blur-2xl transition-all duration-300",
-              "bg-white/40 dark:bg-zinc-900/60",
+              "bg-white/55 dark:bg-zinc-900/70 border-white/50 dark:border-white/10",
               isFocused 
-                ? "border-primary/40 dark:border-primary/50 bg-white/55 dark:bg-zinc-900/80 shadow-lg shadow-primary/5 dark:shadow-primary/10" 
-                : "border-neutral-200/60 dark:border-zinc-700/60 hover:border-neutral-300 dark:hover:border-zinc-600 hover:bg-white/50 dark:hover:bg-zinc-900/70 shadow-sm",
+                ? "border-primary/40 dark:border-primary/50 bg-white/65 dark:bg-zinc-900/80 shadow-[0_10px_26px_rgba(0,0,0,0.12)]" 
+                : "hover:border-white/70 dark:hover:border-white/20 hover:bg-white/60 dark:hover:bg-zinc-900/75 shadow-[0_6px_18px_rgba(0,0,0,0.08)]",
               className
             )}
             onDragOver={onDragOver}
