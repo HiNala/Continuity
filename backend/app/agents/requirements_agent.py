@@ -245,7 +245,7 @@ class RequirementsAgent:
     def __init__(self):
         self.max_questions = MAX_QUESTIONS
         self.gemini_api_key = settings.gemini_api_key
-        self.gemini_model = settings.gemini_model
+        self.gemini_model = settings.gemini_vision_model or settings.gemini_model
     
     # ============================================
     # Image Analysis Methods

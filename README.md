@@ -168,6 +168,10 @@ Copy `.env.example` to `.env` and configure:
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `GEMINI_API_KEY` | Google Gemini API key for image generation | Yes |
+| `GEMINI_VISION_MODEL` | Gemini model for image analysis | Optional |
+| `GEMINI_IMAGE_MODEL` | Gemini model for image generation (e.g., `gemini-3-pro-image-preview`) | Optional |
+| `GEMINI_IMAGE_ASPECT_RATIO` | Output aspect ratio (e.g., `16:9`) | Optional |
+| `GEMINI_IMAGE_SIZE` | Output size (`1K`, `2K`, `4K`) | Optional |
 | `WANDB_API_KEY` | Weights & Biases API key for Weave | Yes |
 | `WANDB_ENTITY` | W&B entity/organization (optional) | Optional |
 | `DATABASE_URL` | PostgreSQL connection string | Auto-configured |
@@ -379,7 +383,7 @@ This project is organized into missions for the hackathon:
 - **Docker Compose** — Multi-container orchestration
 
 ### AI & Observability
-- **Google Gemini 2.0 Flash** — Image generation and vision analysis
+- **Google Gemini** — Image generation and vision analysis (defaults to `gemini-3-pro-image-preview`)
 - **Weave (W&B)** — LLM observability and tracing
 - **Browserbase** — Web automation
 
@@ -399,6 +403,10 @@ Weave is not just used for logging — it's the **core mechanism** that enables 
 3. **Policy Modification**: Based on trace analysis, the system modifies its own generation policy
 4. **Feedback Loop**: Next generation uses updated policy, creating a genuine improvement loop
 5. **Trace-Linked UI**: The frontend surfaces a Weave trace link in the Agent Activity panel after a run completes
+
+**Recommended Weave Setup:**
+- Set `WANDB_ENTITY` (optional) and `WEAVE_PROJECT_NAME` to ensure traces land in the right workspace
+- For image outputs, Continuity saves generated images to disk and returns paths in traces
 
 **What Gets Traced:**
 - `requirements_agent_analyze_goal` — Goal parsing and question generation

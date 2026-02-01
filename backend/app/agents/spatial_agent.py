@@ -126,7 +126,7 @@ class SpatialAnalysisAgent:
     
     def __init__(self):
         self.gemini_api_key = settings.gemini_api_key
-        self.gemini_model = settings.gemini_model
+        self.gemini_model = settings.gemini_vision_model or settings.gemini_model
     
     @weave.op(name="spatial_agent_prepare_image")
     def prepare_image(self, image_path: str) -> Optional[Dict[str, Any]]:

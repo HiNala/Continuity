@@ -95,7 +95,9 @@ export default function ContinuityApp() {
 
   const getMessageId = useCallback(() => {
     messageCounterRef.current += 1;
-    return `msg-${Date.now()}-${messageCounterRef.current}`;
+    // Use a more unique ID combining timestamp, counter, and random string
+    const randomPart = Math.random().toString(36).substring(2, 11);
+    return `msg-${Date.now()}-${messageCounterRef.current}-${randomPart}`;
   }, []);
 
   // Auto-scroll to latest card with slight delay for animation
@@ -581,6 +583,7 @@ export default function ContinuityApp() {
     }
 
     let lastState = "";
+    let hasReportedTerminal = false; // Prevent duplicate terminal state messages
 
     const poll = async () => {
       try {
@@ -621,7 +624,11 @@ export default function ContinuityApp() {
           }
         }
 
-        if (status.state === "completed" || status.state === "completed_with_warnings" || status.state === "failed") {
+        // Only report terminal states once
+        const isTerminal = status.state === "completed" || status.state === "completed_with_warnings" || status.state === "failed";
+        if (isTerminal && !hasReportedTerminal) {
+          hasReportedTerminal = true;
+          
           if (pollingRef.current) {
             clearInterval(pollingRef.current);
             pollingRef.current = null;

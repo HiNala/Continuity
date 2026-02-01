@@ -54,7 +54,11 @@ class Settings(BaseSettings):
     # Model Configuration
     # ==========================================
     default_model: str = "gemini-2.0-flash"
-    gemini_model: str = "gemini-2.0-flash"  # Vision model for spatial analysis
+    gemini_model: str = "gemini-2.0-flash"  # Legacy/shared default
+    gemini_vision_model: str = "gemini-2.0-flash"  # Image analysis model
+    gemini_image_model: str = "gemini-3-pro-image-preview"  # Image generation model
+    gemini_image_aspect_ratio: str = "16:9"
+    gemini_image_size: str = "2K"
     max_iterations: int = 5
     quality_threshold: float = 0.7
     

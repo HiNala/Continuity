@@ -155,7 +155,9 @@ class GenerationAgent:
     
     def __init__(self):
         self.gemini_api_key = settings.gemini_api_key
-        self.gemini_model = settings.gemini_model
+        self.gemini_model = settings.gemini_image_model or settings.gemini_model
+        self.image_aspect_ratio = settings.gemini_image_aspect_ratio
+        self.image_size = settings.gemini_image_size
         self.output_dir = Path("generated_images")
         self.output_dir.mkdir(exist_ok=True)
     
@@ -389,6 +391,11 @@ class GenerationAgent:
                     "temperature": creativity,
                     "topP": 0.9,
                     "maxOutputTokens": 8192,
+                    "responseModalities": ["TEXT", "IMAGE"],
+                    "imageConfig": {
+                        "aspectRatio": self.image_aspect_ratio,
+                        "imageSize": self.image_size,
+                    },
                 }
             }
             
@@ -405,14 +412,39 @@ class GenerationAgent:
             
             # Extract response text (Gemini doesn't actually generate images yet,
             # but we'll structure this for when it does or for image editing APIs)
-            response_text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            parts_out = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+            response_text = ""
+            image_payload = None
+            for part in parts_out:
+                if not response_text and isinstance(part, dict) and part.get("text"):
+                    response_text = part.get("text", "")
+                if isinstance(part, dict) and part.get("inline_data"):
+                    image_payload = part["inline_data"]
+                    break
             
             # For now, return the prompt response (in production, this would be image data)
+            output_path = None
+            if image_payload and image_payload.get("data"):
+                try:
+                    image_bytes = base64.b64decode(image_payload["data"])
+                    mime_type = image_payload.get("mime_type", "image/png")
+                    ext = {
+                        "image/png": "png",
+                        "image/jpeg": "jpg",
+                        "image/webp": "webp",
+                    }.get(mime_type, "png")
+                    output_path = str(self.output_dir / f"gen_{int(time.time())}.{ext}")
+                    with open(output_path, "wb") as f:
+                        f.write(image_bytes)
+                except Exception:
+                    output_path = None
+
             return {
                 "success": True,
                 "response_text": response_text,
                 "latency_ms": latency_ms,
                 "model": self.gemini_model,
+                "output_path": output_path,
             }
             
         except httpx.HTTPStatusError as e:
@@ -476,8 +508,9 @@ class GenerationAgent:
         iteration.generation_latency_ms = result.get("latency_ms")
         
         if result["success"]:
-            # In production, save actual generated image
-            output_path = str(self.output_dir / f"{project_id}/{GenerationPhase.CLEANUP}_{iteration_number}_{int(time.time())}.png")
+            output_path = result.get("output_path") or str(
+                self.output_dir / f"{project_id}/{GenerationPhase.CLEANUP}_{iteration_number}_{int(time.time())}.png"
+            )
             iteration.output_image_path = output_path
             iteration.status = IterationStatus.COMPLETED
             iteration.metadata_ = {"response": result.get("response_text", "")[:500]}
@@ -541,7 +574,9 @@ class GenerationAgent:
         iteration.generation_latency_ms = result.get("latency_ms")
         
         if result["success"]:
-            output_path = str(self.output_dir / f"{project_id}/{GenerationPhase.STRUCTURAL}_{iteration_number}_{int(time.time())}.png")
+            output_path = result.get("output_path") or str(
+                self.output_dir / f"{project_id}/{GenerationPhase.STRUCTURAL}_{iteration_number}_{int(time.time())}.png"
+            )
             iteration.output_image_path = output_path
             iteration.status = IterationStatus.COMPLETED
             iteration.metadata_ = {"response": result.get("response_text", "")[:500]}
@@ -607,7 +642,9 @@ class GenerationAgent:
         iteration.generation_latency_ms = result.get("latency_ms")
         
         if result["success"]:
-            output_path = str(self.output_dir / f"{project_id}/{GenerationPhase.FIXTURE}_{iteration_number}_{int(time.time())}.png")
+            output_path = result.get("output_path") or str(
+                self.output_dir / f"{project_id}/{GenerationPhase.FIXTURE}_{iteration_number}_{int(time.time())}.png"
+            )
             iteration.output_image_path = output_path
             iteration.status = IterationStatus.COMPLETED
             iteration.metadata_ = {"response": result.get("response_text", "")[:500]}
@@ -686,7 +723,9 @@ class GenerationAgent:
         iteration.generation_latency_ms = result.get("latency_ms")
         
         if result["success"]:
-            output_path = str(self.output_dir / f"{project_id}/{GenerationPhase.STYLE}_{target_style}_{iteration_number}_{int(time.time())}.png")
+            output_path = result.get("output_path") or str(
+                self.output_dir / f"{project_id}/{GenerationPhase.STYLE}_{target_style}_{iteration_number}_{int(time.time())}.png"
+            )
             iteration.output_image_path = output_path
             iteration.status = IterationStatus.COMPLETED
             iteration.metadata_ = {
