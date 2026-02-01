@@ -2904,6 +2904,35 @@ function SplitView({
               )}
             </AnimatePresence>
 
+            {/* Inspiration Images - Show when available */}
+            {questions?.inspiration?.inspiration_available && (
+              <div className="pt-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[11px] font-medium text-violet-600 dark:text-violet-400">✨ Style Inspiration</span>
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    ...(questions.inspiration.style_inspiration?.flatMap(s => s.images) || []),
+                    ...(questions.inspiration.space_inspiration || []),
+                    ...(questions.inspiration.general_inspiration || []),
+                  ].slice(0, 8).map((img, i) => (
+                    <div key={img.id || i} className="relative aspect-square rounded-lg overflow-hidden group cursor-pointer">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img 
+                        src={img.url} 
+                        alt={img.description} 
+                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                        <p className="absolute bottom-1 left-1 right-1 text-[9px] text-white truncate">{img.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-neutral-400 dark:text-zinc-500 mt-2">Reference images to inspire your design</p>
+              </div>
+            )}
+
             {/* Questions - Clean, inline */}
             {questions && (
               <div className="pt-6 space-y-4">

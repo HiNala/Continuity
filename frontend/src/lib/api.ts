@@ -47,6 +47,26 @@ export interface ImageAnalysisResult {
   accessibility_features: string[];
 }
 
+export interface InspirationImageData {
+  id: string;
+  url: string;
+  thumbnail: string;
+  description: string;
+  source: string;
+}
+
+export interface StyleInspirationData {
+  style: string;
+  images: InspirationImageData[];
+}
+
+export interface InspirationData {
+  inspiration_available: boolean;
+  style_inspiration: StyleInspirationData[];
+  space_inspiration: InspirationImageData[];
+  general_inspiration: InspirationImageData[];
+}
+
 export interface AnalyzeGoalResponse {
   project_id: string;
   original_goal: string;
@@ -54,6 +74,7 @@ export interface AnalyzeGoalResponse {
   questions: ClarifyingQuestion[];
   questions_needed: boolean;
   image_analysis: ImageAnalysisResult | null;
+  inspiration: InspirationData | null;
 }
 
 export interface SubmitAnswersRequest {
