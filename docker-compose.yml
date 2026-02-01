@@ -38,6 +38,9 @@ services:
       # Mount source for hot reloading in development
       - ./frontend/src:/app/src:ro
       - ./frontend/public:/app/public:ro
+      # Anonymous volume to prevent .next cache conflicts
+      - /app/.next
+      - /app/node_modules
     networks:
       - clarity-network
     restart: unless-stopped
