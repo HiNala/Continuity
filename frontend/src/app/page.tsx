@@ -540,6 +540,9 @@ export default function ContinuityApp() {
         content: "Pipeline active. Streaming real-time updates...",
       });
 
+      // Fetch Weave trace link early if available
+      fetchAgentReasoning(pId);
+
       // Subscribe to SSE stream for real-time updates
       const cleanup = subscribeToOrchestration(
         pId,
