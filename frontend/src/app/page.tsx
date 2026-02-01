@@ -537,7 +537,15 @@ export default function ContinuityApp() {
           if (toState.includes("analyzing_space")) {
             addChatMessage({
               type: "assistant",
-              content: "🔍 **Spatial Analysis Starting** — analyzing geometry, detecting fixtures, and locking constraints...",
+              content: `🔍 **Spatial Analysis Starting**\n\n• Detecting room boundaries and geometry\n• Identifying existing fixtures (sinks, windows, doors)\n• Measuring spatial dimensions\n• Locking construction constraints\n\nThis ensures the AI respects your space's physical reality...`,
+            });
+          }
+          
+          // Add message when requirements are being skipped (already exist)
+          if (toState.includes("analyzing_space") && event.details?.trigger === "skip") {
+            addChatMessage({
+              type: "assistant",
+              content: "✓ Requirements loaded from earlier. Moving directly to spatial analysis...",
             });
           }
 
@@ -561,9 +569,18 @@ export default function ContinuityApp() {
               });
             }
 
+            // Show detailed phase-specific messages
+            const phaseDetails: Record<string, string> = {
+              cleanup: "Removing construction debris, dust, and temporary elements...",
+              structural: "Completing walls, ceiling, and flooring to a finished state...",
+              fixture: "Placing fixtures according to your spatial constraints...",
+              style: "Applying your chosen aesthetic styling and materials...",
+            };
+            const phaseDetail = phaseDetails[phaseKey] || "Processing image transformation...";
+            
             addChatMessage({
               type: "assistant",
-              content: `🎨 **Generating ${phaseLabel}**${attemptNumber > 1 ? ` (Attempt ${attemptNumber})` : ""}...`,
+              content: `🎨 **Generating ${phaseLabel}**${attemptNumber > 1 ? ` (Attempt ${attemptNumber})` : ""}\n\n${phaseDetail}`,
             });
           }
 
@@ -571,7 +588,7 @@ export default function ContinuityApp() {
             const outputPath = (event.details?.output_path || event.details?.output_image) as string | undefined;
             addChatMessage({
               type: "assistant",
-              content: `🧪 **Evaluating ${phaseLabel}** — checking constraints, geometry, hallucinations, style, and completeness...`,
+              content: `🧪 **Evaluating ${phaseLabel}**\n\n• Checking spatial constraints are respected\n• Verifying no AI hallucinations\n• Assessing style consistency\n• Measuring overall quality score\n\nIf issues found, I'll automatically improve and retry...`,
               images: outputPath ? [resolveImagePath(outputPath)] : undefined,
             });
           }
@@ -776,7 +793,34 @@ export default function ContinuityApp() {
             
             // Handle evaluation events
             if (isEvaluating) {
-              content = `Quality control checking output against 5 criteria: constraints, geometry, hallucinations, style, and completeness...`;
+              content = `Quality control checking output against 5 criteria...`;
+            }
+            
+            // Build progress steps based on event type
+            let progressSteps: Array<{ label: string; status: "pending" | "running" | "completed" }> | undefined;
+            const isGenerating = event.details?.to_state?.includes("generating");
+            
+            if (isGenerating) {
+              progressSteps = [
+                { label: "Loading spatial constraints", status: "completed" as const },
+                { label: "Preparing generation prompt", status: "running" as const },
+                { label: "Calling Gemini vision model", status: "pending" as const },
+                { label: "Post-processing output", status: "pending" as const },
+              ];
+            } else if (isEvaluating) {
+              progressSteps = [
+                { label: "Constraint compliance", status: "running" as const },
+                { label: "Geometry preservation", status: "pending" as const },
+                { label: "Hallucination check", status: "pending" as const },
+                { label: "Style execution", status: "pending" as const },
+                { label: "Phase completion", status: "pending" as const },
+              ];
+            } else if (isRetry) {
+              progressSteps = [
+                { label: "Analyzing failure reasons", status: "completed" as const },
+                { label: "Adjusting policy parameters", status: "running" as const },
+                { label: "Re-generating with improvements", status: "pending" as const },
+              ];
             }
             
             return [...prev, {
@@ -798,6 +842,7 @@ export default function ContinuityApp() {
                   score: `${(event.details.score * 100).toFixed(0)}%`,
                 }),
               },
+              progressSteps,
             }];
           }
           return prev;
@@ -898,6 +943,17 @@ export default function ContinuityApp() {
         break;
         
       case "progress":
+        // Show granular progress messages in chat
+        if (event.action === "starting" && event.details?.state) {
+          const state = event.details.state as string;
+          if (state === "created" || state === "gathering_requirements") {
+            addChatMessage({
+              type: "assistant", 
+              content: "📋 **Pipeline Initialized** — loading project configuration and preparing agents...",
+            });
+          }
+        }
+        
         // CRITICAL: Update orchestrationStatus from progress events (especially initial state)
         if (event.details?.state) {
           const progressState = event.details.state as string;
@@ -1445,6 +1501,12 @@ export default function ContinuityApp() {
           status: "running",
           action: "analyzing",
           timestamp: new Date().toLocaleTimeString(),
+          progressSteps: [
+            { label: "Processing image data", status: "running" as const },
+            { label: "Detecting room layout", status: "pending" as const },
+            { label: "Identifying fixtures", status: "pending" as const },
+            { label: "Extracting spatial constraints", status: "pending" as const },
+          ],
         });
       }
 
@@ -1456,6 +1518,12 @@ export default function ContinuityApp() {
         status: "running",
         action: "analyzing",
         timestamp: new Date().toLocaleTimeString(),
+        progressSteps: [
+          { label: "Parsing natural language input", status: "running" as const },
+          { label: "Extracting style preferences", status: "pending" as const },
+          { label: "Identifying space type", status: "pending" as const },
+          { label: "Generating clarifying questions", status: "pending" as const },
+        ],
       });
 
       const analysis = await analyzeGoal(project.project_id);
@@ -1585,6 +1653,11 @@ export default function ContinuityApp() {
       status: "running",
       action: "thinking",
       timestamp: new Date().toLocaleTimeString(),
+      progressSteps: [
+        { label: "Validating responses", status: "running" as const },
+        { label: "Updating design brief", status: "pending" as const },
+        { label: "Preparing for spatial analysis", status: "pending" as const },
+      ],
     });
 
     try {
@@ -1814,6 +1887,12 @@ export default function ContinuityApp() {
               status: "running",
               action: "analyzing",
               timestamp: new Date().toLocaleTimeString(),
+              progressSteps: [
+                { label: "Parsing natural language", status: "running" as const },
+                { label: "Extracting preferences", status: "pending" as const },
+                { label: "Identifying space type", status: "pending" as const },
+                { label: "Preparing questions", status: "pending" as const },
+              ],
             });
           } else if (status.state.includes("analyzing_space") || status.state.includes("analyzing")) {
             // Mark previous agent as complete
@@ -1825,10 +1904,16 @@ export default function ContinuityApp() {
             addAgentCard({
               agent: "spatial",
               title: "Spatial Analysis Agent Active",
-              content: "Detecting physical constraints, fixtures, plumbing, and spatial boundaries...",
+              content: "Detecting physical constraints and spatial boundaries...",
               status: "running",
               action: "analyzing",
               timestamp: new Date().toLocaleTimeString(),
+              progressSteps: [
+                { label: "Detecting structural elements", status: "running" as const },
+                { label: "Identifying plumbing constraints", status: "pending" as const },
+                { label: "Classifying fixtures", status: "pending" as const },
+                { label: "Computing locked regions", status: "pending" as const },
+              ],
             });
           } else if (status.state.includes("generating")) {
             // Mark spatial agent as complete if transitioning from analysis
@@ -1841,6 +1926,12 @@ export default function ContinuityApp() {
             }
             const phase = status.current_phase || "cleanup";
             const isRetrying = status.state.includes("retrying") || status.retry_count > 0;
+            const phaseSteps = [
+              { label: "Loading spatial constraints", status: "completed" as const },
+              { label: "Preparing generation prompt", status: "running" as const },
+              { label: "Calling Gemini vision model", status: "pending" as const },
+              { label: "Post-processing output", status: "pending" as const },
+            ];
             addAgentCard({
               agent: "generation",
               title: isRetrying ? `Retrying ${phase.charAt(0).toUpperCase() + phase.slice(1)}` : `${phase.charAt(0).toUpperCase() + phase.slice(1)} Phase`,
@@ -1854,15 +1945,24 @@ export default function ContinuityApp() {
                 phase: phase,
                 retry_count: status.retry_count,
               },
+              progressSteps: phaseSteps,
             });
           } else if (status.state.includes("evaluating")) {
             const phase = status.current_phase || "generation";
+            const evalSteps = [
+              { label: "Constraint compliance check", status: "running" as const },
+              { label: "Geometry preservation", status: "pending" as const },
+              { label: "Hallucination detection", status: "pending" as const },
+              { label: "Style execution", status: "pending" as const },
+              { label: "Phase completion", status: "pending" as const },
+            ];
             addAgentCard({
               agent: "qc",
               title: `Quality Control - ${phase.charAt(0).toUpperCase() + phase.slice(1)}`,
-              content: `Evaluating ${phase} output against 5 quality criteria: constraint compliance, geometry preservation, hallucination check, style execution, and phase completion...`,
+              content: `Evaluating ${phase} output against 5 quality criteria...`,
               status: "running",
               action: "evaluating",
+              progressSteps: evalSteps,
               timestamp: new Date().toLocaleTimeString(),
               details: {
                 phase: phase,
