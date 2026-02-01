@@ -383,7 +383,7 @@ This project is organized into missions for the hackathon:
 - **Docker Compose** — Multi-container orchestration
 
 ### AI & Observability
-- **Google Gemini** — Image generation and vision analysis (defaults to `gemini-3-pro-image-preview`)
+- **Google Gemini (Nano Banana Pro)** — Image generation and vision analysis (defaults to `gemini-3-pro-image-preview`)
 - **Weave (W&B)** — LLM observability and tracing
 - **Browserbase** — Web automation
 

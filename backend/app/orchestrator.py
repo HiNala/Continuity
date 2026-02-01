@@ -330,50 +330,67 @@ class Orchestrator:
             existing_req = await self.session.execute(
                 select(Requirements).where(Requirements.project_id == self.project_id)
             )
-            if existing_req.scalar_one_or_none():
+            requirements = existing_req.scalar_one_or_none()
+            
+            if requirements:
+                # Requirements already submitted via /submit-answers
                 await self.transition(
                     OrchestrationState.ANALYZING_SPACE,
                     OrchestrationTrigger.SKIP,
-                    {"message": "Requirements already available, skipping clarification"}
+                    {
+                        "message": "Requirements already available, skipping clarification",
+                        "space_type": requirements.space_type,
+                        "style_targets": requirements.style_targets,
+                    }
                 )
                 return
 
-            # Analyze the goal
-            if self.project.goal:
-                analysis = requirements_agent.analyze_goal(self.project.goal)
-                questions = requirements_agent.generate_questions(analysis)
-
-                if questions:
-                    # Need clarification
-                    await self.transition(
-                        OrchestrationState.AWAITING_CLARIFICATION,
-                        OrchestrationTrigger.SUCCESS,
-                        {
-                            "questions_count": len(questions),
-                            "identified": analysis.get("identified", {}),
-                        }
-                    )
-                else:
-                    # No questions needed - save requirements and proceed
-                    await self._save_default_requirements(analysis.get("identified", {}))
-                    await self.transition(
-                        OrchestrationState.ANALYZING_SPACE,
-                        OrchestrationTrigger.SUCCESS,
-                        {"message": "Requirements complete, no clarification needed"}
-                    )
-            else:
-                # No goal - fail
+            # No existing requirements - analyze the goal
+            if not self.project.goal:
                 await self.transition(
                     OrchestrationState.FAILED,
                     OrchestrationTrigger.FAILURE,
                     {"error": "No goal provided"}
                 )
+                return
+
+            # Analyze goal (sync function - no await)
+            analysis = requirements_agent.analyze_goal(self.project.goal)
+            
+            # Generate questions (sync function - no await)  
+            questions = requirements_agent.generate_questions(analysis)
+
+            if questions:
+                # Need clarification from user
+                await self.transition(
+                    OrchestrationState.AWAITING_CLARIFICATION,
+                    OrchestrationTrigger.SUCCESS,
+                    {
+                        "questions_count": len(questions),
+                        "identified": analysis.get("identified", {}),
+                    }
+                )
+            else:
+                # No questions needed - save default requirements and proceed
+                await self._save_default_requirements(analysis.get("identified", {}))
+                await self.transition(
+                    OrchestrationState.ANALYZING_SPACE,
+                    OrchestrationTrigger.SUCCESS,
+                    {"message": "Requirements complete, no clarification needed"}
+                )
                 
         except Exception as e:
+            import traceback
+            error_details = {
+                "error": str(e),
+                "type": type(e).__name__,
+                "traceback": traceback.format_exc()
+            }
+            print(f"[Orchestrator] _handle_gathering_requirements failed: {error_details}")
             await self.transition(
                 OrchestrationState.FAILED,
                 OrchestrationTrigger.FAILURE,
-                {"error": str(e)}
+                {"error": str(e), "error_type": type(e).__name__}
             )
     
     async def _save_default_requirements(self, identified: Dict[str, Any]) -> None:

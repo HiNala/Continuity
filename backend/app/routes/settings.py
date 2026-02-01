@@ -80,12 +80,18 @@ async def test_weave_api() -> APITestResult:
             if response.status_code == 200:
                 data = response.json()
                 username = data.get("data", {}).get("viewer", {}).get("username", "unknown")
+                project = settings.weave_project_name
+                entity = settings.wandb_entity
                 return APITestResult(
                     service=service,
                     success=True,
                     message=f"Connected as: {username}",
                     timestamp=timestamp,
-                    details={"username": username},
+                    details={
+                        "username": username,
+                        "project": project,
+                        "entity": entity,
+                    },
                 )
             else:
                 return APITestResult(
@@ -128,12 +134,26 @@ async def test_gemini_api() -> APITestResult:
                 data = response.json()
                 models = data.get("models", [])
                 model_names = [m.get("name", "").split("/")[-1] for m in models[:5]]
+                available = {m.get("name", "").split("/")[-1] for m in models}
+                configured = {
+                    "vision_model": settings.gemini_vision_model or settings.gemini_model,
+                    "image_model": settings.gemini_image_model or settings.gemini_model,
+                }
+                missing = [name for name in configured.values() if name and name not in available]
+                message = f"Connected! {len(models)} models available"
+                if missing:
+                    message = f"{message} (missing: {', '.join(missing)})"
                 return APITestResult(
                     service=service,
                     success=True,
-                    message=f"Connected! {len(models)} models available",
+                    message=message,
                     timestamp=timestamp,
-                    details={"model_count": len(models), "sample_models": model_names},
+                    details={
+                        "model_count": len(models),
+                        "sample_models": model_names,
+                        "configured_models": configured,
+                        "missing_models": missing,
+                    },
                 )
             elif response.status_code == 400:
                 return APITestResult(
@@ -190,10 +210,14 @@ async def test_browserbase_api() -> APITestResult:
             )
             
             if response.status_code == 200:
+                if not settings.browserbase_project_id:
+                    message = "Connected to Browserbase (project ID missing)"
+                else:
+                    message = "Connected to Browserbase"
                 return APITestResult(
                     service=service,
                     success=True,
-                    message="Connected to Browserbase",
+                    message=message,
                     timestamp=timestamp,
                     details={"project_id": settings.browserbase_project_id},
                 )

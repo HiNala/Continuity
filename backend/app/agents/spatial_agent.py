@@ -464,6 +464,94 @@ class SpatialAnalysisAgent:
         else:
             return ConstructionState.PARTIALLY_COMPLETE
     
+    @weave.op(name="spatial_agent_analyze_images")
+    async def analyze_images(
+        self,
+        session: AsyncSession,
+        project_id: UUID,
+        images: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Complete workflow to analyze all project images and save results.
+        
+        This method orchestrates:
+        1. Preparing each image for analysis
+        2. Running Gemini Vision analysis on each
+        3. Merging multi-image results
+        4. Classifying elements
+        5. Saving to database
+        
+        Args:
+            session: Database session
+            project_id: The project ID
+            images: List of image paths or URLs
+            
+        Returns:
+            Analysis summary with constraint counts
+        """
+        if not images:
+            return {
+                "success": False,
+                "error": "No images provided",
+                "constraints_count": 0,
+            }
+        
+        # Step 1: Analyze each image
+        analyses = []
+        for i, image_path in enumerate(images[:5]):  # Limit to 5 images
+            image_data = self.prepare_image(image_path)
+            if image_data:
+                analysis = await self.analyze_single_image(
+                    image_data, 
+                    i, 
+                    str(project_id)
+                )
+                if analysis and "error" not in analysis:
+                    analyses.append(analysis)
+        
+        if not analyses:
+            return {
+                "success": False,
+                "error": "Failed to analyze any images",
+                "constraints_count": 0,
+            }
+        
+        # Step 2: Merge results from multiple images
+        merged = self.merge_multi_image_analysis(analyses)
+        
+        # Step 3: Classify elements
+        elements = merged.get("elements", [])
+        classified = self.classify_elements(elements)
+        
+        # Step 4: Determine construction state
+        construction_state = self.assess_construction_state(elements)
+        merged["construction_state"] = construction_state
+        
+        # Step 5: Save to database
+        try:
+            project_analysis = await self.save_constraints(
+                session, project_id, merged, classified
+            )
+            await session.flush()
+            
+            return {
+                "success": True,
+                "constraints_count": len(classified),
+                "construction_state": construction_state,
+                "locked_count": project_analysis.locked_count,
+                "preferred_count": project_analysis.preferred_count,
+                "flexible_count": project_analysis.flexible_count,
+                "images_analyzed": len(analyses),
+                "overall_confidence": merged.get("overall_confidence", 0.5),
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "constraints_count": len(classified),
+                "construction_state": construction_state,
+            }
+
     @weave.op(name="spatial_agent_save_constraints")
     async def save_constraints(
         self,

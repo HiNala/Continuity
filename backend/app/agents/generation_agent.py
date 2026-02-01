@@ -418,9 +418,13 @@ class GenerationAgent:
             for part in parts_out:
                 if not response_text and isinstance(part, dict) and part.get("text"):
                     response_text = part.get("text", "")
-                if isinstance(part, dict) and part.get("inline_data"):
-                    image_payload = part["inline_data"]
-                    break
+                if isinstance(part, dict):
+                    if part.get("inline_data"):
+                        image_payload = part["inline_data"]
+                        break
+                    if part.get("inlineData"):
+                        image_payload = part["inlineData"]
+                        break
             
             # For now, return the prompt response (in production, this would be image data)
             output_path = None
