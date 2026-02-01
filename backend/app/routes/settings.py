@@ -384,3 +384,59 @@ async def test_all_apis():
         redis=redis_result,
         database=database_result,
     )
+
+
+# ============================================
+# Self-Improvement Test Endpoint
+# ============================================
+class SelfImprovementTestResult(BaseModel):
+    """Result of self-improvement tests."""
+    summary: dict
+    tests: dict
+    weave_url: Optional[str] = None
+
+
+@router.post("/test/self-improvement")
+async def test_self_improvement():
+    """
+    Run the self-improvement test suite.
+    Tests the core loop and verifies agents are truly self-improving.
+    
+    Returns test results with Weave trace URLs for live viewing.
+    """
+    import sys
+    import os
+    
+    # Add tests directory to path
+    tests_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "tests")
+    if tests_dir not in sys.path:
+        sys.path.insert(0, tests_dir)
+    
+    try:
+        from tests.test_self_improvement import run_all_tests
+        results = await run_all_tests()
+        return results
+    except ImportError as e:
+        return {
+            "summary": {
+                "total": 0,
+                "passed": 0,
+                "failed": 1,
+                "rate": 0,
+                "error": f"Could not import tests: {str(e)}",
+            },
+            "tests": {},
+            "weave_url": None,
+        }
+    except Exception as e:
+        return {
+            "summary": {
+                "total": 0,
+                "passed": 0,
+                "failed": 1,
+                "rate": 0,
+                "error": str(e),
+            },
+            "tests": {},
+            "weave_url": None,
+        }

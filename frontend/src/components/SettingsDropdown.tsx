@@ -21,7 +21,9 @@ import {
   testRedisAPI,
   testDatabaseAPI,
   testAllAPIs,
+  runSelfImprovementTests,
   APITestResult,
+  SelfImprovementTestResult,
 } from "@/lib/api";
 
 interface SettingsDropdownProps {
@@ -32,6 +34,7 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, APITestResult>>({});
+  const [selfImprovementResult, setSelfImprovementResult] = useState<SelfImprovementTestResult | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -110,6 +113,27 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Test failed";
       onTestResult?.("error", "API Test Failed", message);
+    } finally {
+      setTesting(null);
+    }
+  };
+
+  const handleSelfImprovementTest = async () => {
+    setTesting("self-improvement");
+    setSelfImprovementResult(null);
+    try {
+      const result = await runSelfImprovementTests();
+      setSelfImprovementResult(result);
+      
+      const { passed, failed, total } = result.summary;
+      if (failed === 0) {
+        onTestResult?.("success", "Self-Improvement Tests Passed", `All ${total} tests passed`);
+      } else {
+        onTestResult?.("error", `${passed}/${total} Tests Passed`, `${failed} test(s) failed`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Test failed";
+      onTestResult?.("error", "Self-Improvement Test Failed", message);
     } finally {
       setTesting(null);
     }
@@ -246,6 +270,82 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
                   </>
                 )}
               </motion.button>
+            </div>
+
+            {/* Self-Improvement Test Section */}
+            <div className="p-3 border-t border-black/[0.06]">
+              <div className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider mb-2">
+                Self-Improvement Tests
+              </div>
+              <motion.button
+                onClick={handleSelfImprovementTest}
+                disabled={testing !== null}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-foreground bg-gradient-to-r from-emerald-50 to-teal-50 hover:from-emerald-100 hover:to-teal-100 border border-emerald-200/50 rounded-xl transition-all disabled:opacity-50"
+              >
+                {testing === "self-improvement" ? (
+                  <>
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    >
+                      <Loader2 className="w-4 h-4 text-emerald-600" />
+                    </motion.div>
+                    <span className="text-emerald-700">Running Tests...</span>
+                  </>
+                ) : (
+                  <>
+                    <Activity className="w-4 h-4 text-emerald-600" />
+                    <span className="text-emerald-700">Test Self-Improvement</span>
+                  </>
+                )}
+              </motion.button>
+              
+              {/* Self-Improvement Test Results */}
+              <AnimatePresence>
+                {selfImprovementResult && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mt-2 p-2 rounded-lg bg-white/80 border border-black/[0.06]"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-semibold text-foreground">Results</span>
+                      <span className={`text-xs font-bold ${
+                        selfImprovementResult.summary.failed === 0 
+                          ? "text-emerald-600" 
+                          : "text-red-500"
+                      }`}>
+                        {selfImprovementResult.summary.passed}/{selfImprovementResult.summary.total} Passed
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      {Object.entries(selfImprovementResult.tests).map(([key, test]) => (
+                        <div key={key} className="flex items-center justify-between text-[10px]">
+                          <span className="text-muted-foreground">{test.test_name}</span>
+                          {test.passed ? (
+                            <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                          ) : (
+                            <XCircle className="w-3 h-3 text-red-500" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {selfImprovementResult.weave_url && (
+                      <a
+                        href={selfImprovementResult.weave_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 block text-[10px] text-primary hover:underline"
+                      >
+                        View in Weave →
+                      </a>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Results Summary */}

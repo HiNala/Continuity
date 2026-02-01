@@ -932,6 +932,55 @@ export async function testAllAPIs(): Promise<AllAPITestsResult> {
 }
 
 // ============================================
+// Self-Improvement Test Types and Functions
+// ============================================
+export interface SelfImprovementTestSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  rate: number;
+  timestamp?: string;
+  error?: string;
+}
+
+export interface SelfImprovementTestResult {
+  summary: SelfImprovementTestSummary;
+  tests: Record<string, {
+    test_name: string;
+    passed: boolean;
+    started_at?: string;
+    completed_at?: string;
+    duration_ms?: number;
+    steps?: Array<{
+      name: string;
+      status: string;
+      timestamp: string;
+    }>;
+    errors?: string[];
+    metrics?: Record<string, unknown>;
+    weave_trace_url?: string;
+  }>;
+  weave_url?: string;
+}
+
+/**
+ * Run the self-improvement test suite.
+ * Tests verify that agents are truly self-improving.
+ */
+export async function runSelfImprovementTests(): Promise<SelfImprovementTestResult> {
+  const response = await fetch(`${API_URL}/api/settings/test/self-improvement`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to run self-improvement tests");
+  }
+
+  return response.json();
+}
+
+// ============================================
 // Streaming Types
 // ============================================
 export interface StreamEvent {
