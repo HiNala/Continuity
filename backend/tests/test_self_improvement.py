@@ -34,7 +34,7 @@ from tests.test_utils import (
 )
 from app.models import (
     OrchestrationState, GenerationPhase, EvaluationStatus,
-    PolicyCreator, EvaluationCriterion
+    PolicyCreator, EvaluationCriterion, Iteration
 )
 from app.agents.qc_agent import qc_agent, PASS_THRESHOLD, CRITERION_WEIGHTS
 from app.weave_ops import test_weave_operation, analyze_text, record_policy_improvement
@@ -233,7 +233,7 @@ async def test_qc_evaluation_flow() -> TestResult:
         # Step 2: Create test iteration for evaluation
         result.add_step("Create test iteration", "running")
         iteration = await create_test_iteration(
-            session, project_id, policy.id,
+            session, project_id, policy.version,
             phase=GenerationPhase.CLEANUP,
             passed=False,
             score=0.5,
@@ -324,7 +324,7 @@ async def test_self_improvement_loop() -> TestResult:
         result.add_step("Setup evaluation scenario", "running")
         await create_test_constraints(session, project_id)
         iteration = await create_test_iteration(
-            session, project_id, policy.id,
+            session, project_id, policy.version,
             phase=GenerationPhase.CLEANUP,
             passed=False,
             score=0.55,
@@ -523,7 +523,7 @@ async def test_end_to_end_pipeline() -> TestResult:
         
         for i, phase in enumerate(phases):
             iter = await create_test_iteration(
-                session, project_id, policy.id,
+                session, project_id, policy.version,
                 phase=phase,
                 iteration_number=i + 1,
                 passed=True,

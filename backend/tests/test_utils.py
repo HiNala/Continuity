@@ -15,6 +15,7 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import weave
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
@@ -89,12 +90,11 @@ async def create_test_project(
     """Create a test project with initial data."""
     project = Project(
         id=uuid4(),
-        name=name or f"{TestConfig.TEST_PROJECT_PREFIX}{datetime.now().strftime('%H%M%S')}",
         goal=goal,
-        style_targets=style_targets or ["modern", "spa"],
-        input_images=images or [TestConfig.TEST_IMAGE_URL],
-        status=ProjectStatus.ACTIVE,
+        images=images or [TestConfig.TEST_IMAGE_URL],
+        status=ProjectStatus.CREATED,
         orchestration_state=OrchestrationState.CREATED,
+        metadata_={"name": name or f"{TestConfig.TEST_PROJECT_PREFIX}{datetime.now().strftime('%H%M%S')}"},
     )
     session.add(project)
     await session.flush()
@@ -117,11 +117,14 @@ async def create_test_requirements(
     
     req = Requirements(
         project_id=project_id,
-        raw_goal="Transform into modern spa bathroom",
-        parsed_requirements=data,
-        clarification_questions=[],
+        original_goal="Transform into modern spa bathroom",
+        space_type=data.get("space_type", "bathroom"),
+        style_targets=data.get("style_preferences", ["modern"]),
+        budget_tier=data.get("budget_tier", "mid-range"),
+        accessibility_required=data.get("accessibility_required", False),
+        intended_use=data.get("use_case", "personal"),
         clarification_responses={},
-        is_complete=True,
+        analysis_complete=True,
     )
     session.add(req)
     await session.flush()
@@ -137,7 +140,6 @@ async def create_test_policy(
     policy = Policy(
         project_id=project_id,
         version=version,
-        is_active=True,
         created_by=PolicyCreator.USER,
         cleanup_config={
             "prompt_template": "Clean up the space, remove debris and construction materials.",
@@ -180,24 +182,24 @@ async def create_test_constraints(
             element_type="window",
             element_location="right wall",
             classification=ConstraintClassification.LOCKED,
-            detected_by="spatial_agent",
-            confidence=0.95,
+            confidence_score=0.95,
+            notes="Detected by spatial_agent",
         ),
         Constraint(
             project_id=project_id,
             element_type="door",
             element_location="left wall",
             classification=ConstraintClassification.LOCKED,
-            detected_by="spatial_agent",
-            confidence=0.92,
+            confidence_score=0.92,
+            notes="Detected by spatial_agent",
         ),
         Constraint(
             project_id=project_id,
             element_type="toilet",
             element_location="back corner",
             classification=ConstraintClassification.LOCKED,
-            detected_by="spatial_agent",
-            confidence=0.88,
+            confidence_score=0.88,
+            notes="Detected by spatial_agent",
         ),
     ]
     
@@ -210,21 +212,24 @@ async def create_test_constraints(
 async def create_test_iteration(
     session: AsyncSession,
     project_id,
-    policy_id,
+    policy_version: int,
     phase: GenerationPhase = GenerationPhase.CLEANUP,
     iteration_number: int = 1,
     passed: bool = False,
     score: float = 0.5,
 ) -> Iteration:
     """Create a test iteration for evaluation testing."""
+    from app.models import IterationStatus
+    
     iteration = Iteration(
         project_id=project_id,
-        policy_id=policy_id,
+        policy_version=policy_version,
         phase=phase,
         iteration_number=iteration_number,
         input_image_path=TestConfig.TEST_IMAGE_URL,
         output_image_path=TestConfig.TEST_IMAGE_URL,  # Same for test
         prompt_used="Test prompt for generation",
+        status=IterationStatus.COMPLETED,
         evaluation_status=EvaluationStatus.PASSED if passed else EvaluationStatus.FAILED,
         evaluation_score=score,
         evaluation_result="accepted" if passed else "rejected",
@@ -350,11 +355,23 @@ def get_weave_trace_url() -> Optional[str]:
 async def cleanup_test_project(session: AsyncSession, project_id):
     """Clean up a test project and related data."""
     from sqlalchemy import delete
+    from app.models import PolicyChange, EvaluationDetail, ProjectAnalysis
     
     try:
-        # Delete in order due to foreign keys
+        # Delete in order due to foreign keys (most dependent first)
+        # PolicyChange references iterations, so delete it first
+        await session.execute(delete(PolicyChange).where(PolicyChange.project_id == project_id))
+        # EvaluationDetail references iterations
+        await session.execute(
+            delete(EvaluationDetail).where(
+                EvaluationDetail.iteration_id.in_(
+                    select(Iteration.id).where(Iteration.project_id == project_id)
+                )
+            )
+        )
         await session.execute(delete(Iteration).where(Iteration.project_id == project_id))
         await session.execute(delete(Constraint).where(Constraint.project_id == project_id))
+        await session.execute(delete(ProjectAnalysis).where(ProjectAnalysis.project_id == project_id))
         await session.execute(delete(Policy).where(Policy.project_id == project_id))
         await session.execute(delete(Requirements).where(Requirements.project_id == project_id))
         await session.execute(delete(Project).where(Project.id == project_id))
