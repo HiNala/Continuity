@@ -29,9 +29,10 @@ import {
 interface SettingsDropdownProps {
   onTestResult?: (type: "success" | "error", title: string, message?: string) => void;
   onOpenGallery?: () => void;
+  galleryEnabled?: boolean;
 }
 
-export function SettingsDropdown({ onTestResult, onOpenGallery }: SettingsDropdownProps = {}) {
+export function SettingsDropdown({ onTestResult, onOpenGallery, galleryEnabled = true }: SettingsDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, APITestResult>>({});
@@ -212,9 +213,14 @@ export function SettingsDropdown({ onTestResult, onOpenGallery }: SettingsDropdo
                     setIsOpen(false);
                     onOpenGallery();
                   }}
+                  disabled={!galleryEnabled}
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-neutral-700 dark:text-zinc-300 hover:text-neutral-900 dark:hover:text-zinc-100 hover:bg-neutral-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+                  className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-xl transition-all ${
+                    galleryEnabled
+                      ? "text-neutral-700 dark:text-zinc-300 hover:text-neutral-900 dark:hover:text-zinc-100 hover:bg-neutral-50 dark:hover:bg-zinc-800"
+                      : "text-neutral-400 dark:text-zinc-600 cursor-not-allowed opacity-60"
+                  }`}
                 >
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-lg bg-neutral-100 dark:bg-zinc-800 flex items-center justify-center">

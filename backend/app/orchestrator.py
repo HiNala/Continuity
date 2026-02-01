@@ -1114,6 +1114,18 @@ class Orchestrator:
             # Build detailed evaluation feedback for frontend
             passed_criteria = sum(1 for c in criteria_results if c.get("passed", False))
             total_criteria = len(criteria_results)
+            failed_details = [
+                {
+                    "criterion": c.get("criterion", "unknown"),
+                    "score": c.get("score"),
+                    "details": c.get("details", "") or ""
+                }
+                for c in criteria_results if not c.get("passed", True)
+            ]
+            primary_failure_reason = next(
+                (d["details"] for d in failed_details if d.get("details")),
+                None
+            )
             
             if eval_result.get("passed"):
                 # Passed - move to next phase or complete
@@ -1141,6 +1153,9 @@ class Orchestrator:
                     "total_criteria": total_criteria,
                     "failed_criteria": failed_criteria,
                     "failure_reasons": failed_criteria,
+                    "failure_details": failed_details,
+                    "primary_failure_reason": primary_failure_reason or "Quality check below threshold",
+                    "human_readable_reason": primary_failure_reason or "Quality check below threshold",
                     "message": f"Quality check failed ({passed_criteria}/{total_criteria} criteria passed, score: {eval_score:.2%})",
                 })
                 
@@ -1188,15 +1203,24 @@ class Orchestrator:
             # Get latest iteration and analyze failure
             iteration = await self._get_latest_iteration(phase)
             
+            policy_result = None
+            changes_applied: list = []
+            old_version = None
+            new_version = None
+
             if iteration:
                 # Analyze and apply policy changes
                 analysis = await qc_agent.analyze_failure(self.session, iteration.id)
                 recommended_changes = analysis.get("recommended_changes", [])
                 
                 if recommended_changes:
-                    await qc_agent.apply_policy_changes(
+                    policy_result = await qc_agent.apply_policy_changes(
                         self.session, self.project_id, recommended_changes, iteration.id
                     )
+                    if policy_result and policy_result.get("success"):
+                        changes_applied = policy_result.get("changes_applied", [])
+                        old_version = policy_result.get("old_version")
+                        new_version = policy_result.get("new_version")
             
             # Increment retry count and go back to generation
             self.project.retry_count += 1
@@ -1205,7 +1229,13 @@ class Orchestrator:
             await self.transition(
                 gen_state,
                 OrchestrationTrigger.USER_ACTION,
-                {"retry_number": self.project.retry_count}
+                {
+                    "retry_number": self.project.retry_count,
+                    "phase": phase,
+                    "changes_applied": changes_applied,
+                    "previous_policy_version": old_version,
+                    "policy_version": new_version,
+                }
             )
             
         except Exception as e:

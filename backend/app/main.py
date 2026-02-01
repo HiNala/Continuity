@@ -8,8 +8,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import weave
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -168,14 +169,13 @@ logger = logging.getLogger(__name__)
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Handle HTTP exceptions with consistent JSON responses."""
-    return Response(
-        content='{"error": "%s", "detail": "%s", "status_code": %d}' % (
-            exc.detail if isinstance(exc.detail, str) else "HTTP Error",
-            exc.detail if isinstance(exc.detail, str) else str(exc.detail),
-            exc.status_code
-        ),
+    return JSONResponse(
         status_code=exc.status_code,
-        media_type="application/json",
+        content={
+            "error": exc.detail if isinstance(exc.detail, str) else "HTTP Error",
+            "detail": exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+            "status_code": exc.status_code,
+        },
     )
 
 
@@ -187,12 +187,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         loc = " -> ".join(str(x) for x in error["loc"])
         errors.append(f"{loc}: {error['msg']}")
     
-    return Response(
-        content='{"error": "Validation Error", "details": %s, "status_code": 422}' % (
-            str(errors).replace("'", '"')
-        ),
+    return JSONResponse(
         status_code=422,
-        media_type="application/json",
+        content={
+            "error": "Validation Error",
+            "details": errors,
+            "status_code": 422,
+        },
     )
 
 
@@ -208,10 +209,13 @@ async def general_exception_handler(request: Request, exc: Exception):
     else:
         detail = "An unexpected error occurred. Please try again later."
     
-    return Response(
-        content='{"error": "Internal Server Error", "detail": "%s", "status_code": 500}' % detail,
+    return JSONResponse(
         status_code=500,
-        media_type="application/json",
+        content={
+            "error": "Internal Server Error",
+            "detail": detail,
+            "status_code": 500,
+        },
     )
 
 

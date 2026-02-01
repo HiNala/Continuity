@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -43,8 +43,9 @@ import {
   startOrchestration,
   getOrchestrationStatus,
   selectProjectReferenceImages,
-  getAllProjectImages,
-  getIterationEvaluation,
+  getProjectGallery,
+  GalleryResponse,
+  GalleryAttempt,
   ClarifyingQuestion,
   RequirementsResponse,
   AnalysisSummaryResponse,
@@ -58,6 +59,7 @@ import { ImageUpload } from "@/components/ImageUpload";
 import { InspirationGallery } from "@/components/InspirationGallery";
 import { ResultsTimeline } from "@/components/ResultsTimeline";
 import { ImprovementStory } from "@/components/ImprovementStory";
+import { ErrorState } from "@/components/ui/error-state";
 
 // ============================================
 // Types
@@ -68,16 +70,10 @@ interface Answers {
   [questionId: string]: string | string[];
 }
 
-interface GalleryItem {
-  id: string;
+interface GallerySelection {
   phase: string;
-  iterationNumber: number;
-  imageUrl: string;
-  evaluationPassed: boolean | null;
-  evaluationScore: number | null;
-  evaluationStatus: string | null;
-  reason: string;
-  createdAt: string;
+  phaseLabel: string;
+  attempt: GalleryAttempt;
 }
 
 // ============================================
@@ -127,11 +123,12 @@ export default function ProjectPage() {
   // Orchestration (Mission 06)
   const [orchestrationStatus, setOrchestrationStatus] = useState<OrchestrationStatusResponse | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+  const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
-  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryData, setGalleryData] = useState<GalleryResponse | null>(null);
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
-  const [galleryFilter, setGalleryFilter] = useState<"all" | "passed" | "failed" | "pending">("all");
+  const [gallerySelected, setGallerySelected] = useState<GallerySelection | null>(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const resolveImagePath = (imagePath: string) => {
@@ -339,87 +336,92 @@ export default function ProjectPage() {
     }
   };
 
-  const openGallery = async () => {
-    setIsGalleryOpen(true);
+  const formatPolicyChange = (change: Record<string, unknown>): string => {
+    const type = String(change.type || "update");
+    const oldValue = change.current || change.old;
+    const newValue = change.proposed || change.new;
+    if (type === "constraint_emphasis") {
+      return `Constraint emphasis: ${oldValue || "medium"} → ${newValue || "high"}`;
+    }
+    if (type === "creativity_reduction") {
+      return `Creativity: ${oldValue || "standard"} → ${newValue || "lower"}`;
+    }
+    if (type === "prompt_addition") {
+      return `Prompt addition: ${(change.addition as string) || (newValue as string) || "Added guidance"}`;
+    }
+    if (type === "max_retries_increase") {
+      return `Max retries: ${oldValue || "default"} → ${newValue || "higher"}`;
+    }
+    return `${type.replace(/_/g, " ")}: ${oldValue ?? "before"} → ${newValue ?? "after"}`;
+  };
+
+  const buildScoreChartPoints = (scores: number[]): string => {
+    if (scores.length === 0) return "";
+    const width = 100;
+    const height = 40;
+    const step = scores.length > 1 ? width / (scores.length - 1) : width;
+    return scores
+      .map((score, index) => {
+        const x = index * step;
+        const y = height - Math.max(0, Math.min(score, 1)) * height;
+        return `${x},${y}`;
+      })
+      .join(" ");
+  };
+
+  const getPhaseName = (phase: string) => {
+    const phaseNames: Record<string, string> = {
+      cleanup: "Cleanup",
+      structural: "Structural",
+      fixture: "Fixtures",
+      style: "Style",
+    };
+    return phaseNames[phase] || phase;
+  };
+
+  const loadGalleryData = useCallback(async () => {
     if (!projectId) {
       setGalleryError("No project found yet. Create a project first.");
-      setGalleryItems([]);
+      setGalleryData(null);
       return;
     }
 
     setGalleryLoading(true);
     setGalleryError(null);
     try {
-      const { iterations } = await getAllProjectImages(projectId);
-      const baseItems = iterations
-        .filter((iteration) => iteration.output_image_url || iteration.output_image_path)
-        .map((iteration) => {
-          const url =
-            iteration.output_image_url ||
-            resolveImagePath(iteration.output_image_path || "");
-
-          return {
-            id: iteration.id,
-            phase: iteration.phase,
-            iterationNumber: iteration.iteration_number,
-            imageUrl: url,
-            evaluationPassed: iteration.evaluation_passed,
-            evaluationScore: iteration.evaluation_score,
-            evaluationStatus: iteration.evaluation_status,
-            reason: "Not evaluated",
-            createdAt: iteration.created_at,
-          };
-        });
-
-      const failedItems = baseItems.filter((item) => item.evaluationPassed === false);
-      const failureReasonMap = new Map<string, string>();
-      await Promise.allSettled(
-        failedItems.map(async (item) => {
-          const detail = await getIterationEvaluation(projectId, item.id);
-          const reason = detail.failure_reasons?.[0];
-          if (reason) failureReasonMap.set(item.id, reason);
-        })
-      );
-
-      const withReasons = baseItems.map((item) => {
-        if (item.evaluationPassed === true) {
-          return { ...item, reason: "Passed QC" };
-        }
-        if (item.evaluationPassed === false) {
-          return {
-            ...item,
-            reason: failureReasonMap.get(item.id) || item.evaluationStatus || "Failed QC",
-          };
-        }
-        return item;
-      });
-
-      setGalleryItems(withReasons);
+      const data = await getProjectGallery(projectId);
+      setGalleryData(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load gallery";
       setGalleryError(message);
+      setGalleryData(null);
     } finally {
       setGalleryLoading(false);
     }
+  }, [projectId]);
+
+  const openGallery = async () => {
+    setIsGalleryOpen(true);
+    setGallerySelected(null);
+    await loadGalleryData();
   };
 
-  const filteredGalleryItems = galleryItems.filter((item) => {
-    if (galleryFilter === "all") return true;
-    if (galleryFilter === "passed") return item.evaluationPassed === true;
-    if (galleryFilter === "failed") return item.evaluationPassed === false;
-    return item.evaluationPassed === null;
-  });
+  useEffect(() => {
+    if (!isGalleryOpen) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsGalleryOpen(false);
+        setGallerySelected(null);
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [isGalleryOpen]);
 
-  const galleryCounts = {
-    all: galleryItems.length,
-    passed: galleryItems.filter((item) => item.evaluationPassed === true).length,
-    failed: galleryItems.filter((item) => item.evaluationPassed === false).length,
-    pending: galleryItems.filter((item) => item.evaluationPassed === null).length,
-  };
-
-  const getPhaseName = (phase: string) => {
-    return phase.charAt(0).toUpperCase() + phase.slice(1);
-  };
+  const galleryEnabled =
+    (galleryData?.summary.total_attempts ?? 0) > 0 ||
+    (generationResult?.phases?.length ?? 0) > 0 ||
+    (generationResult?.style_variations?.length ?? 0) > 0;
 
   // ==========================================
   // Orchestration Helpers (Mission 06)
@@ -479,11 +481,22 @@ export default function ProjectPage() {
         
         // Continue polling if not terminal
         if (!isTerminalState(status.state)) {
-          setTimeout(poll, 2500); // Poll every 2.5 seconds
+          if (pollingTimeoutRef.current) {
+            clearTimeout(pollingTimeoutRef.current);
+          }
+          pollingTimeoutRef.current = setTimeout(poll, 2500); // Poll every 2.5 seconds
         } else {
+          if (pollingTimeoutRef.current) {
+            clearTimeout(pollingTimeoutRef.current);
+            pollingTimeoutRef.current = null;
+          }
           setIsPolling(false);
         }
       } catch (err) {
+        if (pollingTimeoutRef.current) {
+          clearTimeout(pollingTimeoutRef.current);
+          pollingTimeoutRef.current = null;
+        }
         setError(err instanceof Error ? err.message : "Failed to get status");
         setIsPolling(false);
       }
@@ -491,6 +504,15 @@ export default function ProjectPage() {
     
     poll();
   };
+
+  useEffect(() => {
+    return () => {
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+        pollingTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const handleStartOrchestration = async () => {
     if (!projectId) return;
@@ -577,6 +599,7 @@ export default function ProjectPage() {
               }
             }}
             onOpenGallery={openGallery}
+            galleryEnabled={galleryEnabled}
           />
         </div>
       </header>
@@ -584,9 +607,12 @@ export default function ProjectPage() {
       <div className="max-w-4xl mx-auto px-6 py-12">
         {/* Error display */}
         {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400">
-            {error}
-          </div>
+          <ErrorState
+            variant="banner"
+            title="Something went wrong"
+            message={error}
+            onDismiss={() => setError(null)}
+          />
         )}
 
         {/* Step 1: Goal Input */}
@@ -1474,7 +1500,10 @@ export default function ProjectPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div
             className="absolute inset-0"
-            onClick={() => setIsGalleryOpen(false)}
+            onClick={() => {
+              setIsGalleryOpen(false);
+              setGallerySelected(null);
+            }}
           />
           <div className="relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/90 shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/80">
@@ -1484,7 +1513,9 @@ export default function ProjectPage() {
                   <h2 className="text-lg font-semibold">Generation Gallery</h2>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  All generated images with QC pass/fail and reasons
+                  {galleryData?.run_timestamp
+                    ? `Run started ${new Date(galleryData.run_timestamp).toLocaleString()}`
+                    : "All generated images with QC pass/fail and reasons"}
                 </p>
               </div>
               <button
@@ -1496,30 +1527,24 @@ export default function ProjectPage() {
               </button>
             </div>
 
-            <div className="px-6 py-4 border-b border-slate-800 flex flex-wrap items-center gap-2">
-              {(["all", "passed", "failed", "pending"] as const).map((filter) => (
-                <button
-                  key={filter}
-                  onClick={() => setGalleryFilter(filter)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                    galleryFilter === filter
-                      ? "bg-continuity-500/20 text-continuity-300 border border-continuity-500/40"
-                      : "bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200"
-                  }`}
-                >
-                  {filter === "all" ? "All" : filter === "passed" ? "Passed" : filter === "failed" ? "Failed" : "Pending"}
-                  <span className="ml-2 text-[10px] text-slate-500">
-                    {galleryCounts[filter]}
-                  </span>
-                </button>
-              ))}
-            </div>
-
             <div className="p-6 overflow-y-auto max-h-[70vh]">
               {galleryLoading && (
-                <div className="flex items-center justify-center py-12 text-slate-400">
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Loading gallery...
+                <div className="space-y-4">
+                  <div className="flex items-center justify-center py-6 text-slate-400">
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Loading gallery...
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+                        <div className="aspect-square bg-slate-800 animate-pulse" />
+                        <div className="p-3 space-y-2">
+                          <div className="h-3 w-24 bg-slate-800 rounded animate-pulse" />
+                          <div className="h-3 w-32 bg-slate-800 rounded animate-pulse" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -1529,57 +1554,170 @@ export default function ProjectPage() {
                 </div>
               )}
 
-              {!galleryLoading && !galleryError && filteredGalleryItems.length === 0 && (
+              {!galleryLoading && !galleryError && (!galleryData || galleryData.summary.total_attempts === 0) && (
                 <div className="text-center text-slate-500 py-12">
-                  No images found for this filter.
+                  No images generated yet. Run a transformation to see your gallery.
                 </div>
               )}
 
-              {!galleryLoading && !galleryError && filteredGalleryItems.length > 0 && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredGalleryItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden"
-                    >
-                      <div className="aspect-square bg-slate-900">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={item.imageUrl}
-                          alt={`${item.phase} run ${item.iterationNumber}`}
-                          className="w-full h-full object-cover"
-                        />
+              {!galleryLoading && !galleryError && galleryData && galleryData.summary.total_attempts > 0 && (
+                <div className="space-y-8">
+                  {/* Summary */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                      <div className="text-xs text-slate-500">Total Images</div>
+                      <div className="text-2xl font-semibold text-white">{galleryData.summary.total_attempts}</div>
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        Policy updates: {galleryData.summary.total_policy_updates}
                       </div>
-                      <div className="p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs text-slate-400">
-                            {item.phase} • Run #{item.iterationNumber}
-                          </div>
-                          <div className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                            item.evaluationPassed === true
-                              ? "bg-emerald-500/20 text-emerald-300"
-                              : item.evaluationPassed === false
-                              ? "bg-red-500/20 text-red-300"
-                              : "bg-slate-700/40 text-slate-300"
-                          }`}>
-                            {item.evaluationPassed === true
-                              ? "PASS"
-                              : item.evaluationPassed === false
-                              ? "FAIL"
-                              : "PENDING"}
-                          </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                      <div className="text-xs text-slate-500">Passed / Failed</div>
+                      <div className="text-2xl font-semibold text-white">
+                        <span className="text-emerald-400">{galleryData.summary.passed}</span>
+                        <span className="text-slate-500"> / </span>
+                        <span className="text-red-400">{galleryData.summary.failed}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Success rate: {galleryData.summary.total_attempts > 0
+                          ? Math.round((galleryData.summary.passed / galleryData.summary.total_attempts) * 100)
+                          : 0}%
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                      <div className="text-xs text-slate-500">Improvement Journey</div>
+                      <div className="text-2xl font-semibold text-white">
+                        {galleryData.summary.improvement_demonstrated ? "Visible" : "Not yet"}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Score progression across attempts
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Score Progression Chart */}
+                  <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                    <div className="text-xs text-slate-500 mb-3">Score Progression</div>
+                    {galleryData.summary.overall_score_progression.length > 0 ? (
+                      <div className="w-full">
+                        <svg viewBox="0 0 100 40" className="w-full h-24">
+                          <polyline
+                            fill="none"
+                            stroke="currentColor"
+                            className="text-continuity-400"
+                            strokeWidth="2"
+                            points={buildScoreChartPoints(galleryData.summary.overall_score_progression)}
+                          />
+                          {galleryData.summary.overall_score_progression.map((score, idx) => {
+                            const x = galleryData.summary.overall_score_progression.length > 1
+                              ? (idx * 100) / (galleryData.summary.overall_score_progression.length - 1)
+                              : 50;
+                            const y = 40 - Math.max(0, Math.min(score, 1)) * 40;
+                            return (
+                              <circle
+                                key={idx}
+                                cx={x}
+                                cy={y}
+                                r="1.6"
+                                className="text-continuity-400 fill-current"
+                              />
+                            );
+                          })}
+                        </svg>
+                        <div className="flex justify-between text-[10px] text-slate-500">
+                          <span>Attempt 1</span>
+                          <span>Attempt {galleryData.summary.overall_score_progression.length}</span>
                         </div>
-                        <div className="text-xs text-slate-300">
-                          Reason: <span className="text-slate-400">{item.reason}</span>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-500">No scores yet.</div>
+                    )}
+                  </div>
+
+                  {/* Phases */}
+                  {galleryData.phases.map((phase) => (
+                    <div key={phase.phase} className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-slate-200">
+                          {phase.phase_label}
+                        </h3>
+                        <span className="text-xs text-slate-500">
+                          {phase.total_attempts} attempts → {phase.final_status === "passed" ? "✓" : phase.final_status === "failed" ? "✗" : "…"}
+                        </span>
+                      </div>
+                      {phase.score_progression.length > 0 && (
+                        <div className="text-xs text-slate-500">
+                          Improvement: {phase.score_progression.map((score) => `${Math.round(score * 100)}%`).join(" → ")} • Policy updates: {phase.policy_updates_count}
                         </div>
-                        {item.evaluationScore !== null && item.evaluationScore !== undefined && (
-                          <div className="text-[11px] text-slate-500">
-                            Score: {(item.evaluationScore * 100).toFixed(0)}%
-                          </div>
-                        )}
-                        <div className="text-[10px] text-slate-600">
-                          {new Date(item.createdAt).toLocaleString()}
-                        </div>
+                      )}
+                      <div className="flex items-center gap-3 overflow-x-auto pb-2">
+                        {phase.attempts.map((attempt, idx) => {
+                          const status = attempt.status;
+                          const resolvedUrl = resolveImagePath(attempt.image_url);
+                          const delta = attempt.score_delta;
+                          const deltaLabel = delta !== null && delta !== undefined
+                            ? `${delta >= 0 ? "↑" : "↓"} ${Math.abs(Math.round(delta * 100))}%`
+                            : null;
+                          return (
+                            <div key={attempt.iteration_id} className="flex items-center gap-3 flex-shrink-0">
+                              <button
+                                onClick={() => setGallerySelected({ phase: phase.phase, phaseLabel: phase.phase_label, attempt })}
+                                className={`text-left rounded-xl border overflow-hidden transition-colors w-64 ${
+                                  status === "passed"
+                                    ? "border-emerald-500/40 bg-emerald-500/5"
+                                    : status === "failed" && (delta !== null && delta > 0)
+                                    ? "border-amber-500/40 bg-amber-500/5"
+                                    : status === "failed"
+                                    ? "border-red-500/40 bg-red-500/5"
+                                    : "border-slate-800 bg-slate-900/60"
+                                }`}
+                              >
+                                <div className="relative aspect-[4/3] bg-slate-900">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={resolvedUrl}
+                                    alt={`${phase.phase_label} attempt ${attempt.attempt_number}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <div className={`absolute top-2 right-2 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                    status === "passed"
+                                      ? "bg-emerald-500/80 text-white"
+                                      : status === "failed"
+                                      ? "bg-red-500/80 text-white"
+                                      : "bg-slate-700/80 text-white"
+                                  }`}>
+                                    {status === "passed" ? "PASS" : status === "failed" ? "FAIL" : "PENDING"}
+                                  </div>
+                                </div>
+                                <div className="p-3 space-y-2">
+                                  <div className="text-xs text-slate-400">
+                                    Attempt {attempt.attempt_number} of {phase.total_attempts}
+                                  </div>
+                                  {attempt.score !== null && attempt.score !== undefined && (
+                                    <div className="text-xs text-slate-300">
+                                      Score: {Math.round(attempt.score * 100)}%{" "}
+                                      {deltaLabel && <span className="text-slate-500">({deltaLabel})</span>}
+                                    </div>
+                                  )}
+                                  <div className="text-xs text-slate-300">
+                                    Reason: <span className="text-slate-400">{attempt.human_readable_reason || attempt.failure_reason || "Not evaluated"}</span>
+                                  </div>
+                                  {attempt.policy_version !== null && attempt.policy_version !== undefined && (
+                                    <div className="text-[11px] text-slate-500">
+                                      Policy v{attempt.policy_version}
+                                      {attempt.policy_changes_from_previous.length > 0 && (
+                                        <span className="ml-2 text-amber-400">🔧 {attempt.policy_changes_from_previous.length} updates</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </button>
+                              {idx < phase.attempts.length - 1 && (
+                                <div className="text-slate-500 text-lg">→</div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
@@ -1587,6 +1725,122 @@ export default function ProjectPage() {
               )}
             </div>
           </div>
+
+          {/* Detail Lightbox */}
+          {gallerySelected && (
+            <div
+              className="absolute inset-0 z-10 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+              onClick={() => setGallerySelected(null)}
+            >
+              <div
+                className="relative w-full max-w-5xl max-h-[85vh] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/95 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">
+                      {gallerySelected.phaseLabel} • Attempt #{gallerySelected.attempt.attempt_number}
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      {new Date(gallerySelected.attempt.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setGallerySelected(null)}
+                    className="p-2 rounded-full hover:bg-white/10 transition-colors"
+                    aria-label="Close details"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0">
+                  <div className="p-4">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={resolveImagePath(gallerySelected.attempt.image_url)}
+                      alt="Gallery detail"
+                      className="w-full max-h-[60vh] object-contain rounded-xl border border-slate-800"
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  </div>
+                  <div className="p-4 space-y-4 overflow-y-auto max-h-[70vh]">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                        gallerySelected.attempt.status === "passed"
+                          ? "bg-emerald-500/20 text-emerald-300"
+                          : gallerySelected.attempt.status === "failed"
+                          ? "bg-red-500/20 text-red-300"
+                          : "bg-slate-700/40 text-slate-300"
+                      }`}>
+                        {gallerySelected.attempt.status === "passed"
+                          ? "Passed QC"
+                          : gallerySelected.attempt.status === "failed"
+                          ? "Failed QC"
+                          : "Pending QC"}
+                      </span>
+                      {gallerySelected.attempt.score !== null && gallerySelected.attempt.score !== undefined && (
+                        <span className="text-xs text-slate-400">
+                          Score: {(gallerySelected.attempt.score * 100).toFixed(0)}%
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-300">
+                      Reason: <span className="text-slate-400">{gallerySelected.attempt.human_readable_reason || gallerySelected.attempt.failure_reason || "Not evaluated"}</span>
+                    </div>
+                    {gallerySelected.attempt.policy_version !== null && gallerySelected.attempt.policy_version !== undefined && (
+                      <div className="text-xs text-slate-400">
+                        Policy version: v{gallerySelected.attempt.policy_version}
+                      </div>
+                    )}
+                    {gallerySelected.attempt.policy_changes_from_previous.length > 0 && (
+                      <div className="space-y-1">
+                        <div className="text-xs font-semibold text-slate-300">Policy adjustments</div>
+                        <ul className="text-[11px] text-slate-400 space-y-1">
+                          {gallerySelected.attempt.policy_changes_from_previous.map((change, index) => (
+                            <li key={index}>• {formatPolicyChange(change)}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {gallerySelected.attempt.weave_trace_id && (
+                      <button
+                        onClick={() => window.open(`https://wandb.ai/traces/${gallerySelected.attempt.weave_trace_id}`, "_blank")}
+                        className="text-xs text-continuity-400 hover:text-continuity-300"
+                      >
+                        View Weave Trace →
+                      </button>
+                    )}
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold text-slate-300">Evaluation Breakdown</div>
+                      {gallerySelected.attempt.evaluation.length === 0 ? (
+                        <div className="text-xs text-slate-500">No evaluation details available yet.</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {gallerySelected.attempt.evaluation.map((criterion) => (
+                            <div key={criterion.criterion} className="rounded-lg border border-slate-800 bg-slate-900/60 p-2">
+                              <div className="flex items-center justify-between">
+                                <div className="text-xs text-slate-300">
+                                  {criterion.criterion.replace(/_/g, " ")}
+                                </div>
+                                <div className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                  criterion.passed ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
+                                }`}>
+                                  {Math.round(criterion.score * 100)}%
+                                </div>
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-1">
+                                {criterion.details}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </main>

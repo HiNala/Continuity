@@ -11,7 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload
@@ -20,7 +20,7 @@ from app.database import get_async_session
 from app.config import settings
 from app.models import (
     Project, Requirements, ProjectStatus, Constraint, ProjectAnalysis,
-    Iteration, EvaluationDetail, OrchestrationLog,
+    Iteration, EvaluationDetail, OrchestrationLog, PolicyChange,
     EvaluationStatus, OrchestrationState
 )
 from app.agents.requirements_agent import requirements_agent
@@ -50,6 +50,7 @@ class CreateProjectRequest(BaseModel):
         description="User identifier (optional)"
     )
     
+    @field_validator("images")
     @classmethod
     def validate_images(cls, v: List[str]) -> List[str]:
         """Validate image URLs/paths."""
@@ -139,6 +140,7 @@ class SubmitAnswersRequest(BaseModel):
         max_length=50  # Max 50 questions
     )
     
+    @field_validator("responses")
     @classmethod
     def validate_responses(cls, v: Dict[str, Any]) -> Dict[str, Any]:
         """Validate response structure."""
@@ -1132,9 +1134,13 @@ class GalleryAttempt(BaseModel):
     image_url: str
     status: str
     score: Optional[float]
+    previous_score: Optional[float]
+    score_delta: Optional[float]
     failure_reason: Optional[str]
+    human_readable_reason: Optional[str]
     evaluation: List[CriterionResult]
     policy_version: Optional[int]
+    policy_changes_from_previous: List[Dict[str, Any]]
     weave_trace_id: Optional[str]
     timestamp: str
 
@@ -1143,6 +1149,10 @@ class GalleryPhase(BaseModel):
     """Phase group with its attempts."""
     phase: str
     phase_label: str
+    total_attempts: int
+    final_status: str
+    score_progression: List[float]
+    policy_updates_count: int
     attempts: List[GalleryAttempt]
 
 
@@ -1151,7 +1161,9 @@ class GallerySummary(BaseModel):
     total_attempts: int
     passed: int
     failed: int
-    improvement_shown: bool
+    total_policy_updates: int
+    overall_score_progression: List[float]
+    improvement_demonstrated: bool
 
 
 class GalleryResponse(BaseModel):
@@ -1271,6 +1283,18 @@ async def get_project_gallery(
     )
     iterations = iterations_result.scalars().all()
 
+    policy_changes_result = await session.execute(
+        select(PolicyChange)
+        .where(PolicyChange.project_id == project_id)
+        .order_by(PolicyChange.created_at)
+    )
+    policy_changes = policy_changes_result.scalars().all()
+    changes_by_iteration: Dict[str, List[Dict[str, Any]]] = {}
+    for change in policy_changes:
+        if change.trigger_iteration_id:
+            key = str(change.trigger_iteration_id)
+            changes_by_iteration.setdefault(key, []).extend(change.changes_made or [])
+
     phase_groups: Dict[str, List[Iteration]] = {}
     for iteration in iterations:
         phase_groups.setdefault(iteration.phase, []).append(iteration)
@@ -1279,7 +1303,9 @@ async def get_project_gallery(
     total_attempts = 0
     passed = 0
     failed = 0
-    improvement_shown = False
+    total_policy_updates = len(policy_changes)
+    overall_score_progression: List[float] = []
+    improvement_demonstrated = False
 
     phase_label_map = {
         "cleanup": "Cleanup",
@@ -1289,10 +1315,14 @@ async def get_project_gallery(
     }
 
     for phase, phase_iterations in phase_groups.items():
+        phase_iterations = sorted(phase_iterations, key=lambda i: i.iteration_number)
         attempts: List[GalleryAttempt] = []
+        score_progression: List[float] = []
+        policy_updates_count = 0
+        last_score: Optional[float] = None
         for iteration in phase_iterations:
             if iteration.iteration_number and iteration.iteration_number > 1:
-                improvement_shown = True
+                improvement_demonstrated = True
 
             output_url = ""
             if iteration.output_image_path:
@@ -1311,6 +1341,7 @@ async def get_project_gallery(
             total_attempts += 1
 
             reason = None
+            human_reason = None
             if status == EvaluationStatus.FAILED:
                 if iteration.failure_reasons:
                     reason = iteration.failure_reasons[0]
@@ -1322,8 +1353,10 @@ async def get_project_gallery(
                         None
                     )
                     reason = failed_detail.details if failed_detail and failed_detail.details else "Failed QC"
+                human_reason = reason
             elif status == EvaluationStatus.PASSED:
                 reason = "Passed QC"
+                human_reason = "All checks passed"
 
             evaluation = [
                 CriterionResult(
@@ -1336,22 +1369,46 @@ async def get_project_gallery(
                 for detail in iteration.evaluation_details
             ]
 
+            previous_score = last_score
+            score_delta = None
+            if iteration.evaluation_score is not None:
+                score_progression.append(iteration.evaluation_score)
+                overall_score_progression.append(iteration.evaluation_score)
+                if previous_score is not None:
+                    score_delta = iteration.evaluation_score - previous_score
+                    if score_delta > 0:
+                        improvement_demonstrated = True
+                last_score = iteration.evaluation_score
+
+            policy_changes_from_previous = changes_by_iteration.get(str(iteration.id), [])
+            if policy_changes_from_previous:
+                policy_updates_count += 1
+
             attempts.append(GalleryAttempt(
                 attempt_number=iteration.iteration_number,
                 iteration_id=str(iteration.id),
                 image_url=output_url,
                 status=status,
                 score=iteration.evaluation_score,
+                previous_score=previous_score,
+                score_delta=score_delta,
                 failure_reason=reason,
+                human_readable_reason=human_reason,
                 evaluation=evaluation,
                 policy_version=iteration.policy_version,
+                policy_changes_from_previous=policy_changes_from_previous,
                 weave_trace_id=iteration.weave_run_id,
                 timestamp=iteration.created_at.isoformat(),
             ))
 
+        final_status = attempts[-1].status if attempts else EvaluationStatus.PENDING
         phases.append(GalleryPhase(
             phase=phase,
             phase_label=phase_label_map.get(phase, phase.title()),
+            total_attempts=len(attempts),
+            final_status=final_status,
+            score_progression=score_progression,
+            policy_updates_count=policy_updates_count,
             attempts=attempts
         ))
 
@@ -1359,7 +1416,9 @@ async def get_project_gallery(
         total_attempts=total_attempts,
         passed=passed,
         failed=failed,
-        improvement_shown=improvement_shown
+        total_policy_updates=total_policy_updates,
+        overall_score_progression=overall_score_progression,
+        improvement_demonstrated=improvement_demonstrated
     )
 
     return GalleryResponse(

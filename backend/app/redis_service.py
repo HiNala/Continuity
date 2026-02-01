@@ -259,13 +259,7 @@ class RedisService:
         combined = f"{query.lower().strip()}:{style}:{space_type}"
         return hashlib.md5(combined.encode()).hexdigest()
     
-    async def health_check(self) -> bool:
-        """Check Redis connectivity."""
-        try:
-            await self.client.ping()
-            return True
-        except Exception:
-            return False
+    # Duplicate health_check removed (use primary health_check above)
 
 
 # Global Redis service instance

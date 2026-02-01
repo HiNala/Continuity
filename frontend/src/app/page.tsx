@@ -29,6 +29,9 @@ import {
   getAgentReasoning,
   getIterations,
   getIterationEvaluation,
+  getProjectGallery,
+  type GalleryResponse,
+  type GalleryAttempt,
   getBatchReport,
   type AnalyzeGoalResponse,
   type OrchestrationStatusResponse,
@@ -67,6 +70,64 @@ const smoothTransition = {
   ease: [0.25, 0.1, 0.25, 1] as const,
 };
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+const resolveImagePath = (imagePath?: string | null) => {
+  if (!imagePath) return "";
+  if (imagePath.startsWith("http") || imagePath.startsWith("data:")) return imagePath;
+  if (imagePath.startsWith("/")) return `${API_URL}${imagePath}`;
+  return `${API_URL}/${imagePath}`;
+};
+
+const phaseLabelMap: Record<string, string> = {
+  cleanup: "Cleanup",
+  structural: "Structural",
+  fixture: "Fixtures",
+  style: "Style",
+};
+
+const criterionLabelMap: Record<string, string> = {
+  constraint_compliance: "Constraint compliance",
+  geometry_preservation: "Geometry preservation",
+  hallucination_detection: "Hallucination check",
+  style_execution: "Style execution",
+  phase_completion: "Phase completion",
+  goal_alignment: "Goal alignment",
+};
+
+const formatPolicyChange = (change: Record<string, unknown>) => {
+  const type = String(change.type || "update");
+  const oldValue = change.current || change.old;
+  const newValue = change.proposed || change.new;
+  if (type === "constraint_emphasis") {
+    return `Constraint emphasis: ${oldValue || "medium"} → ${newValue || "high"}`;
+  }
+  if (type === "creativity_reduction") {
+    return `Creativity: ${oldValue || "standard"} → ${newValue || "lower"}`;
+  }
+  if (type === "prompt_addition") {
+    return `Added instruction: ${(change.addition as string) || (newValue as string) || "Extra guidance"}`;
+  }
+  if (type === "max_retries_increase") {
+    return `Max retries: ${oldValue || "default"} → ${newValue || "higher"}`;
+  }
+  return `${type.replace(/_/g, " ")}: ${oldValue ?? "before"} → ${newValue ?? "after"}`;
+};
+
+const buildScoreChartPoints = (scores: number[]): string => {
+  if (scores.length === 0) return "";
+  const width = 100;
+  const height = 40;
+  const step = scores.length > 1 ? width / (scores.length - 1) : width;
+  return scores
+    .map((score, index) => {
+      const x = index * step;
+      const y = height - Math.max(0, Math.min(score, 1)) * height;
+      return `${x},${y}`;
+    })
+    .join(" ");
+};
+
 type AppState = "welcome" | "active";
 
 interface AgentCard extends Omit<AgentWorkCardProps, 'id'> {
@@ -82,6 +143,12 @@ interface ChatMessage {
   images?: string[];
   isStreaming?: boolean;
   isNew?: boolean;
+}
+
+interface GallerySelection {
+  phase: string;
+  phaseLabel: string;
+  attempt: GalleryAttempt;
 }
 
 export default function ContinuityApp() {
@@ -109,6 +176,11 @@ export default function ContinuityApp() {
     iterationNumber?: number;
     weaveTraceId?: string;
   }>>([]);
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const [galleryData, setGalleryData] = useState<GalleryResponse | null>(null);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryError, setGalleryError] = useState<string | null>(null);
+  const [gallerySelected, setGallerySelected] = useState<GallerySelection | null>(null);
   const [transformationComplete, setTransformationComplete] = useState(false);
   const [selfImprovementRetries, setSelfImprovementRetries] = useState<Array<{
     phase: string;
@@ -176,6 +248,8 @@ export default function ContinuityApp() {
   const streamCleanupRef = useRef<(() => void) | null>(null);
   const messageCounterRef = useRef(0);
   const projectIdRef = useRef<string | null>(null);  // Ref to avoid stale closures
+  const lastScoreByPhaseRef = useRef<Record<string, number | null>>({});
+  const lastAttemptByPhaseRef = useRef<Record<string, number>>({});
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -242,6 +316,44 @@ export default function ContinuityApp() {
     }, 2000);
     return newMessage.id;
   }, [getMessageId]);
+
+  const loadGalleryData = useCallback(async () => {
+    if (!projectIdRef.current) {
+      setGalleryError("No project found yet. Run a generation first.");
+      setGalleryData(null);
+      return;
+    }
+    setGalleryLoading(true);
+    setGalleryError(null);
+    try {
+      const data = await getProjectGallery(projectIdRef.current);
+      setGalleryData(data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load gallery";
+      setGalleryError(message);
+      setGalleryData(null);
+    } finally {
+      setGalleryLoading(false);
+    }
+  }, []);
+
+  const openGallery = useCallback(async () => {
+    setIsGalleryOpen(true);
+    setGallerySelected(null);
+    await loadGalleryData();
+  }, [loadGalleryData]);
+
+  useEffect(() => {
+    if (!isGalleryOpen) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsGalleryOpen(false);
+        setGallerySelected(null);
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [isGalleryOpen]);
 
   // Handle streaming events from SSE
   const handleStreamEvent = useCallback((event: StreamEvent) => {
@@ -408,48 +520,106 @@ export default function ContinuityApp() {
           setCurrentThinking({ agent: event.agent, action: event.action });
         }
         
-        // FIX: Add detailed chat messages for significant events to show more info during demo
+        // Improvement journey chat messages (attempts, evaluation, policy updates)
         const toState = event.details?.to_state as string | undefined;
+        const derivedPhase = toState?.includes("generating_")
+          ? toState.replace("generating_", "")
+          : toState?.includes("evaluating_")
+            ? toState.replace("evaluating_", "")
+            : toState?.includes("retrying_")
+              ? toState.replace("retrying_", "")
+              : (event.details?.phase as string | undefined);
+        const phaseKey = derivedPhase || "phase";
+        const phaseLabel = phaseLabelMap[phaseKey] || phaseKey;
+
         if (toState && event.agent) {
-          // Send informative messages for key phase transitions
           if (toState.includes("analyzing_space")) {
             addChatMessage({
               type: "assistant",
-              content: "🔍 **Spatial Analysis Starting** - Analyzing room geometry, detecting fixtures, identifying constraints...",
+              content: "🔍 **Spatial Analysis Starting** — analyzing geometry, detecting fixtures, and locking constraints...",
             });
-          } else if (toState.includes("generating_cleanup")) {
+          }
+
+          if (toState.includes("generating_")) {
+            const retryNumber = event.details?.retry_number as number | undefined;
+            const attemptNumber = retryNumber ? retryNumber + 1 : (lastAttemptByPhaseRef.current[phaseKey] || 0) + 1;
+            lastAttemptByPhaseRef.current[phaseKey] = attemptNumber;
+
+            const changes = event.details?.changes_applied as Array<Record<string, unknown>> | undefined;
+            if (changes && changes.length > 0) {
+              const changeLines = changes.map((change) => `• ${formatPolicyChange(change)}`).join("\n");
+              addChatMessage({
+                type: "assistant",
+                content: `🔧 **Improving Approach**\n\nBased on the evaluation, I'm adjusting:\n${changeLines}\n\nRetrying ${phaseLabel} phase...`,
+              });
+            }
+
             addChatMessage({
               type: "assistant",
-              content: "🧹 **Cleanup Phase** - Removing debris and preparing base image for transformation...",
+              content: `🎨 **Generating ${phaseLabel}**${attemptNumber > 1 ? ` (Attempt ${attemptNumber})` : ""}...`,
             });
-          } else if (toState.includes("generating_structural")) {
+          }
+
+          if (toState.includes("evaluating_")) {
+            const outputPath = event.details?.output_path as string | undefined;
             addChatMessage({
               type: "assistant",
-              content: "🏗️ **Structural Phase** - Rendering walls, floors, and architectural elements...",
+              content: `🧪 **Evaluating ${phaseLabel}** — checking constraints, geometry, hallucinations, style, and completeness...`,
+              images: outputPath ? [resolveImagePath(outputPath)] : undefined,
             });
-          } else if (toState.includes("generating_fixture")) {
+          }
+
+          if (toState.includes("retrying_")) {
+            const score = event.details?.score as number | undefined;
+            const prevScore = lastScoreByPhaseRef.current[phaseKey];
+            const delta = score !== undefined && prevScore !== null && prevScore !== undefined ? score - prevScore : null;
+            const deltaLabel = delta !== null ? `${delta >= 0 ? "↑" : "↓"} ${Math.abs(Math.round(delta * 100))}%` : "";
+            const momentum = delta !== null && delta > 0 ? "\n\nGetting closer!" : "";
+
+            const failureDetails = event.details?.failure_details as Array<{ criterion?: string; details?: string }>;
+            const failureReasons = event.details?.failure_reasons as string[] | undefined;
+            const reasons = (failureDetails && failureDetails.length > 0)
+              ? failureDetails.map((detail) => {
+                  const label = detail.criterion ? (criterionLabelMap[detail.criterion] || detail.criterion) : "Issue";
+                  return `• ${label}: ${detail.details || "Below threshold"}`;
+                })
+              : (failureReasons && failureReasons.length > 0)
+                ? failureReasons.map((reason) => `• ${criterionLabelMap[reason] || reason}`)
+                : [`• ${event.details?.human_readable_reason || "Quality check below threshold"}`];
+
             addChatMessage({
               type: "assistant",
-              content: "🚿 **Fixture Phase** - Placing fixtures and appliances according to spatial constraints...",
+              content: `⚠️ **Quality Check Failed**${score !== undefined ? ` (Score: ${Math.round(score * 100)}%${deltaLabel ? ` ${deltaLabel}` : ""})` : ""}\n\nThe ${phaseLabel} output has an issue:\n${reasons.join("\n")}\n\nAnalyzing what went wrong...${momentum}`,
+              images: event.details?.output_path ? [resolveImagePath(event.details.output_path as string)] : undefined,
             });
-          } else if (toState.includes("generating_style")) {
-            addChatMessage({
-              type: "assistant",
-              content: "🎨 **Style Phase** - Applying final aesthetic styling and finishing touches...",
-            });
-          } else if (toState.includes("evaluating")) {
-            const phase = toState.replace("evaluating_", "");
-            addChatMessage({
-              type: "assistant",
-              content: `📋 **Quality Check** - Evaluating ${phase || "output"} against 5 criteria: constraints, geometry, hallucinations, style, completeness...`,
-            });
-          } else if (toState.includes("retrying")) {
-            const retryPhase = toState.replace("retrying_", "");
-            const retryNum = event.details?.retry_number || 1;
-            addChatMessage({
-              type: "assistant",
-              content: `🔄 **Self-Improvement** - QC detected issues. Retry #${retryNum} for ${retryPhase} - analyzing failure and adjusting policy...`,
-            });
+
+            if (score !== undefined) {
+              lastScoreByPhaseRef.current[phaseKey] = score;
+            }
+          }
+        }
+
+        if (event.details?.evaluation_passed === true) {
+          const score = event.details?.score as number | undefined;
+          const prevScore = lastScoreByPhaseRef.current[phaseKey];
+          const delta = score !== undefined && prevScore !== null && prevScore !== undefined ? score - prevScore : null;
+          const deltaLabel = delta !== null ? `${delta >= 0 ? "↑" : "↓"} ${Math.abs(Math.round(delta * 100))}%` : "";
+          const passedCriteria = event.details?.passed_criteria as number | undefined;
+          const totalCriteria = event.details?.total_criteria as number | undefined;
+          const criteriaSummary = passedCriteria !== undefined && totalCriteria !== undefined
+            ? `• ${passedCriteria}/${totalCriteria} criteria passed`
+            : "• All checks passed";
+          const nextPhase = event.details?.to_phase as string | undefined;
+          const nextPhaseLabel = nextPhase ? (phaseLabelMap[nextPhase] || nextPhase) : null;
+
+          addChatMessage({
+            type: "assistant",
+            content: `✅ **Quality Check Passed**${score !== undefined ? ` (Score: ${Math.round(score * 100)}%${deltaLabel ? ` ${deltaLabel}` : ""})` : ""}\n\n${criteriaSummary}\n\n${nextPhaseLabel ? `Moving to ${nextPhaseLabel} phase...` : "Moving forward..."}`,
+            images: event.details?.output_path ? [resolveImagePath(event.details.output_path as string)] : undefined,
+          });
+
+          if (score !== undefined) {
+            lastScoreByPhaseRef.current[phaseKey] = score;
           }
         }
         
@@ -1247,6 +1417,8 @@ export default function ContinuityApp() {
         images: imageUrls,
       });
       setProjectId(project.project_id);
+      lastScoreByPhaseRef.current = {};
+      lastAttemptByPhaseRef.current = {};
 
       updateAgentCard(initCardId, { 
         status: "completed",
@@ -1804,6 +1976,9 @@ export default function ContinuityApp() {
   };
 
   const pipelineStage = getPipelineStage();
+  const galleryEnabled =
+    (galleryData?.summary.total_attempts ?? 0) > 0 ||
+    generatedPhases.length > 0;
 
   return (
     <ToastProvider>
@@ -1881,7 +2056,10 @@ export default function ContinuityApp() {
                     )}
                   </AnimatePresence>
                   <ThemeToggle />
-                  <SettingsDropdown />
+                  <SettingsDropdown
+                    onOpenGallery={openGallery}
+                    galleryEnabled={galleryEnabled}
+                  />
                 </motion.div>
               </motion.div>
             </div>
@@ -1930,6 +2108,353 @@ export default function ContinuityApp() {
               )}
             </AnimatePresence>
           </main>
+
+        {/* Gallery Modal */}
+        {isGalleryOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div
+              className="absolute inset-0"
+              onClick={() => {
+                setIsGalleryOpen(false);
+                setGallerySelected(null);
+              }}
+            />
+            <div className="relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/90 shadow-2xl">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/80">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-continuity-400" />
+                    <h2 className="text-lg font-semibold">Generation Gallery</h2>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {galleryData?.run_timestamp
+                      ? `Run started ${new Date(galleryData.run_timestamp).toLocaleString()}`
+                      : "All generated images with QC pass/fail and reasons"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setIsGalleryOpen(false);
+                    setGallerySelected(null);
+                  }}
+                  className="p-2 rounded-full hover:bg-white/10 transition-colors"
+                  aria-label="Close gallery"
+                >
+                  <ChevronRight className="w-5 h-5 rotate-90" />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto max-h-[70vh]">
+                {galleryLoading && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-center py-6 text-slate-400">
+                      <RotateCcw className="w-5 h-5 mr-2 animate-spin" />
+                      Loading gallery...
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <div key={i} className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+                          <div className="aspect-square bg-slate-800 animate-pulse" />
+                          <div className="p-3 space-y-2">
+                            <div className="h-3 w-24 bg-slate-800 rounded animate-pulse" />
+                            <div className="h-3 w-32 bg-slate-800 rounded animate-pulse" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!galleryLoading && galleryError && (
+                  <div className="p-4 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300">
+                    {galleryError}
+                  </div>
+                )}
+
+                {!galleryLoading && !galleryError && (!galleryData || galleryData.summary.total_attempts === 0) && (
+                  <div className="text-center text-slate-500 py-12">
+                    No images generated yet. Run a transformation to see your gallery.
+                  </div>
+                )}
+
+                {!galleryLoading && !galleryError && galleryData && galleryData.summary.total_attempts > 0 && (
+                  <div className="space-y-8">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                        <div className="text-xs text-slate-500">Total Images</div>
+                        <div className="text-2xl font-semibold text-white">{galleryData.summary.total_attempts}</div>
+                        <div className="text-[11px] text-slate-500 mt-1">
+                          Policy updates: {galleryData.summary.total_policy_updates}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                        <div className="text-xs text-slate-500">Passed / Failed</div>
+                        <div className="text-2xl font-semibold text-white">
+                          <span className="text-emerald-400">{galleryData.summary.passed}</span>
+                          <span className="text-slate-500"> / </span>
+                          <span className="text-red-400">{galleryData.summary.failed}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Success rate: {galleryData.summary.total_attempts > 0
+                            ? Math.round((galleryData.summary.passed / galleryData.summary.total_attempts) * 100)
+                            : 0}%
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                        <div className="text-xs text-slate-500">Improvement Journey</div>
+                        <div className="text-2xl font-semibold text-white">
+                          {galleryData.summary.improvement_demonstrated ? "Visible" : "Not yet"}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Score progression across attempts
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                      <div className="text-xs text-slate-500 mb-3">Score Progression</div>
+                      {galleryData.summary.overall_score_progression.length > 0 ? (
+                        <div className="w-full">
+                          <svg viewBox="0 0 100 40" className="w-full h-24">
+                            <polyline
+                              fill="none"
+                              stroke="currentColor"
+                              className="text-continuity-400"
+                              strokeWidth="2"
+                              points={buildScoreChartPoints(galleryData.summary.overall_score_progression)}
+                            />
+                            {galleryData.summary.overall_score_progression.map((score, idx) => {
+                              const x = galleryData.summary.overall_score_progression.length > 1
+                                ? (idx * 100) / (galleryData.summary.overall_score_progression.length - 1)
+                                : 50;
+                              const y = 40 - Math.max(0, Math.min(score, 1)) * 40;
+                              return (
+                                <circle
+                                  key={idx}
+                                  cx={x}
+                                  cy={y}
+                                  r="1.6"
+                                  className="text-continuity-400 fill-current"
+                                />
+                              );
+                            })}
+                          </svg>
+                          <div className="flex justify-between text-[10px] text-slate-500">
+                            <span>Attempt 1</span>
+                            <span>Attempt {galleryData.summary.overall_score_progression.length}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-slate-500">No scores yet.</div>
+                      )}
+                    </div>
+
+                    {galleryData.phases.map((phase) => (
+                      <div key={phase.phase} className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-slate-200">
+                            {phase.phase_label}
+                          </h3>
+                          <span className="text-xs text-slate-500">
+                            {phase.total_attempts} attempts → {phase.final_status === "passed" ? "✓" : phase.final_status === "failed" ? "✗" : "…"}
+                          </span>
+                        </div>
+                        {phase.score_progression.length > 0 && (
+                          <div className="text-xs text-slate-500">
+                            Improvement: {phase.score_progression.map((score) => `${Math.round(score * 100)}%`).join(" → ")} • Policy updates: {phase.policy_updates_count}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-3 overflow-x-auto pb-2">
+                          {phase.attempts.map((attempt, idx) => {
+                            const status = attempt.status;
+                            const resolvedUrl = resolveImagePath(attempt.image_url);
+                            const delta = attempt.score_delta;
+                            const deltaLabel = delta !== null && delta !== undefined
+                              ? `${delta >= 0 ? "↑" : "↓"} ${Math.abs(Math.round(delta * 100))}%`
+                              : null;
+                            return (
+                              <div key={attempt.iteration_id} className="flex items-center gap-3 flex-shrink-0">
+                                <button
+                                  onClick={() => setGallerySelected({ phase: phase.phase, phaseLabel: phase.phase_label, attempt })}
+                                  className={`text-left rounded-xl border overflow-hidden transition-colors w-64 ${
+                                    status === "passed"
+                                      ? "border-emerald-500/40 bg-emerald-500/5"
+                                      : status === "failed" && (delta !== null && delta > 0)
+                                      ? "border-amber-500/40 bg-amber-500/5"
+                                      : status === "failed"
+                                      ? "border-red-500/40 bg-red-500/5"
+                                      : "border-slate-800 bg-slate-900/60"
+                                  }`}
+                                >
+                                  <div className="relative aspect-[4/3] bg-slate-900">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={resolvedUrl}
+                                      alt={`${phase.phase_label} attempt ${attempt.attempt_number}`}
+                                      className="w-full h-full object-cover"
+                                    />
+                                    <div className={`absolute top-2 right-2 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                      status === "passed"
+                                        ? "bg-emerald-500/80 text-white"
+                                        : status === "failed"
+                                        ? "bg-red-500/80 text-white"
+                                        : "bg-slate-700/80 text-white"
+                                    }`}>
+                                      {status === "passed" ? "PASS" : status === "failed" ? "FAIL" : "PENDING"}
+                                    </div>
+                                  </div>
+                                  <div className="p-3 space-y-2">
+                                    <div className="text-xs text-slate-400">
+                                      Attempt {attempt.attempt_number} of {phase.total_attempts}
+                                    </div>
+                                    {attempt.score !== null && attempt.score !== undefined && (
+                                      <div className="text-xs text-slate-300">
+                                        Score: {Math.round(attempt.score * 100)}%{" "}
+                                        {deltaLabel && <span className="text-slate-500">({deltaLabel})</span>}
+                                      </div>
+                                    )}
+                                    <div className="text-xs text-slate-300">
+                                      Reason: <span className="text-slate-400">{attempt.human_readable_reason || attempt.failure_reason || "Not evaluated"}</span>
+                                    </div>
+                                    {attempt.policy_version !== null && attempt.policy_version !== undefined && (
+                                      <div className="text-[11px] text-slate-500">
+                                        Policy v{attempt.policy_version}
+                                        {attempt.policy_changes_from_previous.length > 0 && (
+                                          <span className="ml-2 text-amber-400">🔧 {attempt.policy_changes_from_previous.length} updates</span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </button>
+                                {idx < phase.attempts.length - 1 && (
+                                  <div className="text-slate-500 text-lg">→</div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {gallerySelected && (
+                <div
+                  className="absolute inset-0 z-10 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+                  onClick={() => setGallerySelected(null)}
+                >
+                  <div
+                    className="relative w-full max-w-5xl max-h-[85vh] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/95 shadow-2xl"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+                      <div>
+                        <h3 className="text-sm font-semibold text-white">
+                          {gallerySelected.phaseLabel} • Attempt #{gallerySelected.attempt.attempt_number}
+                        </h3>
+                        <p className="text-xs text-slate-400">
+                          {new Date(gallerySelected.attempt.timestamp).toLocaleString()}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setGallerySelected(null)}
+                        className="p-2 rounded-full hover:bg-white/10 transition-colors"
+                        aria-label="Close details"
+                      >
+                        <ChevronRight className="w-5 h-5 rotate-90" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-0">
+                      <div className="p-4">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={resolveImagePath(gallerySelected.attempt.image_url)}
+                          alt="Gallery detail"
+                          className="w-full max-h-[60vh] object-contain rounded-xl border border-slate-800"
+                        />
+                      </div>
+                      <div className="p-4 space-y-4 overflow-y-auto max-h-[70vh]">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                            gallerySelected.attempt.status === "passed"
+                              ? "bg-emerald-500/20 text-emerald-300"
+                              : gallerySelected.attempt.status === "failed"
+                              ? "bg-red-500/20 text-red-300"
+                              : "bg-slate-700/40 text-slate-300"
+                          }`}>
+                            {gallerySelected.attempt.status === "passed"
+                              ? "Passed QC"
+                              : gallerySelected.attempt.status === "failed"
+                              ? "Failed QC"
+                              : "Pending QC"}
+                          </span>
+                          {gallerySelected.attempt.score !== null && gallerySelected.attempt.score !== undefined && (
+                            <span className="text-xs text-slate-400">
+                              Score: {(gallerySelected.attempt.score * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-300">
+                          Reason: <span className="text-slate-400">{gallerySelected.attempt.human_readable_reason || gallerySelected.attempt.failure_reason || "Not evaluated"}</span>
+                        </div>
+                        {gallerySelected.attempt.policy_version !== null && gallerySelected.attempt.policy_version !== undefined && (
+                          <div className="text-xs text-slate-400">
+                            Policy version: v{gallerySelected.attempt.policy_version}
+                          </div>
+                        )}
+                        {gallerySelected.attempt.policy_changes_from_previous.length > 0 && (
+                          <div className="space-y-1">
+                            <div className="text-xs font-semibold text-slate-300">Policy adjustments</div>
+                            <ul className="text-[11px] text-slate-400 space-y-1">
+                              {gallerySelected.attempt.policy_changes_from_previous.map((change, index) => (
+                                <li key={index}>• {formatPolicyChange(change)}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {gallerySelected.attempt.weave_trace_id && (
+                          <button
+                            onClick={() => window.open(`https://wandb.ai/traces/${gallerySelected.attempt.weave_trace_id}`, "_blank")}
+                            className="text-xs text-continuity-400 hover:text-continuity-300"
+                          >
+                            View Weave Trace →
+                          </button>
+                        )}
+                        <div className="space-y-2">
+                          <div className="text-xs font-semibold text-slate-300">Evaluation Breakdown</div>
+                          {gallerySelected.attempt.evaluation.length === 0 ? (
+                            <div className="text-xs text-slate-500">No evaluation details available yet.</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {gallerySelected.attempt.evaluation.map((criterion) => (
+                                <div key={criterion.criterion} className="rounded-lg border border-slate-800 bg-slate-900/60 p-2">
+                                  <div className="flex items-center justify-between">
+                                    <div className="text-xs text-slate-300">
+                                      {criterion.criterion.replace(/_/g, " ")}
+                                    </div>
+                                    <div className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                      criterion.passed ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
+                                    }`}>
+                                      {Math.round(criterion.score * 100)}%
+                                    </div>
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-1">
+                                    {criterion.details}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
           {/* Footer - Consolidated attribution (welcome only) */}
           {appState === "welcome" && (

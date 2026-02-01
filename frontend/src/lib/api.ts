@@ -1279,9 +1279,13 @@ export interface GalleryAttempt {
   image_url: string;
   status: string;
   score: number | null;
+  previous_score: number | null;
+  score_delta: number | null;
   failure_reason: string | null;
+  human_readable_reason: string | null;
   evaluation: CriterionResult[];
   policy_version: number | null;
+  policy_changes_from_previous: Array<Record<string, unknown>>;
   weave_trace_id: string | null;
   timestamp: string;
 }
@@ -1289,6 +1293,10 @@ export interface GalleryAttempt {
 export interface GalleryPhase {
   phase: string;
   phase_label: string;
+  total_attempts: number;
+  final_status: string;
+  score_progression: number[];
+  policy_updates_count: number;
   attempts: GalleryAttempt[];
 }
 
@@ -1296,7 +1304,9 @@ export interface GallerySummary {
   total_attempts: number;
   passed: number;
   failed: number;
-  improvement_shown: boolean;
+  total_policy_updates: number;
+  overall_score_progression: number[];
+  improvement_demonstrated: boolean;
 }
 
 export interface GalleryResponse {
