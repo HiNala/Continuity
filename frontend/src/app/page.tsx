@@ -2818,7 +2818,7 @@ function SplitView({
         {...slideInLeft}
         transition={{ ...smoothTransition, delay: 0.1 }}
         style={{ width: `${splitPosition}%` }}
-        className="relative flex flex-col border-r border-white/30 dark:border-white/10 min-w-[280px] bg-gradient-to-b from-white/60 to-white/40 dark:from-zinc-950/70 dark:to-zinc-950/50 backdrop-blur-2xl"
+        className="relative flex flex-col h-full border-r border-white/30 dark:border-white/10 min-w-[280px] bg-gradient-to-b from-white/60 to-white/40 dark:from-zinc-950/70 dark:to-zinc-950/50 backdrop-blur-2xl"
       >
         {/* Minimal header */}
         <div className="shrink-0 h-12 flex items-center justify-between px-5 border-b border-white/20 dark:border-white/5 bg-white/40 dark:bg-zinc-950/40 backdrop-blur-xl">
@@ -2840,7 +2840,7 @@ function SplitView({
         </div>
 
         {/* Messages area - modern chat feel */}
-        <div ref={chatScrollRef} className="flex-1 overflow-y-auto scrollbar-invisible pb-24 flex flex-col">
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto scrollbar-invisible pb-4 flex flex-col min-h-0">
           <div className="max-w-xl mx-auto px-5 py-5 mt-auto w-full">
             {/* Uploaded Images - Elegant display */}
             {uploadedImages.length > 0 && (
@@ -3024,11 +3024,8 @@ function SplitView({
           </div>
         </div>
 
-        {/* Input - Truly floating with glassmorphism */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 pointer-events-none">
-          {/* Fade gradient behind input */}
-          <div className="absolute inset-0 bg-gradient-to-t from-white/90 via-white/60 to-transparent dark:from-zinc-950/95 dark:via-zinc-950/70 dark:to-transparent" />
-          
+        {/* Input - Fixed at bottom with glassmorphism */}
+        <div className="shrink-0 relative z-20 p-4 pointer-events-none border-t border-white/20 dark:border-white/5 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl">
           {/* Floating input card */}
           <div className="relative pointer-events-auto">
             <div className="glass-card rounded-2xl shadow-[0_-8px_30px_rgba(0,0,0,0.08),0_4px_20px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_-8px_30px_rgba(0,0,0,0.3),0_4px_20px_rgba(0,0,0,0.25),0_0_0_1px_rgba(255,255,255,0.05)]">
