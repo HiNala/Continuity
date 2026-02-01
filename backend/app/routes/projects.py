@@ -1121,6 +1121,46 @@ class EvaluationDetailResponse(BaseModel):
     evaluated_at: Optional[str]
     criteria: List[CriterionResult]
 
+#
+# ============================================
+# Gallery Models (Generation Gallery)
+# ============================================
+class GalleryAttempt(BaseModel):
+    """A single generation attempt with evaluation info."""
+    attempt_number: int
+    iteration_id: str
+    image_url: str
+    status: str
+    score: Optional[float]
+    failure_reason: Optional[str]
+    evaluation: List[CriterionResult]
+    policy_version: Optional[int]
+    weave_trace_id: Optional[str]
+    timestamp: str
+
+
+class GalleryPhase(BaseModel):
+    """Phase group with its attempts."""
+    phase: str
+    phase_label: str
+    attempts: List[GalleryAttempt]
+
+
+class GallerySummary(BaseModel):
+    """Summary stats for the gallery."""
+    total_attempts: int
+    passed: int
+    failed: int
+    improvement_shown: bool
+
+
+class GalleryResponse(BaseModel):
+    """Response for the generation gallery."""
+    project_id: str
+    run_timestamp: Optional[str]
+    phases: List[GalleryPhase]
+    summary: GallerySummary
+
 
 # ============================================
 # QC & Evaluation Endpoints (Mission 05)
@@ -1205,6 +1245,128 @@ async def get_iteration_evaluation(
             )
             for d in details
         ],
+    )
+
+
+@router.get("/{project_id}/gallery", response_model=GalleryResponse)
+async def get_project_gallery(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Return a gallery view of all generated images with QC status and reasons.
+    """
+    project_result = await session.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = project_result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    iterations_result = await session.execute(
+        select(Iteration)
+        .where(Iteration.project_id == project_id)
+        .options(selectinload(Iteration.evaluation_details))
+        .order_by(Iteration.created_at)
+    )
+    iterations = iterations_result.scalars().all()
+
+    phase_groups: Dict[str, List[Iteration]] = {}
+    for iteration in iterations:
+        phase_groups.setdefault(iteration.phase, []).append(iteration)
+
+    phases: List[GalleryPhase] = []
+    total_attempts = 0
+    passed = 0
+    failed = 0
+    improvement_shown = False
+
+    phase_label_map = {
+        "cleanup": "Cleanup",
+        "structural": "Structural Completion",
+        "fixture": "Fixture Placement",
+        "style": "Style Application",
+    }
+
+    for phase, phase_iterations in phase_groups.items():
+        attempts: List[GalleryAttempt] = []
+        for iteration in phase_iterations:
+            if iteration.iteration_number and iteration.iteration_number > 1:
+                improvement_shown = True
+
+            output_url = ""
+            if iteration.output_image_path:
+                if iteration.output_image_path.startswith("generated_images"):
+                    output_url = f"/{iteration.output_image_path}"
+                elif iteration.output_image_path.startswith("/"):
+                    output_url = iteration.output_image_path
+                else:
+                    output_url = f"/generated_images/{iteration.output_image_path.split('/')[-1]}"
+
+            status = iteration.evaluation_status or EvaluationStatus.PENDING
+            if status == EvaluationStatus.PASSED:
+                passed += 1
+            elif status == EvaluationStatus.FAILED:
+                failed += 1
+            total_attempts += 1
+
+            reason = None
+            if status == EvaluationStatus.FAILED:
+                if iteration.failure_reasons:
+                    reason = iteration.failure_reasons[0]
+                elif iteration.evaluation_reasons:
+                    reason = iteration.evaluation_reasons[0]
+                else:
+                    failed_detail = next(
+                        (d for d in iteration.evaluation_details if not d.passed),
+                        None
+                    )
+                    reason = failed_detail.details if failed_detail and failed_detail.details else "Failed QC"
+            elif status == EvaluationStatus.PASSED:
+                reason = "Passed QC"
+
+            evaluation = [
+                CriterionResult(
+                    criterion=detail.criterion,
+                    passed=detail.passed,
+                    score=detail.score,
+                    details=detail.details or "",
+                    evidence=detail.evidence or {}
+                )
+                for detail in iteration.evaluation_details
+            ]
+
+            attempts.append(GalleryAttempt(
+                attempt_number=iteration.iteration_number,
+                iteration_id=str(iteration.id),
+                image_url=output_url,
+                status=status,
+                score=iteration.evaluation_score,
+                failure_reason=reason,
+                evaluation=evaluation,
+                policy_version=iteration.policy_version,
+                weave_trace_id=iteration.weave_run_id,
+                timestamp=iteration.created_at.isoformat(),
+            ))
+
+        phases.append(GalleryPhase(
+            phase=phase,
+            phase_label=phase_label_map.get(phase, phase.title()),
+            attempts=attempts
+        ))
+
+    summary = GallerySummary(
+        total_attempts=total_attempts,
+        passed=passed,
+        failed=failed,
+        improvement_shown=improvement_shown
+    )
+
+    return GalleryResponse(
+        project_id=str(project.id),
+        run_timestamp=project.started_at.isoformat() if project.started_at else project.created_at.isoformat(),
+        phases=phases,
+        summary=summary
     )
 
 

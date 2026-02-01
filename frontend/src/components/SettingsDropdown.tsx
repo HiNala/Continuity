@@ -12,6 +12,7 @@ import {
   Globe,
   Activity,
   Play,
+  Images,
 } from "lucide-react";
 import {
   testWeaveAPI,
@@ -27,9 +28,10 @@ import {
 
 interface SettingsDropdownProps {
   onTestResult?: (type: "success" | "error", title: string, message?: string) => void;
+  onOpenGallery?: () => void;
 }
 
-export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
+export function SettingsDropdown({ onTestResult, onOpenGallery }: SettingsDropdownProps = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, APITestResult>>({});
@@ -203,6 +205,31 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
             className="absolute right-0 mt-2 w-72 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-2xl border border-white/50 dark:border-white/10 rounded-2xl shadow-[0_18px_50px_rgba(0,0,0,0.18)] z-50 overflow-hidden"
           >
+            {onOpenGallery && (
+              <div className="p-3 border-b border-white/30 dark:border-white/10">
+                <motion.button
+                  onClick={() => {
+                    setIsOpen(false);
+                    onOpenGallery();
+                  }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-neutral-700 dark:text-zinc-300 hover:text-neutral-900 dark:hover:text-zinc-100 hover:bg-neutral-50 dark:hover:bg-zinc-800 rounded-xl transition-all"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-neutral-100 dark:bg-zinc-800 flex items-center justify-center">
+                      <Images className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-medium">Gallery</div>
+                      <div className="text-[11px] text-neutral-500 dark:text-zinc-400">
+                        View all generated images
+                      </div>
+                    </div>
+                  </div>
+                </motion.button>
+              </div>
+            )}
             <div className="p-4 border-b border-white/30 dark:border-white/10 bg-gradient-to-r from-primary/6 to-accent/6 dark:from-primary/10 dark:to-accent/10">
               <h3 className="font-semibold text-neutral-900 dark:text-zinc-100">API Connections</h3>
               <p className="text-xs text-neutral-500 dark:text-zinc-400 mt-1">

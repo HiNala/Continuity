@@ -155,6 +155,67 @@ app.add_middleware(
 
 
 # ============================================
+# Global Exception Handlers
+# ============================================
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+import traceback
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions with consistent JSON responses."""
+    return Response(
+        content='{"error": "%s", "detail": "%s", "status_code": %d}' % (
+            exc.detail if isinstance(exc.detail, str) else "HTTP Error",
+            exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+            exc.status_code
+        ),
+        status_code=exc.status_code,
+        media_type="application/json",
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors with detailed messages."""
+    errors = []
+    for error in exc.errors():
+        loc = " -> ".join(str(x) for x in error["loc"])
+        errors.append(f"{loc}: {error['msg']}")
+    
+    return Response(
+        content='{"error": "Validation Error", "details": %s, "status_code": 422}' % (
+            str(errors).replace("'", '"')
+        ),
+        status_code=422,
+        media_type="application/json",
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle unexpected exceptions gracefully."""
+    # Log the full traceback for debugging
+    logger.error(f"Unexpected error: {exc}\n{traceback.format_exc()}")
+    
+    # Return a generic error message in production
+    if settings.debug:
+        detail = str(exc)
+    else:
+        detail = "An unexpected error occurred. Please try again later."
+    
+    return Response(
+        content='{"error": "Internal Server Error", "detail": "%s", "status_code": 500}' % detail,
+        status_code=500,
+        media_type="application/json",
+    )
+
+
+# ============================================
 # Response Models
 # ============================================
 class HealthResponse(BaseModel):
@@ -212,6 +273,68 @@ async def health_check():
         timestamp=datetime.now(timezone.utc).isoformat(),
         version="0.1.0",
         environment=settings.environment,
+    )
+
+
+class DetailedHealthResponse(BaseModel):
+    """Detailed health check response model."""
+    status: str
+    timestamp: str
+    version: str
+    environment: str
+    services: dict
+
+
+@app.get("/health/detailed", response_model=DetailedHealthResponse, tags=["Status"])
+async def detailed_health_check():
+    """
+    Detailed health check endpoint.
+    Returns the status of all services including database and Redis.
+    """
+    services = {
+        "api": {"status": "ok"},
+        "database": {"status": "unknown"},
+        "redis": {"status": "unknown"},
+        "weave": {"status": "disabled" if not settings.wandb_api_key else "enabled"},
+    }
+    
+    overall_status = "ok"
+    
+    # Check database
+    try:
+        db_status = await get_db_status()
+        services["database"] = {
+            "status": "ok",
+            "message": db_status.get("message", "Connected"),
+        }
+    except Exception as e:
+        services["database"] = {
+            "status": "error",
+            "message": str(e),
+        }
+        overall_status = "degraded"
+    
+    # Check Redis
+    try:
+        redis_ok = await redis_service.health_check()
+        services["redis"] = {
+            "status": "ok" if redis_ok else "error",
+        }
+        if not redis_ok:
+            overall_status = "degraded"
+    except Exception as e:
+        services["redis"] = {
+            "status": "error",
+            "message": str(e),
+        }
+        overall_status = "degraded"
+    
+    return DetailedHealthResponse(
+        status=overall_status,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        version="0.1.0",
+        environment=settings.environment,
+        services=services,
     )
 
 

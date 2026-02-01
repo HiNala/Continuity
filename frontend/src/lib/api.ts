@@ -1271,6 +1271,42 @@ export interface EvaluationDetailResponse {
 }
 
 // ============================================
+// Generation Gallery Types
+// ============================================
+export interface GalleryAttempt {
+  attempt_number: number;
+  iteration_id: string;
+  image_url: string;
+  status: string;
+  score: number | null;
+  failure_reason: string | null;
+  evaluation: CriterionResult[];
+  policy_version: number | null;
+  weave_trace_id: string | null;
+  timestamp: string;
+}
+
+export interface GalleryPhase {
+  phase: string;
+  phase_label: string;
+  attempts: GalleryAttempt[];
+}
+
+export interface GallerySummary {
+  total_attempts: number;
+  passed: number;
+  failed: number;
+  improvement_shown: boolean;
+}
+
+export interface GalleryResponse {
+  project_id: string;
+  run_timestamp: string | null;
+  phases: GalleryPhase[];
+  summary: GallerySummary;
+}
+
+// ============================================
 // Evaluation Detail Function
 // ============================================
 
@@ -1289,6 +1325,24 @@ export async function getIterationEvaluation(
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.detail || "Failed to get evaluation details");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get a full generation gallery for a project.
+ */
+export async function getProjectGallery(
+  projectId: string
+): Promise<GalleryResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/gallery`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get gallery");
   }
 
   return response.json();

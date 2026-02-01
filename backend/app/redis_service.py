@@ -1,5 +1,5 @@
 """
-Continuity - Redis Service
+Clarity - Redis Service
 Provides caching and session management using Redis.
 
 Redis is used for:
@@ -45,6 +45,16 @@ class RedisService:
         if self._client:
             await self._client.close()
             self._client = None
+    
+    async def health_check(self) -> bool:
+        """Check if Redis is healthy and responding."""
+        try:
+            if self._client is None:
+                return False
+            result = await self._client.ping()
+            return result is True
+        except Exception:
+            return False
     
     @property
     def client(self) -> redis.Redis:

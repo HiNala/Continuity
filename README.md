@@ -137,11 +137,12 @@ Current AI image generation tools fail at architectural visualization because th
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd Continuity
+cd Clarity
 
 # Copy environment file and add your API keys
 cp .env.example .env
 # Edit .env with your API keys (see Environment Variables below)
+# IMPORTANT: Set POSTGRES_PASSWORD to a secure value!
 
 # Build and start all services
 docker compose up --build -d
@@ -192,10 +193,10 @@ npm run dev
 ```bash
 # Using Docker for just the database
 docker run -d \
-  --name continuity-postgres \
-  -e POSTGRES_USER=continuity \
-  -e POSTGRES_PASSWORD=continuity_dev_password \
-  -e POSTGRES_DB=continuity \
+  --name clarity-postgres \
+  -e POSTGRES_USER=clarity \
+  -e POSTGRES_PASSWORD=your_secure_password_here \
+  -e POSTGRES_DB=clarity \
   -p 5432:5432 \
   postgres:16-alpine
 ```
@@ -209,12 +210,15 @@ Copy `.env.example` to `.env` and configure:
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `GEMINI_API_KEY` | Google Gemini API key for image generation | Yes |
+| `WANDB_API_KEY` | Weights & Biases API key for Weave | Yes |
+| `POSTGRES_PASSWORD` | Database password (Docker) | Yes |
+| `POSTGRES_USER` | Database username (default: `clarity`) | Optional |
+| `POSTGRES_DB` | Database name (default: `clarity`) | Optional |
 | `GEMINI_VISION_MODEL` | Gemini model for image analysis | Optional |
-| `GEMINI_IMAGE_MODEL` | Gemini model for image generation (e.g., `gemini-3-pro-image-preview`) | Optional |
+| `GEMINI_IMAGE_MODEL` | Gemini model for image generation | Optional |
 | `GEMINI_IMAGE_ASPECT_RATIO` | Output aspect ratio (e.g., `16:9`) | Optional |
 | `GEMINI_IMAGE_SIZE` | Output size (`1K`, `2K`, `4K`) | Optional |
-| `WANDB_API_KEY` | Weights & Biases API key for Weave | Yes |
-| `WANDB_ENTITY` | W&B entity/organization (optional) | Optional |
+| `WANDB_ENTITY` | W&B entity/organization | Optional |
 | `DATABASE_URL` | PostgreSQL connection string | Auto-configured |
 | `REDIS_URL` | Redis connection string | Auto-configured |
 | `BROWSERBASE_API_KEY` | Browserbase API for web automation | Optional |
@@ -255,7 +259,7 @@ docker compose down -v
 docker compose up --build -d
 
 # Access PostgreSQL CLI
-docker compose exec postgres psql -U continuity -d continuity
+docker compose exec postgres psql -U clarity -d clarity
 
 # Access Redis CLI
 docker compose exec redis redis-cli
@@ -878,6 +882,99 @@ STAGEHAND_MODEL_API_KEY=sk-...  # OpenAI or Anthropic API key
 - **observe()** — Find interactive elements on a page
 
 Combined with Browserbase's cloud browser infrastructure, Stagehand enables Clarity to intelligently navigate design websites and extract inspiration images without hardcoded selectors.
+
+---
+
+## 🚀 Production Deployment
+
+### Building for Production
+
+The Dockerfiles support multi-stage builds with separate development and production stages:
+
+```bash
+# Build production images
+docker compose -f docker-compose.yml build --build-arg BUILD_ENV=production
+
+# Or build individual services
+docker build --target production -t clarity-backend ./backend
+docker build --target production -t clarity-frontend ./frontend
+```
+
+### Production Checklist
+
+- [ ] Set `DEBUG=false` in environment
+- [ ] Use strong, unique `POSTGRES_PASSWORD`
+- [ ] Configure proper `FRONTEND_URL` for CORS
+- [ ] Set up SSL/TLS termination (nginx/cloudflare)
+- [ ] Configure database backups
+- [ ] Set up monitoring (Weave traces + application metrics)
+- [ ] Review and restrict CORS origins in `backend/app/main.py`
+
+### Security Features
+
+- **Non-root containers**: Production builds run as dedicated `clarity` user
+- **Security headers**: X-Content-Type-Options, X-Frame-Options, X-XSS-Protection
+- **Input validation**: All API endpoints validate input with Pydantic
+- **CORS restrictions**: Explicit allowed methods and headers
+- **No hardcoded secrets**: All sensitive values via environment variables
+
+---
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+**Docker: "POSTGRES_PASSWORD is required"**
+```bash
+# Set the password in your .env file
+POSTGRES_PASSWORD=your_secure_password_here
+```
+
+**Images not displaying after pipeline completion**
+- Check browser console for errors
+- Verify the `generated_images` directory has correct permissions
+- Try refreshing the page - the SSE connection may have dropped
+
+**Pipeline stuck at "Running"**
+- Check backend logs: `docker compose logs -f backend`
+- Verify Gemini API key is valid
+- Check Weave dashboard for trace errors
+
+**Database connection errors**
+```bash
+# Reset the database
+docker compose down -v
+docker compose up --build -d
+```
+
+**Frontend not connecting to backend**
+```bash
+# Verify backend is healthy
+curl http://localhost:8000/health
+
+# Check CORS settings if using different ports/hosts
+```
+
+### Logs and Debugging
+
+```bash
+# View all logs
+docker compose logs -f
+
+# View specific service
+docker compose logs -f backend
+docker compose logs -f frontend
+docker compose logs -f postgres
+
+# Check container status
+docker compose ps
+
+# Access backend shell
+docker compose exec backend /bin/bash
+
+# Check database
+docker compose exec postgres psql -U clarity -d clarity -c "SELECT * FROM system_status;"
+```
 
 ---
 

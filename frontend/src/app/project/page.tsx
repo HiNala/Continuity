@@ -30,6 +30,8 @@ import {
   AlertTriangle,
   RefreshCw,
   XCircle,
+  Images,
+  X,
 } from "lucide-react";
 import {
   createProject,
@@ -41,6 +43,8 @@ import {
   startOrchestration,
   getOrchestrationStatus,
   selectProjectReferenceImages,
+  getAllProjectImages,
+  getIterationEvaluation,
   ClarifyingQuestion,
   RequirementsResponse,
   AnalysisSummaryResponse,
@@ -62,6 +66,18 @@ type Step = "input" | "questions" | "complete" | "analyzing" | "constraints" | "
 
 interface Answers {
   [questionId: string]: string | string[];
+}
+
+interface GalleryItem {
+  id: string;
+  phase: string;
+  iterationNumber: number;
+  imageUrl: string;
+  evaluationPassed: boolean | null;
+  evaluationScore: number | null;
+  evaluationStatus: string | null;
+  reason: string;
+  createdAt: string;
 }
 
 // ============================================
@@ -111,6 +127,19 @@ export default function ProjectPage() {
   // Orchestration (Mission 06)
   const [orchestrationStatus, setOrchestrationStatus] = useState<OrchestrationStatusResponse | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryError, setGalleryError] = useState<string | null>(null);
+  const [galleryFilter, setGalleryFilter] = useState<"all" | "passed" | "failed" | "pending">("all");
+
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const resolveImagePath = (imagePath: string) => {
+    if (!imagePath) return imagePath;
+    if (imagePath.startsWith("http") || imagePath.startsWith("data:")) return imagePath;
+    if (imagePath.startsWith("/")) return `${API_URL}${imagePath}`;
+    return `${API_URL}/${imagePath}`;
+  };
 
   // ==========================================
   // ==========================================
@@ -310,6 +339,84 @@ export default function ProjectPage() {
     }
   };
 
+  const openGallery = async () => {
+    setIsGalleryOpen(true);
+    if (!projectId) {
+      setGalleryError("No project found yet. Create a project first.");
+      setGalleryItems([]);
+      return;
+    }
+
+    setGalleryLoading(true);
+    setGalleryError(null);
+    try {
+      const { iterations } = await getAllProjectImages(projectId);
+      const baseItems = iterations
+        .filter((iteration) => iteration.output_image_url || iteration.output_image_path)
+        .map((iteration) => {
+          const url =
+            iteration.output_image_url ||
+            resolveImagePath(iteration.output_image_path || "");
+
+          return {
+            id: iteration.id,
+            phase: iteration.phase,
+            iterationNumber: iteration.iteration_number,
+            imageUrl: url,
+            evaluationPassed: iteration.evaluation_passed,
+            evaluationScore: iteration.evaluation_score,
+            evaluationStatus: iteration.evaluation_status,
+            reason: "Not evaluated",
+            createdAt: iteration.created_at,
+          };
+        });
+
+      const failedItems = baseItems.filter((item) => item.evaluationPassed === false);
+      const failureReasonMap = new Map<string, string>();
+      await Promise.allSettled(
+        failedItems.map(async (item) => {
+          const detail = await getIterationEvaluation(projectId, item.id);
+          const reason = detail.failure_reasons?.[0];
+          if (reason) failureReasonMap.set(item.id, reason);
+        })
+      );
+
+      const withReasons = baseItems.map((item) => {
+        if (item.evaluationPassed === true) {
+          return { ...item, reason: "Passed QC" };
+        }
+        if (item.evaluationPassed === false) {
+          return {
+            ...item,
+            reason: failureReasonMap.get(item.id) || item.evaluationStatus || "Failed QC",
+          };
+        }
+        return item;
+      });
+
+      setGalleryItems(withReasons);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load gallery";
+      setGalleryError(message);
+    } finally {
+      setGalleryLoading(false);
+    }
+  };
+
+  const filteredGalleryItems = galleryItems.filter((item) => {
+    if (galleryFilter === "all") return true;
+    if (galleryFilter === "passed") return item.evaluationPassed === true;
+    if (galleryFilter === "failed") return item.evaluationPassed === false;
+    return item.evaluationPassed === null;
+  });
+
+  const galleryCounts = {
+    all: galleryItems.length,
+    passed: galleryItems.filter((item) => item.evaluationPassed === true).length,
+    failed: galleryItems.filter((item) => item.evaluationPassed === false).length,
+    pending: galleryItems.filter((item) => item.evaluationPassed === null).length,
+  };
+
   const getPhaseName = (phase: string) => {
     return phase.charAt(0).toUpperCase() + phase.slice(1);
   };
@@ -469,6 +576,7 @@ export default function ProjectPage() {
                 toast.error(title, message);
               }
             }}
+            onOpenGallery={openGallery}
           />
         </div>
       </header>
@@ -1360,6 +1468,127 @@ export default function ProjectPage() {
           </div>
         )}
       </div>
+
+      {/* Gallery Modal */}
+      {isGalleryOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div
+            className="absolute inset-0"
+            onClick={() => setIsGalleryOpen(false)}
+          />
+          <div className="relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/90 shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/80">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Images className="w-5 h-5 text-continuity-400" />
+                  <h2 className="text-lg font-semibold">Generation Gallery</h2>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  All generated images with QC pass/fail and reasons
+                </p>
+              </div>
+              <button
+                onClick={() => setIsGalleryOpen(false)}
+                className="p-2 rounded-full hover:bg-white/10 transition-colors"
+                aria-label="Close gallery"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-6 py-4 border-b border-slate-800 flex flex-wrap items-center gap-2">
+              {(["all", "passed", "failed", "pending"] as const).map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setGalleryFilter(filter)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    galleryFilter === filter
+                      ? "bg-continuity-500/20 text-continuity-300 border border-continuity-500/40"
+                      : "bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200"
+                  }`}
+                >
+                  {filter === "all" ? "All" : filter === "passed" ? "Passed" : filter === "failed" ? "Failed" : "Pending"}
+                  <span className="ml-2 text-[10px] text-slate-500">
+                    {galleryCounts[filter]}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[70vh]">
+              {galleryLoading && (
+                <div className="flex items-center justify-center py-12 text-slate-400">
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  Loading gallery...
+                </div>
+              )}
+
+              {!galleryLoading && galleryError && (
+                <div className="p-4 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300">
+                  {galleryError}
+                </div>
+              )}
+
+              {!galleryLoading && !galleryError && filteredGalleryItems.length === 0 && (
+                <div className="text-center text-slate-500 py-12">
+                  No images found for this filter.
+                </div>
+              )}
+
+              {!galleryLoading && !galleryError && filteredGalleryItems.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredGalleryItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden"
+                    >
+                      <div className="aspect-square bg-slate-900">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.imageUrl}
+                          alt={`${item.phase} run ${item.iterationNumber}`}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div className="p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs text-slate-400">
+                            {item.phase} • Run #{item.iterationNumber}
+                          </div>
+                          <div className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                            item.evaluationPassed === true
+                              ? "bg-emerald-500/20 text-emerald-300"
+                              : item.evaluationPassed === false
+                              ? "bg-red-500/20 text-red-300"
+                              : "bg-slate-700/40 text-slate-300"
+                          }`}>
+                            {item.evaluationPassed === true
+                              ? "PASS"
+                              : item.evaluationPassed === false
+                              ? "FAIL"
+                              : "PENDING"}
+                          </div>
+                        </div>
+                        <div className="text-xs text-slate-300">
+                          Reason: <span className="text-slate-400">{item.reason}</span>
+                        </div>
+                        {item.evaluationScore !== null && item.evaluationScore !== undefined && (
+                          <div className="text-[11px] text-slate-500">
+                            Score: {(item.evaluationScore * 100).toFixed(0)}%
+                          </div>
+                        )}
+                        <div className="text-[10px] text-slate-600">
+                          {new Date(item.createdAt).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
