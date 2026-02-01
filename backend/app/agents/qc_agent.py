@@ -12,6 +12,7 @@ The agent does NOT generate images - it only evaluates and optimizes.
 """
 
 import json
+import inspect
 import httpx
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
@@ -44,6 +45,19 @@ CRITERION_WEIGHTS = {
 
 # Pass/fail threshold
 PASS_THRESHOLD = 0.70
+
+# Weave op names to query for recent context
+WEAVE_GENERATION_OPS = [
+    "gen_load_policy",
+    "gen_load_constraints",
+    "gen_load_requirements",
+    "gen_generate_image",
+    "gen_cleanup_phase",
+    "gen_structural_phase",
+    "gen_fixture_phase",
+    "gen_style_phase",
+    "gen_full_pipeline",
+]
 
 
 # ============================================
@@ -591,6 +605,14 @@ Return a JSON response:
             "insights": [],
             "recommended_changes": [],
         }
+
+        # Pull recent Weave traces for context (best-effort)
+        trace_summary = await self._fetch_recent_weave_traces(limit=12)
+        if trace_summary:
+            analysis["weave_trace_summary"] = trace_summary
+            analysis["insights"].append(
+                f"Reviewed {trace_summary.get('total_calls', 0)} recent Weave traces for context."
+            )
         
         for failed in failed_criteria:
             criterion_analysis = {
@@ -614,6 +636,85 @@ Return a JSON response:
             analysis["insights"].extend(prompt_insights)
         
         return analysis
+
+    @weave.op(name="qc_fetch_recent_traces")
+    async def _fetch_recent_weave_traces(self, limit: int = 12) -> Dict[str, Any]:
+        """
+        Query recent Weave traces for generation context.
+        This is best-effort and won't block self-improvement if unavailable.
+        """
+        if not settings.wandb_api_key:
+            return {}
+
+        client = self._get_weave_client()
+        if not client or not hasattr(client, "get_calls"):
+            return {}
+
+        try:
+            calls = await self._maybe_await(
+                client.get_calls(
+                    filter={"op_names": WEAVE_GENERATION_OPS},
+                    limit=limit,
+                )
+            )
+        except Exception:
+            return {}
+
+        if not calls:
+            return {}
+
+        recent_calls = []
+        op_counts: Dict[str, int] = {}
+        for call in calls:
+            call_dict = self._normalize_weave_call(call)
+            op_name = call_dict.get("op_name", "unknown")
+            op_counts[op_name] = op_counts.get(op_name, 0) + 1
+            recent_calls.append(call_dict)
+
+        return {
+            "total_calls": len(recent_calls),
+            "op_counts": op_counts,
+            "recent_calls": recent_calls,
+        }
+
+    def _get_weave_client(self):
+        """
+        Get a Weave client if available. This is intentionally defensive.
+        """
+        client = getattr(weave, "client", None)
+        if client:
+            return client
+        if hasattr(weave, "Client"):
+            try:
+                return weave.Client()
+            except Exception:
+                return None
+        return None
+
+    async def _maybe_await(self, value):
+        if inspect.isawaitable(value):
+            return await value
+        return value
+
+    def _normalize_weave_call(self, call: Any) -> Dict[str, Any]:
+        if isinstance(call, dict):
+            op_name = call.get("op_name") or call.get("op") or "unknown"
+            summary = call.get("summary") or {}
+            return {
+                "call_id": call.get("id") or call.get("call_id"),
+                "op_name": op_name,
+                "duration_ms": summary.get("duration_ms"),
+                "cost": summary.get("weave", {}).get("costs", {}).get("total"),
+            }
+
+        op_name = getattr(call, "op_name", None) or getattr(call, "op", None) or "unknown"
+        summary = getattr(call, "summary", {}) or {}
+        return {
+            "call_id": getattr(call, "id", None),
+            "op_name": op_name,
+            "duration_ms": summary.get("duration_ms"),
+            "cost": summary.get("weave", {}).get("costs", {}).get("total"),
+        }
     
     def _generate_insights_and_changes(
         self,

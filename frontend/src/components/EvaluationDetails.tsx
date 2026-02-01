@@ -89,10 +89,10 @@ function CriterionRow({ criterion }: { criterion: CriterionResult }) {
   const Icon = config.icon;
 
   return (
-    <div className="border-b border-neutral-100 dark:border-zinc-800 last:border-0">
+    <div className="border-b border-white/30 dark:border-white/10 last:border-0">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-3 py-2.5 flex items-center justify-between hover:bg-neutral-50 dark:hover:bg-zinc-800/50 transition-colors"
+        className="w-full px-3 py-2.5 flex items-center justify-between hover:bg-white/60 dark:hover:bg-zinc-900/50 transition-colors"
       >
         <div className="flex items-center gap-3">
           <div className={`
@@ -143,7 +143,7 @@ function CriterionRow({ criterion }: { criterion: CriterionResult }) {
           <p className="text-xs text-neutral-500 dark:text-zinc-400 italic">{config.description}</p>
           <p className="text-[13px] text-neutral-700 dark:text-zinc-300 leading-relaxed">{criterion.details}</p>
           {criterion.evidence && Object.keys(criterion.evidence).length > 0 && (
-            <div className="mt-2 p-2 rounded bg-neutral-50 dark:bg-zinc-800/50 text-xs">
+            <div className="mt-2 p-2 rounded bg-white/70 dark:bg-zinc-800/50 border border-white/40 dark:border-white/10 text-xs">
               <p className="text-neutral-500 dark:text-zinc-400 mb-1">Evidence:</p>
               <pre className="text-neutral-600 dark:text-zinc-400 whitespace-pre-wrap overflow-x-auto">
                 {JSON.stringify(criterion.evidence, null, 2)}
@@ -162,11 +162,11 @@ function EvaluationCard({ evaluation }: { evaluation: EvaluationResult }) {
   const totalCount = evaluation.criteria.length;
 
   return (
-    <div className="rounded-lg border border-neutral-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
+    <div className="rounded-xl border border-white/50 dark:border-white/10 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.08)]">
       {/* Header */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-4 py-3 flex items-center justify-between hover:bg-neutral-50 dark:hover:bg-zinc-800/50 transition-colors"
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/60 dark:hover:bg-zinc-900/50 transition-colors"
       >
         <div className="flex items-center gap-3">
           <div className={`
@@ -219,10 +219,10 @@ function EvaluationCard({ evaluation }: { evaluation: EvaluationResult }) {
       
       {/* Expanded content */}
       {expanded && (
-        <div className="border-t border-neutral-100 dark:border-zinc-800">
+        <div className="border-t border-white/30 dark:border-white/10">
           {/* Failure reasons if any */}
           {evaluation.failureReasons && evaluation.failureReasons.length > 0 && (
-            <div className="px-4 py-3 bg-red-50 dark:bg-red-900/20 border-b border-red-100 dark:border-red-800/50">
+            <div className="px-4 py-3 bg-red-50/80 dark:bg-red-900/20 border-b border-red-100/60 dark:border-red-800/40">
               <p className="text-xs font-medium text-red-700 dark:text-red-400 mb-1.5">Issues:</p>
               <ul className="space-y-1">
                 {evaluation.failureReasons.map((reason, i) => (
@@ -236,14 +236,14 @@ function EvaluationCard({ evaluation }: { evaluation: EvaluationResult }) {
           )}
           
           {/* Criteria list */}
-          <div className="divide-y divide-neutral-100 dark:divide-zinc-800">
+          <div className="divide-y divide-white/30 dark:divide-white/10">
             {evaluation.criteria.map((criterion) => (
               <CriterionRow key={criterion.criterion} criterion={criterion} />
             ))}
           </div>
           
           {/* Timestamp */}
-          <div className="px-4 py-2 bg-neutral-50 dark:bg-zinc-800/50 text-[10px] text-neutral-400 dark:text-zinc-500">
+          <div className="px-4 py-2 bg-white/60 dark:bg-zinc-800/50 text-[10px] text-neutral-400 dark:text-zinc-500">
             Evaluated at {new Date(evaluation.evaluatedAt).toLocaleTimeString()}
           </div>
         </div>
@@ -255,7 +255,7 @@ function EvaluationCard({ evaluation }: { evaluation: EvaluationResult }) {
 export function EvaluationDetails({ evaluations, className = "" }: EvaluationDetailsProps) {
   if (evaluations.length === 0) {
     return (
-      <div className={`p-4 rounded-lg border border-neutral-200 dark:border-zinc-800 bg-neutral-50 dark:bg-zinc-900/50 ${className}`}>
+      <div className={`p-4 rounded-lg border border-white/50 dark:border-white/10 bg-white/70 dark:bg-zinc-900/60 backdrop-blur-xl ${className}`}>
         <div className="text-center">
           <ClipboardList className="w-8 h-8 text-neutral-300 dark:text-zinc-600 mx-auto mb-2" />
           <p className="text-sm text-neutral-500 dark:text-zinc-500">No evaluations yet</p>

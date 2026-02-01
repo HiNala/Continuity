@@ -213,7 +213,7 @@ export function ResultsTimeline({
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900 ${
             compareMode 
               ? "bg-primary text-white shadow-md" 
-              : "bg-neutral-100 dark:bg-zinc-800 text-neutral-700 dark:text-zinc-300 hover:bg-neutral-200 dark:hover:bg-zinc-700"
+              : "bg-white/70 dark:bg-zinc-900/60 text-neutral-700 dark:text-zinc-300 border border-white/40 dark:border-white/10 hover:bg-white/90 dark:hover:bg-zinc-900/80"
           }`}
         >
           <Layers className="w-3.5 h-3.5" />

@@ -141,7 +141,7 @@ export function ThemeToggle({ className = "" }: ThemeToggleProps) {
         className="absolute inset-0"
         animate={{
           background: isDark
-            ? "linear-gradient(135deg, rgba(30,41,59,0.9) 0%, rgba(15,23,42,0.9) 50%, rgba(2,6,23,0.9) 100%)"
+            ? "linear-gradient(135deg, rgba(10,10,11,0.95) 0%, rgba(17,17,19,0.9) 50%, rgba(24,24,27,0.9) 100%)"
             : "linear-gradient(135deg, rgba(250,250,250,0.95) 0%, rgba(244,244,245,0.9) 50%, rgba(236,236,241,0.9) 100%)",
         }}
         transition={{ duration: 0.8, ease: "easeInOut" }}
@@ -208,8 +208,8 @@ export function ThemeToggle({ className = "" }: ThemeToggleProps) {
       <motion.div
         className="absolute top-0.5 w-7 h-7 rounded-full shadow-md flex items-center justify-center"
         animate={{
-          x: isDark ? 30 : 3,
-          backgroundColor: isDark ? "#111827" : "#ffffff",
+          x: isDark ? 26 : 2,
+          backgroundColor: isDark ? "#0f1115" : "#ffffff",
         }}
         transition={{
           type: "spring",

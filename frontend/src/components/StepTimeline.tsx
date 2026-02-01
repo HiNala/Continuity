@@ -92,7 +92,7 @@ function StepRow({
       {/* Vertical connector line */}
       {!isLast && (
         <div 
-          className="absolute left-[15px] top-9 bottom-0 w-[2px] bg-neutral-200 dark:bg-zinc-700"
+          className="absolute left-[15px] top-9 bottom-0 w-[2px] bg-white/40 dark:bg-white/10"
         />
       )}
       
@@ -118,7 +118,7 @@ function StepRow({
         <div className="flex-1 min-w-0 pb-4">
           <button
             onClick={() => setExpanded(!expanded)}
-            className="w-full text-left group"
+            className="w-full text-left group rounded-xl px-2 py-2 -mx-2 transition-colors hover:bg-white/60 dark:hover:bg-zinc-900/50"
           >
             {/* Header row */}
             <div className="flex items-start justify-between gap-2">
@@ -127,7 +127,7 @@ function StepRow({
                   <span 
                     className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
                     style={{ 
-                      backgroundColor: `${agent.color}15`,
+                      backgroundColor: `${agent.color}14`,
                       color: agent.color 
                     }}
                   >
@@ -191,7 +191,7 @@ function StepRow({
             <div className="mt-2 space-y-2">
               {/* Failure reasons */}
               {step.failureReasons && step.failureReasons.length > 0 && (
-                <div className="p-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50">
+                <div className="p-2 rounded-lg bg-red-50/80 dark:bg-red-900/20 border border-red-100/60 dark:border-red-800/40">
                   <p className="text-[10px] font-medium text-red-700 dark:text-red-400 mb-1">Issues:</p>
                   <ul className="space-y-0.5">
                     {step.failureReasons.map((reason, i) => (
@@ -221,7 +221,7 @@ function StepRow({
               
               {/* Details JSON */}
               {step.details && Object.keys(step.details).length > 0 && (
-                <div className="p-2 rounded-lg bg-neutral-50 dark:bg-zinc-800/50 text-xs">
+                <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-800/50 border border-white/40 dark:border-white/10 text-xs">
                   <pre className="text-neutral-600 dark:text-zinc-400 whitespace-pre-wrap overflow-x-auto max-h-32 overflow-y-auto">
                     {JSON.stringify(step.details, null, 2)}
                   </pre>
@@ -288,14 +288,14 @@ export function StepTimeline({ steps, weaveProjectUrl, className = "" }: StepTim
   return (
     <div className={className}>
       {/* Filter bar */}
-      <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2">
+      <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2 scrollbar-on-hover">
         <button
           onClick={() => setFilterAgent(null)}
           className={`
             text-xs font-medium px-2.5 py-1.5 rounded-md transition-colors whitespace-nowrap
             ${filterAgent === null
-              ? "bg-neutral-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
-              : "bg-neutral-100 dark:bg-zinc-800 text-neutral-600 dark:text-zinc-400 hover:bg-neutral-200 dark:hover:bg-zinc-700"
+              ? "bg-neutral-900/90 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-sm"
+              : "bg-white/70 dark:bg-zinc-900/60 text-neutral-600 dark:text-zinc-400 border border-white/40 dark:border-white/10 hover:bg-white/90 dark:hover:bg-zinc-900/80"
             }
           `}
         >
@@ -310,8 +310,8 @@ export function StepTimeline({ steps, weaveProjectUrl, className = "" }: StepTim
               className={`
                 text-xs font-medium px-2.5 py-1.5 rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5
                 ${filterAgent === key
-                  ? "text-white"
-                  : "bg-neutral-100 dark:bg-zinc-800 text-neutral-600 dark:text-zinc-400 hover:bg-neutral-200 dark:hover:bg-zinc-700"
+                  ? "text-white shadow-sm"
+                  : "bg-white/70 dark:bg-zinc-900/60 text-neutral-600 dark:text-zinc-400 border border-white/40 dark:border-white/10 hover:bg-white/90 dark:hover:bg-zinc-900/80"
                 }
               `}
               style={filterAgent === key ? { backgroundColor: config.color } : {}}

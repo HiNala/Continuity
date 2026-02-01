@@ -1,5 +1,5 @@
 """
-Continuity - Configuration Management
+Clarity - Configuration Management
 Loads settings from environment variables with validation.
 """
 

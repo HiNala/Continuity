@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
     Initialize Weave, database connections, Redis, etc.
     """
     # Startup
-    print("🚀 Starting Continuity Backend...")
+    print("🚀 Starting Clarity Backend...")
     
     # Initialize Weave for observability
     if settings.wandb_api_key:
