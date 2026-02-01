@@ -1,5 +1,5 @@
 """
-Continuity - Main FastAPI Application
+Clarity - Main FastAPI Application
 Self-Improving Agent System for Design Visualization
 WeaveHacks 3 - January 31-February 1, 2026
 """
@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    print("👋 Shutting down Continuity Backend...")
+    print("👋 Shutting down Clarity Backend...")
     await redis_service.disconnect()
 
 
@@ -71,11 +71,11 @@ async def lifespan(app: FastAPI):
 # FastAPI Application
 # ============================================
 app = FastAPI(
-    title="Continuity API",
+    title="Clarity API",
     description="""
     ## Self-Improving Agent System for Design Visualization
     
-    Continuity transforms raw photographs of unfinished or existing spaces 
+    Clarity transforms raw photographs of unfinished or existing spaces 
     into realistic, professionally staged renovation visualizations using 
     a multi-agent architecture with Weave observability.
     
@@ -152,7 +152,7 @@ class WeaveTestResponse(BaseModel):
 async def root():
     """Root endpoint with API information."""
     return {
-        "name": "Continuity API",
+        "name": "Clarity API",
         "description": "Self-Improving Agent System for Design Visualization",
         "version": "0.1.0",
         "docs": "/docs",
