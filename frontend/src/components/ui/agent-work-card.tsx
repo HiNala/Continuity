@@ -86,6 +86,12 @@ export type ActionType =
   | "success"
   | "error";
 
+export interface ProgressStep {
+  label: string;
+  status: "pending" | "running" | "completed" | "error";
+  detail?: string;
+}
+
 export interface AgentWorkCardProps {
   id: string;
   agent: AgentType;
@@ -105,6 +111,7 @@ export interface AgentWorkCardProps {
   };
   weaveTraceUrl?: string;
   browserbaseSessionId?: string;
+  progressSteps?: ProgressStep[];
 }
 
 // Unified neutral color for all agent icons - less visual noise
@@ -175,12 +182,14 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
   toolCall,
   weaveTraceUrl,
   browserbaseSessionId,
+  progressSteps,
 }) => {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const agentInfo = agentConfig[agent];
   const actionInfo = actionConfig[action];
   const AgentIcon = agentInfo.icon;
   const ActionIcon = actionInfo.icon;
+  const hasProgress = progressSteps && progressSteps.length > 0;
 
   const hasExpandableContent = (details && Object.keys(details).length > 0) || reasoning || toolCall;
   const detailsCount =
@@ -278,6 +287,46 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
         <p className="text-xs text-neutral-500 dark:text-zinc-400 leading-relaxed">
           {parseMarkdown(content)}
         </p>
+        
+        {/* Progress Steps - inline granular feedback */}
+        {hasProgress && (
+          <div className="mt-3 space-y-1.5 border-t border-neutral-100 dark:border-zinc-800 pt-3">
+            {progressSteps.map((step, idx) => (
+              <motion.div 
+                key={idx}
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: idx * 0.05 }}
+                className="flex items-center gap-2"
+              >
+                {step.status === "running" ? (
+                  <Loader2 className="w-3 h-3 text-primary animate-spin shrink-0" />
+                ) : step.status === "completed" ? (
+                  <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                ) : step.status === "error" ? (
+                  <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                ) : (
+                  <div className="w-3 h-3 rounded-full border border-neutral-300 dark:border-zinc-600 shrink-0" />
+                )}
+                <span className={cn(
+                  "text-[11px]",
+                  step.status === "running" 
+                    ? "text-neutral-700 dark:text-zinc-200 font-medium" 
+                    : step.status === "completed"
+                    ? "text-neutral-400 dark:text-zinc-500"
+                    : "text-neutral-400 dark:text-zinc-500"
+                )}>
+                  {step.label}
+                </span>
+                {step.detail && step.status === "running" && (
+                  <span className="text-[10px] text-neutral-400 dark:text-zinc-500 truncate italic">
+                    {step.detail}
+                  </span>
+                )}
+              </motion.div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Image preview */}

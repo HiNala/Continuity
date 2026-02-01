@@ -29,6 +29,14 @@ import {
 export type AgentType = "requirements" | "spatial" | "generation" | "qc" | "orchestrator" | "system";
 export type CardStatus = "pending" | "running" | "completed" | "error" | "warning";
 
+export type ActionType = "thinking" | "analyzing" | "generating" | "evaluating" | "policy_update" | "complete" | "error" | "idle";
+
+export interface ProgressStep {
+  label: string;
+  status: "pending" | "running" | "completed" | "error";
+  detail?: string;
+}
+
 export interface AgentCardProps {
   id: string;
   agent: AgentType;
@@ -39,6 +47,9 @@ export interface AgentCardProps {
   details?: Record<string, unknown>;
   reasoning?: string;
   weaveTraceUrl?: string;
+  action?: ActionType;
+  progressSteps?: ProgressStep[];
+  elapsedTime?: number; // in milliseconds
 }
 
 // Agent configuration - minimal color palette
@@ -63,11 +74,49 @@ export function AgentCard({
   details,
   reasoning,
   weaveTraceUrl,
+  action,
+  progressSteps,
+  elapsedTime,
 }: AgentCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const config = agents[agent];
   const Icon = config.icon;
   const hasExpandable = (details && Object.keys(details).length > 0) || reasoning;
+  const hasProgress = progressSteps && progressSteps.length > 0;
+  
+  // Format elapsed time
+  const formatElapsed = (ms: number) => {
+    if (ms < 1000) return `${ms}ms`;
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}m ${remainingSeconds}s`;
+  };
+  
+  // Get action-specific styling
+  const getActionIndicator = () => {
+    if (!action || action === "idle" || action === "complete") return null;
+    
+    const actionConfig = {
+      thinking: { icon: Brain, label: "Thinking", color: "text-blue-500" },
+      analyzing: { icon: Eye, label: "Analyzing", color: "text-purple-500" },
+      generating: { icon: Paintbrush, label: "Generating", color: "text-amber-500" },
+      evaluating: { icon: CheckCircle2, label: "Evaluating", color: "text-emerald-500" },
+      policy_update: { icon: Sparkles, label: "Learning", color: "text-pink-500" },
+      error: { icon: AlertCircle, label: "Error", color: "text-red-500" },
+    }[action];
+    
+    if (!actionConfig) return null;
+    const ActionIcon = actionConfig.icon;
+    
+    return (
+      <span className={`inline-flex items-center gap-1 text-[9px] font-medium ${actionConfig.color}`}>
+        <ActionIcon className="w-2.5 h-2.5 animate-pulse" />
+        {actionConfig.label}
+      </span>
+    );
+  };
 
   return (
     <motion.div
@@ -106,22 +155,67 @@ export function AgentCard({
                 <span className="text-[10px] font-medium text-neutral-400 dark:text-zinc-500 uppercase tracking-wider">
                   {config.label}
                 </span>
+                {getActionIndicator()}
                 {timestamp && (
                   <span className="text-[9px] text-neutral-300 dark:text-zinc-600 font-mono">
                     {timestamp}
                   </span>
                 )}
+                {elapsedTime !== undefined && status === "running" && (
+                  <span className="text-[9px] text-neutral-400 dark:text-zinc-500 font-mono">
+                    {formatElapsed(elapsedTime)}
+                  </span>
+                )}
               </div>
 
               {/* Title */}
-              <h3 className="text-sm font-medium text-neutral-900 leading-tight">
+              <h3 className="text-sm font-medium text-neutral-900 dark:text-zinc-100 leading-tight">
                 {title}
               </h3>
 
               {/* Content */}
-              <p className="text-xs text-neutral-500 mt-1 leading-relaxed">
+              <p className="text-xs text-neutral-500 dark:text-zinc-400 mt-1 leading-relaxed">
                 {content}
               </p>
+              
+              {/* Progress Steps */}
+              {hasProgress && (
+                <div className="mt-3 space-y-1.5">
+                  {progressSteps.map((step, idx) => (
+                    <motion.div 
+                      key={idx}
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: idx * 0.05 }}
+                      className="flex items-center gap-2"
+                    >
+                      {step.status === "running" ? (
+                        <Loader2 className="w-3 h-3 text-blue-500 animate-spin shrink-0" />
+                      ) : step.status === "completed" ? (
+                        <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                      ) : step.status === "error" ? (
+                        <AlertCircle className="w-3 h-3 text-red-500 shrink-0" />
+                      ) : (
+                        <div className="w-3 h-3 rounded-full border border-neutral-300 dark:border-zinc-600 shrink-0" />
+                      )}
+                      <span className={`text-[11px] ${
+                        step.status === "running" 
+                          ? "text-neutral-700 dark:text-zinc-200" 
+                          : step.status === "completed"
+                          ? "text-neutral-500 dark:text-zinc-400"
+                          : "text-neutral-400 dark:text-zinc-500"
+                      }`}>
+                        {step.label}
+                      </span>
+                      {step.detail && step.status === "running" && (
+                        <span className="text-[10px] text-neutral-400 dark:text-zinc-500 truncate">
+                          {step.detail}
+                        </span>
+                      )}
+                    </motion.div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

@@ -1636,22 +1636,54 @@ export default function ContinuityApp() {
   };
 
   const startPipeline = async (pId: string) => {
+    // Initial progress steps for granular feedback
+    const initialSteps = [
+      { label: "Initializing project context", status: "running" as const },
+      { label: "Loading spatial constraints", status: "pending" as const },
+      { label: "Preparing generation policy", status: "pending" as const },
+      { label: "Connecting to pipeline stream", status: "pending" as const },
+    ];
+    
     const orchestrateCardId = addAgentCard({
       agent: "orchestrator",
       title: "Launching Generation Pipeline",
-      content: "Coordinating multi-agent workflow...",
+      content: "Setting up the multi-agent workflow for your visualization...",
       status: "running",
       action: "thinking",
       timestamp: new Date().toLocaleTimeString(),
+      progressSteps: initialSteps,
     });
 
+    // Update progress steps as we go
+    const updateProgress = (stepIndex: number, status: "running" | "completed" | "error", detail?: string) => {
+      updateAgentCard(orchestrateCardId, {
+        progressSteps: initialSteps.map((step, i) => ({
+          ...step,
+          status: i < stepIndex ? "completed" : i === stepIndex ? status : "pending",
+          detail: i === stepIndex ? detail : undefined,
+        })),
+      });
+    };
+
     try {
+      // Step 1 complete, move to step 2
+      updateProgress(1, "running", "Analyzing your space...");
+      
       const isBatch = uploadedImages.length > 1;
+      
+      // Step 2 complete, move to step 3
+      await new Promise(r => setTimeout(r, 300)); // Small delay for visual feedback
+      updateProgress(2, "running", isBatch ? `Batch mode: ${uploadedImages.length} images` : "Single image mode");
+      
       await startOrchestration(pId, false, isBatch);
+      
+      // Step 3 complete, move to step 4
+      updateProgress(3, "running", "Establishing SSE connection...");
       
       updateAgentCard(orchestrateCardId, {
         status: "completed",
-        content: "Pipeline active. Streaming real-time updates...",
+        content: "Pipeline active. Streaming real-time agent updates...",
+        progressSteps: initialSteps.map(s => ({ ...s, status: "completed" as const })),
       });
 
       // Fetch Weave trace link early if available
@@ -2751,9 +2783,38 @@ function SplitView({
 }: SplitViewProps) {
   const [splitPosition, setSplitPosition] = useState(50); // Default 50%
   const [isDragging, setIsDragging] = useState(false);
+  const [showWaitingIndicator, setShowWaitingIndicator] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const activityScrollRef = useRef<HTMLDivElement>(null);
+  const waitingTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Show typing indicator after 12 seconds of waiting during pipeline
+  useEffect(() => {
+    // Clear any existing timer
+    if (waitingTimerRef.current) {
+      clearTimeout(waitingTimerRef.current);
+      waitingTimerRef.current = null;
+    }
+    
+    // Check if we're in a waiting state (pipeline running, no questions, no active thinking)
+    const isPipelineWaiting = isGenerationRunning && !questions && !currentThinking;
+    
+    if (isPipelineWaiting) {
+      // Start 12 second timer
+      waitingTimerRef.current = setTimeout(() => {
+        setShowWaitingIndicator(true);
+      }, 12000);
+    } else {
+      setShowWaitingIndicator(false);
+    }
+    
+    return () => {
+      if (waitingTimerRef.current) {
+        clearTimeout(waitingTimerRef.current);
+      }
+    };
+  }, [isGenerationRunning, questions, currentThinking, chatMessages]);
 
   // Auto-scroll chat to latest message
   useEffect(() => {
