@@ -109,8 +109,8 @@ class StagehandBrowserbaseService:
             return self._stagehand_available
         
         try:
-            # Import the v3 SDK
-            from stagehand import AsyncStagehand
+            # Import the stagehand SDK (v2 API)
+            from stagehand import Stagehand, StagehandConfig
             self._stagehand_available = self.is_stagehand_configured
             if self._stagehand_available:
                 print("[Stagehand] AI-powered browser automation available")
@@ -225,56 +225,63 @@ class StagehandBrowserbaseService:
         """
         Use Stagehand AI to extract inspiration images from the web.
         
-        This uses the Stagehand Python SDK v3 with natural language instructions to:
+        This uses the Stagehand Python SDK with natural language instructions to:
         1. Navigate to a design inspiration website
         2. Search for relevant content
         3. Extract image URLs with AI assistance
-        """
-        from stagehand import AsyncStagehand
         
-        # Build search query
+        Note: The stagehand-py SDK requires Browserbase for browser infrastructure.
+        Falls back to curated gallery if extraction fails.
+        """
+        from stagehand import Stagehand, StagehandConfig
+        
+        # Build search query for URL
         search_terms = [query]
         if style:
-            search_terms.append(f"{style} style")
+            search_terms.append(style)
         if space_type:
-            search_terms.append(f"{space_type} design")
-        full_query = " ".join(search_terms).replace(" ", "-")
+            search_terms.append(space_type)
+        # URL-encode the search query
+        full_query = "-".join(search_terms).replace(" ", "-").lower()
         
         # Use Unsplash as primary source (free, high-quality images)
         search_url = f"https://unsplash.com/s/photos/{full_query}"
         
-        # Create Stagehand client with Browserbase credentials and Gemini model
-        # SDK docs: https://docs.stagehand.dev/v3/sdk/python
-        client = AsyncStagehand(
-            browserbase_api_key=self.browserbase_api_key,
-            browserbase_project_id=self.browserbase_project_id,
-            model_api_key=self.model_api_key,
-        )
-        
-        session = None
         try:
-            # Start a new browser session with Gemini model
-            session = await client.sessions.create(
-                model_name="google/gemini-2.5-flash",  # Fast, accurate, cost-effective
+            # Configure Stagehand with Browserbase
+            config = StagehandConfig(
+                env="BROWSERBASE",
+                api_key=self.browserbase_api_key,
+                project_id=self.browserbase_project_id,
+                model_name="google/gemini-2.0-flash",  # Use stable Gemini model
+                model_api_key=self.model_api_key,
+                headless=True,
+                verbose=1,
             )
-            print(f"[Stagehand] Session started: {session.id}")
             
-            # Navigate to the search results
-            await session.navigate(url=search_url)
-            print(f"[Stagehand] Navigated to {search_url}")
+            # Create Stagehand instance
+            stagehand = Stagehand(config=config)
+            
+            # Initialize the browser
+            await stagehand.init()
+            print(f"[Stagehand] Initialized, navigating to {search_url}")
+            
+            # Navigate to the search page
+            page = stagehand.page
+            await page.goto(search_url)
             
             # Wait for content to load
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
             
-            # Extract image data using Stagehand's AI-powered extraction
-            extract_response = await session.extract(
+            # Extract image data using Stagehand's AI extraction
+            extract_result = await stagehand.extract(
                 instruction=f"""
                 Find interior design images on this page related to: {query}
                 For each image, extract:
-                1. The image URL (src attribute of img tags, prefer high resolution)
-                2. A brief description (alt text or inferred from context)
-                Focus on actual room/interior photos, not profile pictures or icons.
-                Return up to {limit} high-quality images.
+                1. The full image URL (look for img tags with src attributes containing unsplash)
+                2. A brief description from alt text or nearby text
+                Focus on actual interior/room photos, ignore profile pictures and icons.
+                Return up to {limit} high-quality design images.
                 """,
                 schema={
                     "type": "object",
@@ -284,8 +291,8 @@ class StagehandBrowserbaseService:
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "url": {"type": "string"},
-                                    "description": {"type": "string"},
+                                    "url": {"type": "string", "description": "Full image URL"},
+                                    "description": {"type": "string", "description": "Image description"},
                                 },
                                 "required": ["url"]
                             }
@@ -294,25 +301,32 @@ class StagehandBrowserbaseService:
                 }
             )
             
-            # Process extracted data
-            images_data = extract_response.data.result if hasattr(extract_response.data, 'result') else None
-            if images_data and isinstance(images_data, dict):
-                images = images_data.get("images", [])
-                if images:
-                    formatted = [
-                        {
-                            "id": f"stagehand_{i}",
-                            "url": img.get("url", ""),
-                            "thumbnail": img.get("url", ""),
-                            "description": img.get("description", "Design inspiration"),
-                            "source": "unsplash_stagehand",
-                        }
-                        for i, img in enumerate(images[:limit])
-                        if img.get("url")
-                    ]
-                    
-                    print(f"[Stagehand] Extracted {len(formatted)} images")
-                    
+            # Close the browser
+            await stagehand.close()
+            
+            # Process results
+            if extract_result and hasattr(extract_result, 'images'):
+                images = extract_result.images or []
+            elif isinstance(extract_result, dict):
+                images = extract_result.get("images", [])
+            else:
+                images = []
+            
+            if images:
+                formatted = [
+                    {
+                        "id": f"stagehand_{i}",
+                        "url": img.get("url", "") if isinstance(img, dict) else str(img),
+                        "thumbnail": img.get("url", "") if isinstance(img, dict) else str(img),
+                        "description": img.get("description", "Design inspiration") if isinstance(img, dict) else "Design inspiration",
+                        "source": "stagehand_extraction",
+                    }
+                    for i, img in enumerate(images[:limit])
+                    if (img.get("url") if isinstance(img, dict) else img)
+                ]
+                
+                if formatted:
+                    print(f"[Stagehand] Extracted {len(formatted)} images successfully")
                     return {
                         "success": True,
                         "query": query,
@@ -324,16 +338,11 @@ class StagehandBrowserbaseService:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
             
+            print("[Stagehand] No images extracted, falling back to curated gallery")
+            
         except Exception as e:
             print(f"[Stagehand] Error during extraction: {e}")
             raise
-        finally:
-            # Clean up session
-            if session:
-                try:
-                    await session.end()
-                except Exception:
-                    pass
         
         return None
     

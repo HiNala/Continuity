@@ -1,21 +1,21 @@
 # ============================================
 # Continuity Frontend - Next.js 15
 # ============================================
-# Simplified for hackathon development
+# Optimized for Alpine Linux with SWC support
 
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dependencies required for Next.js SWC
-RUN apk add --no-cache libc6-compat
+# Install system dependencies required for Next.js SWC native compilation
+RUN apk add --no-cache libc6-compat gcompat
 
 # Copy package files
-COPY package.json package-lock.json* ./
+COPY package.json ./
 
-# Clean install using lockfile for deterministic builds
-RUN rm -rf node_modules && \
-    npm ci
+# Install dependencies - use npm install to get correct platform binaries
+# The --force flag ensures SWC binaries are installed for the correct platform
+RUN npm install --force --legacy-peer-deps
 
 # Copy application code
 COPY . .
