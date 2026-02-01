@@ -30,8 +30,6 @@ import {
   AlertTriangle,
   RefreshCw,
   XCircle,
-  Images,
-  X,
 } from "lucide-react";
 import {
   createProject,
@@ -39,13 +37,13 @@ import {
   submitAnswers,
   analyzeSpace,
   generateImages,
+  uploadImages,
   evaluateAndImprove,
   startOrchestration,
   getOrchestrationStatus,
   selectProjectReferenceImages,
   getProjectGallery,
   GalleryResponse,
-  GalleryAttempt,
   ClarifyingQuestion,
   RequirementsResponse,
   AnalysisSummaryResponse,
@@ -60,6 +58,8 @@ import { InspirationGallery } from "@/components/InspirationGallery";
 import { ResultsTimeline } from "@/components/ResultsTimeline";
 import { ImprovementStory } from "@/components/ImprovementStory";
 import { ErrorState } from "@/components/ui/error-state";
+import { ImprovementChatFeed, ImprovementMessage } from "@/components/ImprovementChatFeed";
+import { GalleryModal } from "@/components/GalleryModal";
 
 // ============================================
 // Types
@@ -70,11 +70,6 @@ interface Answers {
   [questionId: string]: string | string[];
 }
 
-interface GallerySelection {
-  phase: string;
-  phaseLabel: string;
-  attempt: GalleryAttempt;
-}
 
 // ============================================
 // Icon mapping for question types
@@ -126,9 +121,28 @@ export default function ProjectPage() {
   const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [galleryData, setGalleryData] = useState<GalleryResponse | null>(null);
-  const [galleryLoading, setGalleryLoading] = useState(false);
-  const [galleryError, setGalleryError] = useState<string | null>(null);
-  const [gallerySelected, setGallerySelected] = useState<GallerySelection | null>(null);
+
+  const handleImageFilesSelected = async (files: File[], previewUrls: string[]) => {
+    try {
+      const uploadedUrls = await uploadImages(files);
+      setImageUrls((prev) => {
+        let replaceIdx = 0;
+        return prev.map((url) => {
+          if (previewUrls.includes(url)) {
+            const nextUrl = uploadedUrls[replaceIdx];
+            replaceIdx += 1;
+            return nextUrl || url;
+          }
+          return url;
+        });
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Image upload failed");
+    }
+  };
+  
+  // Improvement Journey (Chat Feed)
+  const [improvementMessages, setImprovementMessages] = useState<ImprovementMessage[]>([]);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const resolveImagePath = (imagePath: string) => {
@@ -307,6 +321,13 @@ export default function ProjectPage() {
     setCurrentPhase("cleanup");
 
     try {
+      if (imageUrls.length > 1) {
+        // Batch mode: use orchestration so each image is processed with self-improvement
+        await startOrchestration(projectId, false, true);
+        pollOrchestrationStatus(projectId);
+        return;
+      }
+
       // Use the first image URL if available
       const inputImage = imageUrls.length > 0 ? imageUrls[0] : undefined;
       const result = await generateImages(projectId, inputImage);
@@ -336,39 +357,6 @@ export default function ProjectPage() {
     }
   };
 
-  const formatPolicyChange = (change: Record<string, unknown>): string => {
-    const type = String(change.type || "update");
-    const oldValue = change.current || change.old;
-    const newValue = change.proposed || change.new;
-    if (type === "constraint_emphasis") {
-      return `Constraint emphasis: ${oldValue || "medium"} → ${newValue || "high"}`;
-    }
-    if (type === "creativity_reduction") {
-      return `Creativity: ${oldValue || "standard"} → ${newValue || "lower"}`;
-    }
-    if (type === "prompt_addition") {
-      return `Prompt addition: ${(change.addition as string) || (newValue as string) || "Added guidance"}`;
-    }
-    if (type === "max_retries_increase") {
-      return `Max retries: ${oldValue || "default"} → ${newValue || "higher"}`;
-    }
-    return `${type.replace(/_/g, " ")}: ${oldValue ?? "before"} → ${newValue ?? "after"}`;
-  };
-
-  const buildScoreChartPoints = (scores: number[]): string => {
-    if (scores.length === 0) return "";
-    const width = 100;
-    const height = 40;
-    const step = scores.length > 1 ? width / (scores.length - 1) : width;
-    return scores
-      .map((score, index) => {
-        const x = index * step;
-        const y = height - Math.max(0, Math.min(score, 1)) * height;
-        return `${x},${y}`;
-      })
-      .join(" ");
-  };
-
   const getPhaseName = (phase: string) => {
     const phaseNames: Record<string, string> = {
       cleanup: "Cleanup",
@@ -379,44 +367,129 @@ export default function ProjectPage() {
     return phaseNames[phase] || phase;
   };
 
-  const loadGalleryData = useCallback(async () => {
-    if (!projectId) {
-      setGalleryError("No project found yet. Create a project first.");
-      setGalleryData(null);
-      return;
+  // Convert gallery data to improvement chat messages
+  const convertGalleryToMessages = useCallback((gallery: GalleryResponse): ImprovementMessage[] => {
+    const messages: ImprovementMessage[] = [];
+    let messageIndex = 0;
+
+    for (const phase of gallery.phases) {
+      for (const attempt of phase.attempts) {
+        const baseTimestamp = attempt.timestamp || new Date().toISOString();
+        
+        // Generation start message
+        messages.push({
+          id: `msg-${messageIndex++}`,
+          timestamp: baseTimestamp,
+          type: "generation_start",
+          phase: phase.phase,
+          attemptNumber: attempt.attempt_number,
+        });
+
+        // Generation complete with image
+        if (attempt.image_url) {
+          messages.push({
+            id: `msg-${messageIndex++}`,
+            timestamp: baseTimestamp,
+            type: "generation_complete",
+            phase: phase.phase,
+            attemptNumber: attempt.attempt_number,
+            imageUrl: resolveImagePath(attempt.image_url),
+          });
+        }
+
+        // Evaluation result (passed or failed)
+        if (attempt.status === "passed") {
+          messages.push({
+            id: `msg-${messageIndex++}`,
+            timestamp: baseTimestamp,
+            type: "evaluation_passed",
+            phase: phase.phase,
+            attemptNumber: attempt.attempt_number,
+            score: attempt.score ?? undefined,
+            previousScore: attempt.previous_score ?? undefined,
+            scoreDelta: attempt.score_delta ?? undefined,
+            criteria: attempt.evaluation?.map(e => ({
+              criterion: e.criterion,
+              score: e.score,
+              passed: e.passed,
+              details: e.details,
+            })),
+          });
+        } else if (attempt.status === "failed") {
+          messages.push({
+            id: `msg-${messageIndex++}`,
+            timestamp: baseTimestamp,
+            type: "evaluation_failed",
+            phase: phase.phase,
+            attemptNumber: attempt.attempt_number,
+            score: attempt.score ?? undefined,
+            previousScore: attempt.previous_score ?? undefined,
+            scoreDelta: attempt.score_delta ?? undefined,
+            humanReadableReason: attempt.human_readable_reason || attempt.failure_reason || undefined,
+            failureReasons: attempt.failure_reason ? [attempt.failure_reason] : undefined,
+            criteria: attempt.evaluation?.map(e => ({
+              criterion: e.criterion,
+              score: e.score,
+              passed: e.passed,
+              details: e.details,
+            })),
+          });
+
+          // Policy update message if there were changes
+          // Note: policy_changes_from_previous means changes made BEFORE this attempt
+          // So we show it just before the generation_start for attempts > 1
+          if (attempt.attempt_number > 1 && attempt.policy_changes_from_previous && attempt.policy_changes_from_previous.length > 0) {
+            // Insert at second-to-last position (before this attempt's generation_start)
+            const policyMsg: ImprovementMessage = {
+              id: `msg-policy-${messageIndex++}`,
+              timestamp: baseTimestamp,
+              type: "policy_update",
+              phase: phase.phase,
+              attemptNumber: attempt.attempt_number,
+              policyVersion: attempt.policy_version ?? undefined,
+              policyChanges: attempt.policy_changes_from_previous.map(change => ({
+                field: String((change as Record<string, unknown>).field || (change as Record<string, unknown>).type || "policy"),
+                from: String((change as Record<string, unknown>).old || (change as Record<string, unknown>).from || "default"),
+                to: String((change as Record<string, unknown>).new || (change as Record<string, unknown>).to || (change as Record<string, unknown>).proposed || "optimized"),
+              })),
+            };
+            // Insert before the generation_start for this attempt
+            const genStartIdx = messages.findIndex(m => 
+              m.type === "generation_start" && 
+              m.phase === phase.phase && 
+              m.attemptNumber === attempt.attempt_number
+            );
+            if (genStartIdx >= 0) {
+              messages.splice(genStartIdx, 0, policyMsg);
+            } else {
+              messages.push(policyMsg);
+            }
+          }
+        }
+      }
+
+      // Phase complete message if final status is passed
+      if (phase.final_status === "passed") {
+        messages.push({
+          id: `msg-${messageIndex++}`,
+          timestamp: new Date().toISOString(),
+          type: "phase_complete",
+          phase: phase.phase,
+          attemptNumber: phase.total_attempts,
+        });
+      }
     }
 
-    setGalleryLoading(true);
-    setGalleryError(null);
-    try {
-      const data = await getProjectGallery(projectId);
-      setGalleryData(data);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to load gallery";
-      setGalleryError(message);
-      setGalleryData(null);
-    } finally {
-      setGalleryLoading(false);
-    }
-  }, [projectId]);
+    return messages;
+  }, [resolveImagePath]);
 
-  const openGallery = async () => {
+  const openGallery = () => {
     setIsGalleryOpen(true);
-    setGallerySelected(null);
-    await loadGalleryData();
   };
 
-  useEffect(() => {
-    if (!isGalleryOpen) return;
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsGalleryOpen(false);
-        setGallerySelected(null);
-      }
-    };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [isGalleryOpen]);
+  const closeGallery = () => {
+    setIsGalleryOpen(false);
+  };
 
   const galleryEnabled =
     (galleryData?.summary.total_attempts ?? 0) > 0 ||
@@ -463,6 +536,16 @@ export default function ProjectPage() {
         const status = await getOrchestrationStatus(projectId);
         setOrchestrationStatus(status);
         
+        // Also fetch gallery data for improvement messages
+        try {
+          const gallery = await getProjectGallery(projectId);
+          setGalleryData(gallery);
+          const messages = convertGalleryToMessages(gallery);
+          setImprovementMessages(messages);
+        } catch {
+          // Gallery fetch can fail silently - we still have orchestration status
+        }
+        
         // Update step based on state
         if (status.state.startsWith("generating_") || 
             status.state.startsWith("evaluating_") || 
@@ -471,6 +554,15 @@ export default function ProjectPage() {
         } else if (status.state === "completed" || status.state === "completed_with_warnings") {
           setStep("results");
           setIsPolling(false);
+          // Final gallery fetch
+          try {
+            const finalGallery = await getProjectGallery(projectId);
+            setGalleryData(finalGallery);
+            const finalMessages = convertGalleryToMessages(finalGallery);
+            setImprovementMessages(finalMessages);
+          } catch {
+            // Gallery fetch can fail silently
+          }
           return;
         } else if (status.state === "failed") {
           setError("Orchestration failed");
@@ -523,7 +615,8 @@ export default function ProjectPage() {
 
     try {
       // Start orchestration (non-blocking)
-      await startOrchestration(projectId);
+      const isBatch = imageUrls.length > 1;
+      await startOrchestration(projectId, false, isBatch);
       
       // Begin polling for status
       pollOrchestrationStatus(projectId);
@@ -652,6 +745,7 @@ export default function ProjectPage() {
                 <ImageUpload
                   images={imageUrls}
                   onImagesChange={setImageUrls}
+                  onFilesSelected={handleImageFilesSelected}
                   maxImages={5}
                 />
               </div>
@@ -1227,6 +1321,17 @@ export default function ProjectPage() {
                 {isPolling && <span className="animate-pulse">Live updating...</span>}
               </div>
             )}
+
+            {/* Improvement Journey Chat Feed */}
+            {improvementMessages.length > 0 && (
+              <div className="max-w-2xl mx-auto mt-8">
+                <ImprovementChatFeed
+                  messages={improvementMessages}
+                  isActive={isPolling}
+                  onImageClick={(url) => window.open(url, '_blank')}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -1337,6 +1442,15 @@ export default function ProjectPage() {
                 onViewWeaveTrace={(traceId) => {
                   window.open(`https://wandb.ai/traces/${traceId}`, "_blank");
                 }}
+              />
+            )}
+
+            {/* Improvement Journey Chat Feed (completed) */}
+            {improvementMessages.length > 0 && (
+              <ImprovementChatFeed
+                messages={improvementMessages}
+                isActive={false}
+                onImageClick={(url) => window.open(url, '_blank')}
               />
             )}
 
@@ -1495,353 +1609,13 @@ export default function ProjectPage() {
         )}
       </div>
 
-      {/* Gallery Modal */}
-      {isGalleryOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div
-            className="absolute inset-0"
-            onClick={() => {
-              setIsGalleryOpen(false);
-              setGallerySelected(null);
-            }}
-          />
-          <div className="relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/90 shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/80">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Images className="w-5 h-5 text-continuity-400" />
-                  <h2 className="text-lg font-semibold">Generation Gallery</h2>
-                </div>
-                <p className="text-xs text-slate-400 mt-1">
-                  {galleryData?.run_timestamp
-                    ? `Run started ${new Date(galleryData.run_timestamp).toLocaleString()}`
-                    : "All generated images with QC pass/fail and reasons"}
-                </p>
-              </div>
-              <button
-                onClick={() => setIsGalleryOpen(false)}
-                className="p-2 rounded-full hover:bg-white/10 transition-colors"
-                aria-label="Close gallery"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto max-h-[70vh]">
-              {galleryLoading && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-center py-6 text-slate-400">
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                    Loading gallery...
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {Array.from({ length: 6 }).map((_, i) => (
-                      <div key={i} className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
-                        <div className="aspect-square bg-slate-800 animate-pulse" />
-                        <div className="p-3 space-y-2">
-                          <div className="h-3 w-24 bg-slate-800 rounded animate-pulse" />
-                          <div className="h-3 w-32 bg-slate-800 rounded animate-pulse" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {!galleryLoading && galleryError && (
-                <div className="p-4 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300">
-                  {galleryError}
-                </div>
-              )}
-
-              {!galleryLoading && !galleryError && (!galleryData || galleryData.summary.total_attempts === 0) && (
-                <div className="text-center text-slate-500 py-12">
-                  No images generated yet. Run a transformation to see your gallery.
-                </div>
-              )}
-
-              {!galleryLoading && !galleryError && galleryData && galleryData.summary.total_attempts > 0 && (
-                <div className="space-y-8">
-                  {/* Summary */}
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-                      <div className="text-xs text-slate-500">Total Images</div>
-                      <div className="text-2xl font-semibold text-white">{galleryData.summary.total_attempts}</div>
-                      <div className="text-[11px] text-slate-500 mt-1">
-                        Policy updates: {galleryData.summary.total_policy_updates}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-                      <div className="text-xs text-slate-500">Passed / Failed</div>
-                      <div className="text-2xl font-semibold text-white">
-                        <span className="text-emerald-400">{galleryData.summary.passed}</span>
-                        <span className="text-slate-500"> / </span>
-                        <span className="text-red-400">{galleryData.summary.failed}</span>
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        Success rate: {galleryData.summary.total_attempts > 0
-                          ? Math.round((galleryData.summary.passed / galleryData.summary.total_attempts) * 100)
-                          : 0}%
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-                      <div className="text-xs text-slate-500">Improvement Journey</div>
-                      <div className="text-2xl font-semibold text-white">
-                        {galleryData.summary.improvement_demonstrated ? "Visible" : "Not yet"}
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        Score progression across attempts
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Score Progression Chart */}
-                  <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-                    <div className="text-xs text-slate-500 mb-3">Score Progression</div>
-                    {galleryData.summary.overall_score_progression.length > 0 ? (
-                      <div className="w-full">
-                        <svg viewBox="0 0 100 40" className="w-full h-24">
-                          <polyline
-                            fill="none"
-                            stroke="currentColor"
-                            className="text-continuity-400"
-                            strokeWidth="2"
-                            points={buildScoreChartPoints(galleryData.summary.overall_score_progression)}
-                          />
-                          {galleryData.summary.overall_score_progression.map((score, idx) => {
-                            const x = galleryData.summary.overall_score_progression.length > 1
-                              ? (idx * 100) / (galleryData.summary.overall_score_progression.length - 1)
-                              : 50;
-                            const y = 40 - Math.max(0, Math.min(score, 1)) * 40;
-                            return (
-                              <circle
-                                key={idx}
-                                cx={x}
-                                cy={y}
-                                r="1.6"
-                                className="text-continuity-400 fill-current"
-                              />
-                            );
-                          })}
-                        </svg>
-                        <div className="flex justify-between text-[10px] text-slate-500">
-                          <span>Attempt 1</span>
-                          <span>Attempt {galleryData.summary.overall_score_progression.length}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-xs text-slate-500">No scores yet.</div>
-                    )}
-                  </div>
-
-                  {/* Phases */}
-                  {galleryData.phases.map((phase) => (
-                    <div key={phase.phase} className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-slate-200">
-                          {phase.phase_label}
-                        </h3>
-                        <span className="text-xs text-slate-500">
-                          {phase.total_attempts} attempts → {phase.final_status === "passed" ? "✓" : phase.final_status === "failed" ? "✗" : "…"}
-                        </span>
-                      </div>
-                      {phase.score_progression.length > 0 && (
-                        <div className="text-xs text-slate-500">
-                          Improvement: {phase.score_progression.map((score) => `${Math.round(score * 100)}%`).join(" → ")} • Policy updates: {phase.policy_updates_count}
-                        </div>
-                      )}
-                      <div className="flex items-center gap-3 overflow-x-auto pb-2">
-                        {phase.attempts.map((attempt, idx) => {
-                          const status = attempt.status;
-                          const resolvedUrl = resolveImagePath(attempt.image_url);
-                          const delta = attempt.score_delta;
-                          const deltaLabel = delta !== null && delta !== undefined
-                            ? `${delta >= 0 ? "↑" : "↓"} ${Math.abs(Math.round(delta * 100))}%`
-                            : null;
-                          return (
-                            <div key={attempt.iteration_id} className="flex items-center gap-3 flex-shrink-0">
-                              <button
-                                onClick={() => setGallerySelected({ phase: phase.phase, phaseLabel: phase.phase_label, attempt })}
-                                className={`text-left rounded-xl border overflow-hidden transition-colors w-64 ${
-                                  status === "passed"
-                                    ? "border-emerald-500/40 bg-emerald-500/5"
-                                    : status === "failed" && (delta !== null && delta > 0)
-                                    ? "border-amber-500/40 bg-amber-500/5"
-                                    : status === "failed"
-                                    ? "border-red-500/40 bg-red-500/5"
-                                    : "border-slate-800 bg-slate-900/60"
-                                }`}
-                              >
-                                <div className="relative aspect-[4/3] bg-slate-900">
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={resolvedUrl}
-                                    alt={`${phase.phase_label} attempt ${attempt.attempt_number}`}
-                                    className="w-full h-full object-cover"
-                                  />
-                                  <div className={`absolute top-2 right-2 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                    status === "passed"
-                                      ? "bg-emerald-500/80 text-white"
-                                      : status === "failed"
-                                      ? "bg-red-500/80 text-white"
-                                      : "bg-slate-700/80 text-white"
-                                  }`}>
-                                    {status === "passed" ? "PASS" : status === "failed" ? "FAIL" : "PENDING"}
-                                  </div>
-                                </div>
-                                <div className="p-3 space-y-2">
-                                  <div className="text-xs text-slate-400">
-                                    Attempt {attempt.attempt_number} of {phase.total_attempts}
-                                  </div>
-                                  {attempt.score !== null && attempt.score !== undefined && (
-                                    <div className="text-xs text-slate-300">
-                                      Score: {Math.round(attempt.score * 100)}%{" "}
-                                      {deltaLabel && <span className="text-slate-500">({deltaLabel})</span>}
-                                    </div>
-                                  )}
-                                  <div className="text-xs text-slate-300">
-                                    Reason: <span className="text-slate-400">{attempt.human_readable_reason || attempt.failure_reason || "Not evaluated"}</span>
-                                  </div>
-                                  {attempt.policy_version !== null && attempt.policy_version !== undefined && (
-                                    <div className="text-[11px] text-slate-500">
-                                      Policy v{attempt.policy_version}
-                                      {attempt.policy_changes_from_previous.length > 0 && (
-                                        <span className="ml-2 text-amber-400">🔧 {attempt.policy_changes_from_previous.length} updates</span>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              </button>
-                              {idx < phase.attempts.length - 1 && (
-                                <div className="text-slate-500 text-lg">→</div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Detail Lightbox */}
-          {gallerySelected && (
-            <div
-              className="absolute inset-0 z-10 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-              onClick={() => setGallerySelected(null)}
-            >
-              <div
-                className="relative w-full max-w-5xl max-h-[85vh] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/95 shadow-2xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-                  <div>
-                    <h3 className="text-sm font-semibold text-white">
-                      {gallerySelected.phaseLabel} • Attempt #{gallerySelected.attempt.attempt_number}
-                    </h3>
-                    <p className="text-xs text-slate-400">
-                      {new Date(gallerySelected.attempt.timestamp).toLocaleString()}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setGallerySelected(null)}
-                    className="p-2 rounded-full hover:bg-white/10 transition-colors"
-                    aria-label="Close details"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0">
-                  <div className="p-4">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={resolveImagePath(gallerySelected.attempt.image_url)}
-                      alt="Gallery detail"
-                      className="w-full max-h-[60vh] object-contain rounded-xl border border-slate-800"
-                      onClick={(event) => event.stopPropagation()}
-                    />
-                  </div>
-                  <div className="p-4 space-y-4 overflow-y-auto max-h-[70vh]">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                        gallerySelected.attempt.status === "passed"
-                          ? "bg-emerald-500/20 text-emerald-300"
-                          : gallerySelected.attempt.status === "failed"
-                          ? "bg-red-500/20 text-red-300"
-                          : "bg-slate-700/40 text-slate-300"
-                      }`}>
-                        {gallerySelected.attempt.status === "passed"
-                          ? "Passed QC"
-                          : gallerySelected.attempt.status === "failed"
-                          ? "Failed QC"
-                          : "Pending QC"}
-                      </span>
-                      {gallerySelected.attempt.score !== null && gallerySelected.attempt.score !== undefined && (
-                        <span className="text-xs text-slate-400">
-                          Score: {(gallerySelected.attempt.score * 100).toFixed(0)}%
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-slate-300">
-                      Reason: <span className="text-slate-400">{gallerySelected.attempt.human_readable_reason || gallerySelected.attempt.failure_reason || "Not evaluated"}</span>
-                    </div>
-                    {gallerySelected.attempt.policy_version !== null && gallerySelected.attempt.policy_version !== undefined && (
-                      <div className="text-xs text-slate-400">
-                        Policy version: v{gallerySelected.attempt.policy_version}
-                      </div>
-                    )}
-                    {gallerySelected.attempt.policy_changes_from_previous.length > 0 && (
-                      <div className="space-y-1">
-                        <div className="text-xs font-semibold text-slate-300">Policy adjustments</div>
-                        <ul className="text-[11px] text-slate-400 space-y-1">
-                          {gallerySelected.attempt.policy_changes_from_previous.map((change, index) => (
-                            <li key={index}>• {formatPolicyChange(change)}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {gallerySelected.attempt.weave_trace_id && (
-                      <button
-                        onClick={() => window.open(`https://wandb.ai/traces/${gallerySelected.attempt.weave_trace_id}`, "_blank")}
-                        className="text-xs text-continuity-400 hover:text-continuity-300"
-                      >
-                        View Weave Trace →
-                      </button>
-                    )}
-                    <div className="space-y-2">
-                      <div className="text-xs font-semibold text-slate-300">Evaluation Breakdown</div>
-                      {gallerySelected.attempt.evaluation.length === 0 ? (
-                        <div className="text-xs text-slate-500">No evaluation details available yet.</div>
-                      ) : (
-                        <div className="space-y-2">
-                          {gallerySelected.attempt.evaluation.map((criterion) => (
-                            <div key={criterion.criterion} className="rounded-lg border border-slate-800 bg-slate-900/60 p-2">
-                              <div className="flex items-center justify-between">
-                                <div className="text-xs text-slate-300">
-                                  {criterion.criterion.replace(/_/g, " ")}
-                                </div>
-                                <div className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                  criterion.passed ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
-                                }`}>
-                                  {Math.round(criterion.score * 100)}%
-                                </div>
-                              </div>
-                              <div className="text-[11px] text-slate-500 mt-1">
-                                {criterion.details}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+      {/* Gallery Modal - Using new GalleryModal component */}
+      {projectId && (
+        <GalleryModal
+          projectId={projectId}
+          isOpen={isGalleryOpen}
+          onClose={closeGallery}
+        />
       )}
     </main>
   );

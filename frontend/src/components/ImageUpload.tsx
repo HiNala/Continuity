@@ -7,9 +7,10 @@ interface ImageUploadProps {
   images: string[];
   onImagesChange: (images: string[]) => void;
   maxImages?: number;
+  onFilesSelected?: (files: File[], previewUrls: string[]) => void;
 }
 
-export function ImageUpload({ images, onImagesChange, maxImages = 5 }: ImageUploadProps) {
+export function ImageUpload({ images, onImagesChange, maxImages = 5, onFilesSelected }: ImageUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [loadingImages, setLoadingImages] = useState<Set<number>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -30,7 +31,8 @@ export function ImageUpload({ images, onImagesChange, maxImages = 5 }: ImageUplo
 
     const files = Array.from(e.dataTransfer.files);
     const imageFiles = files.filter(f => f.type.startsWith("image/"));
-    const newUrls = imageFiles.slice(0, maxImages - images.length).map(f => URL.createObjectURL(f));
+    const selectedFiles = imageFiles.slice(0, maxImages - images.length);
+    const newUrls = selectedFiles.map(f => URL.createObjectURL(f));
     
     // Mark new images as loading
     const startIdx = images.length;
@@ -39,11 +41,13 @@ export function ImageUpload({ images, onImagesChange, maxImages = 5 }: ImageUplo
     setLoadingImages(newLoading);
     
     onImagesChange([...images, ...newUrls]);
+    onFilesSelected?.(selectedFiles, newUrls);
   }, [images, maxImages, onImagesChange, loadingImages]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    const newUrls = files.slice(0, maxImages - images.length).map(f => URL.createObjectURL(f));
+    const selectedFiles = files.slice(0, maxImages - images.length);
+    const newUrls = selectedFiles.map(f => URL.createObjectURL(f));
     
     const startIdx = images.length;
     const newLoading = new Set(loadingImages);
@@ -51,6 +55,7 @@ export function ImageUpload({ images, onImagesChange, maxImages = 5 }: ImageUplo
     setLoadingImages(newLoading);
     
     onImagesChange([...images, ...newUrls]);
+    onFilesSelected?.(selectedFiles, newUrls);
     if (e.target) e.target.value = "";
   }, [images, maxImages, onImagesChange, loadingImages]);
 

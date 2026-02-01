@@ -6,10 +6,11 @@ Handles project creation, requirements gathering, spatial analysis, and project 
 import asyncio
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Dict, Any, Optional, AsyncGenerator
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,10 @@ router = APIRouter(prefix="/api/projects", tags=["Projects"])
 # ============================================
 # Request/Response Models
 # ============================================
+class UploadImagesResponse(BaseModel):
+    """Response after uploading images."""
+    images: List[Dict[str, str]]
+
 class CreateProjectRequest(BaseModel):
     """Request to create a new project."""
     goal: str = Field(..., min_length=1, max_length=5000, description="The user's goal for the visualization")
@@ -179,6 +184,49 @@ class ProjectResponse(BaseModel):
 # ============================================
 # API Endpoints
 # ============================================
+@router.post("/upload", response_model=UploadImagesResponse)
+async def upload_images(
+    files: List[UploadFile] = File(...)
+):
+    """
+    Upload one or more images and return local paths + public URLs.
+    Images are stored in the `uploaded_images` directory.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    upload_dir = Path("uploaded_images")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    uploaded: List[Dict[str, str]] = []
+    for file in files:
+        if not file.content_type or not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="Only image files are allowed")
+
+        suffix = Path(file.filename or "").suffix.lower()
+        if not suffix:
+            # Fallback based on content type
+            suffix = {
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/webp": ".webp",
+            }.get(file.content_type, ".jpg")
+
+        filename = f"upload_{uuid4().hex}{suffix}"
+        file_path = upload_dir / filename
+
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Empty file upload")
+
+        file_path.write_bytes(content)
+        uploaded.append({
+            "path": str(file_path),
+            "url": f"/uploaded_images/{filename}",
+        })
+
+    return UploadImagesResponse(images=uploaded)
+
 @router.post("", response_model=CreateProjectResponse)
 async def create_project(
     request: CreateProjectRequest,

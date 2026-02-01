@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import weave
+import os
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -95,8 +97,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Ensure static file directories exist before mounting
+os.makedirs("generated_images", exist_ok=True)
+os.makedirs("uploaded_images", exist_ok=True)
+
 # Serve generated images from the local output directory
 app.mount("/generated_images", StaticFiles(directory="generated_images"), name="generated_images")
+# Serve uploaded images for processing
+app.mount("/uploaded_images", StaticFiles(directory="uploaded_images"), name="uploaded_images")
 
 
 # ============================================

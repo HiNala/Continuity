@@ -149,6 +149,7 @@ coverage/
 uploads/
 generated/
 generated_images/
+uploaded_images/
 outputs/
 *.generated.*
 

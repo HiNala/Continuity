@@ -21,6 +21,10 @@ export interface CreateProjectResponse {
   message: string;
 }
 
+export interface UploadImagesResponse {
+  images: Array<{ path: string; url: string }>;
+}
+
 export interface QuestionOption {
   answer_id: string;
   answer_text: string;
@@ -100,6 +104,27 @@ export async function createProject(
   }
 
   return response.json();
+}
+
+/**
+ * Upload images to the backend and return their URLs.
+ */
+export async function uploadImages(files: File[]): Promise<string[]> {
+  const formData = new FormData();
+  files.forEach((file) => formData.append("files", file));
+
+  const response = await fetch(`${API_URL}/api/projects/upload`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to upload images");
+  }
+
+  const data: UploadImagesResponse = await response.json();
+  return data.images.map((img) => `${API_URL}${img.url}`);
 }
 
 /**
@@ -764,14 +789,15 @@ export interface OrchestrationResult {
  */
 export async function startOrchestration(
   projectId: string,
-  skipRequirements: boolean = false
+  skipRequirements: boolean = false,
+  batchMode: boolean = true
 ): Promise<OrchestrationResult> {
   const response = await fetch(
     `${API_URL}/api/projects/${projectId}/start`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ skip_requirements: skipRequirements }),
+      body: JSON.stringify({ skip_requirements: skipRequirements, batch_mode: batchMode }),
     }
   );
 

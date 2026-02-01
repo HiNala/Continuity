@@ -548,11 +548,19 @@ class Orchestrator:
         Each scene gets its own spatial analysis and generation phases.
         """
         scene.status = SceneStatus.ANALYZING
+        scene.orchestration_state = OrchestrationState.ANALYZING_SPACE
         scene.started_at = datetime.now(timezone.utc)
         await self.session.flush()
         
         try:
             # Step 1: Spatial analysis for this scene
+            await self._log_batch_event(
+                scene=scene,
+                to_state=OrchestrationState.ANALYZING_SPACE,
+                trigger=OrchestrationTrigger.START,
+                message=f"Analyzing scene {scene.scene_index + 1} of {self.project.total_scenes}",
+                details={"scene_index": scene.scene_index, "input_image": scene.input_image_path},
+            )
             analysis_result = await spatial_agent.analyze_images(
                 self.session,
                 self.project_id,
@@ -596,6 +604,14 @@ class Orchestrator:
             scene.status = SceneStatus.COMPLETED
             scene.completed_at = datetime.now(timezone.utc)
             scene.orchestration_state = OrchestrationState.COMPLETED
+
+            await self._log_batch_event(
+                scene=scene,
+                to_state=OrchestrationState.COMPLETED,
+                trigger=OrchestrationTrigger.SUCCESS,
+                message=f"Scene {scene.scene_index + 1} completed successfully",
+                details={"output_image": scene.output_image_path, "space_type": scene.space_type_detected},
+            )
             
             return {
                 "scene_id": str(scene.id),
@@ -609,6 +625,13 @@ class Orchestrator:
             scene.status = SceneStatus.FAILED
             scene.error_message = str(e)
             scene.orchestration_state = OrchestrationState.FAILED
+            await self._log_batch_event(
+                scene=scene,
+                to_state=OrchestrationState.FAILED,
+                trigger=OrchestrationTrigger.FAILURE,
+                message=f"Scene {scene.scene_index + 1} failed: {str(e)}",
+                details={"error": str(e)},
+            )
             return {
                 "scene_id": str(scene.id),
                 "status": SceneStatus.FAILED,
@@ -634,9 +657,30 @@ class Orchestrator:
         max_retries = self.config.MAX_RETRIES_PER_PHASE
         last_policy_id = policy.get("id")  # Track for improvement verification
         policy_changed = False
+        if not scene.metadata_:
+            scene.metadata_ = {}
+        score_progression = scene.metadata_.get("score_progression", {})
         
         for attempt in range(max_retries + 1):
             try:
+                scene.retry_count = max(scene.retry_count or 0, attempt)
+                if attempt > 0:
+                    await self._log_batch_event(
+                        scene=scene,
+                        to_state=f"retrying_{phase}",
+                        trigger=OrchestrationTrigger.MAX_RETRIES,
+                        message=f"Retrying {phase} for scene {scene.scene_index + 1} (attempt {attempt + 1}/{max_retries + 1})",
+                        details={"attempt": attempt + 1, "phase": phase},
+                    )
+
+                await self._log_batch_event(
+                    scene=scene,
+                    to_state=f"generating_{phase}",
+                    trigger=OrchestrationTrigger.START,
+                    message=f"Generating {phase} for scene {scene.scene_index + 1}",
+                    details={"attempt": attempt + 1, "phase": phase},
+                )
+
                 if phase == GenerationPhase.CLEANUP:
                     result = await generation_agent.execute_cleanup_phase(
                         self.session, self.project_id, input_image, policy, constraints,
@@ -663,9 +707,32 @@ class Orchestrator:
                     # Evaluate result
                     iteration_id = result.get("iteration_id")
                     if iteration_id:
+                        await self._log_batch_event(
+                            scene=scene,
+                            to_state=f"evaluating_{phase}",
+                            trigger=OrchestrationTrigger.START,
+                            message=f"Evaluating {phase} for scene {scene.scene_index + 1}",
+                            details={"iteration_id": str(iteration_id), "phase": phase, "attempt": attempt + 1},
+                        )
                         eval_result = await qc_agent.compute_overall_evaluation(
                             self.session, iteration_id
                         )
+                        evaluations = eval_result.get("evaluations", [])
+                        failed_details = [
+                            {
+                                "criterion": e.get("criterion"),
+                                "details": e.get("details"),
+                                "score": e.get("score"),
+                                "passed": e.get("passed"),
+                            }
+                            for e in evaluations
+                            if not e.get("passed")
+                        ]
+                        prev_score = score_progression.get(phase)
+                        score = eval_result.get("overall_score")
+                        if score is not None:
+                            score_progression[phase] = score
+                            scene.metadata_["score_progression"] = score_progression
                         
                         if eval_result.get("passed"):
                             # SUCCESS! If we had a policy change, mark it as effective
@@ -673,24 +740,83 @@ class Orchestrator:
                                 await qc_agent.mark_improvement_effective(
                                     self.session, self.project_id, policy["id"], effective=True
                                 )
+                            await self._log_batch_event(
+                                scene=scene,
+                                to_state=f"generating_{phase}",
+                                trigger=OrchestrationTrigger.SUCCESS,
+                                message=f"{phase.capitalize()} passed QC for scene {scene.scene_index + 1}",
+                                details={
+                                    "iteration_id": str(iteration_id),
+                                    "phase": phase,
+                                    "evaluation_passed": True,
+                                    "score": score,
+                                    "previous_score": prev_score,
+                                    "score_delta": score - prev_score if score is not None and prev_score is not None else None,
+                                    "evaluations": evaluations,
+                                    "output_path": result.get("output_path"),
+                                },
+                            )
                             return result
                         
                         # Failed evaluation - try to improve policy
                         if attempt < max_retries:
                             analysis = await qc_agent.analyze_failure(self.session, iteration_id)
                             changes = analysis.get("recommended_changes", [])
+                            human_reason = analysis.get("insights", [])
+                            human_reason = human_reason[0] if human_reason else None
+                            changes_applied = changes
+
                             if changes:
                                 policy_result = await qc_agent.apply_policy_changes(
                                     self.session, self.project_id, changes, iteration_id
                                 )
                                 policy = await generation_agent.load_policy(self.session, self.project_id)
                                 policy_changed = True
+                                changes_applied = policy_result.get("changes_applied", changes)
                                 
                                 # Track that policy was updated for this scene
                                 if not scene.metadata_:
                                     scene.metadata_ = {}
                                 scene.metadata_["policy_improvements"] = scene.metadata_.get("policy_improvements", 0) + 1
                                 scene.metadata_["last_improvement_phase"] = phase
+                            await self._log_batch_event(
+                                scene=scene,
+                                to_state=f"retrying_{phase}",
+                                trigger=OrchestrationTrigger.FAILURE,
+                                message=f"{phase.capitalize()} failed QC for scene {scene.scene_index + 1}. Applying policy improvements.",
+                                details={
+                                    "iteration_id": str(iteration_id),
+                                    "phase": phase,
+                                    "evaluation_passed": False,
+                                    "score": score,
+                                    "previous_score": prev_score,
+                                    "score_delta": score - prev_score if score is not None and prev_score is not None else None,
+                                    "evaluations": evaluations,
+                                    "failure_details": failed_details,
+                                    "human_readable_reason": human_reason or (failed_details[0].get("details") if failed_details else None),
+                                    "policy_changes": changes_applied,
+                                    "output_path": result.get("output_path"),
+                                },
+                            )
+                        else:
+                            await self._log_batch_event(
+                                scene=scene,
+                                to_state=f"retrying_{phase}",
+                                trigger=OrchestrationTrigger.MAX_RETRIES,
+                                message=f"{phase.capitalize()} failed QC for scene {scene.scene_index + 1}. Max retries reached.",
+                                details={
+                                    "iteration_id": str(iteration_id),
+                                    "phase": phase,
+                                    "evaluation_passed": False,
+                                    "score": score,
+                                    "previous_score": prev_score,
+                                    "score_delta": score - prev_score if score is not None and prev_score is not None else None,
+                                    "evaluations": evaluations,
+                                    "failure_details": failed_details,
+                                    "human_readable_reason": (failed_details[0].get("details") if failed_details else None),
+                                    "output_path": result.get("output_path"),
+                                },
+                            )
                     else:
                         return result
                         
@@ -705,6 +831,33 @@ class Orchestrator:
             )
         
         return {"error": "Max retries exceeded"}
+
+    async def _log_batch_event(
+        self,
+        scene: Scene,
+        to_state: str,
+        trigger: str,
+        message: str,
+        details: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Log a batch event without mutating project-level state."""
+        from_state = scene.orchestration_state or OrchestrationState.CREATED
+        scene.orchestration_state = to_state
+        log_entry = OrchestrationLog(
+            project_id=self.project_id,
+            from_state=from_state,
+            to_state=to_state,
+            trigger=trigger,
+            details={
+                "message": message,
+                "scene_id": str(scene.id),
+                "scene_index": scene.scene_index,
+                **(details or {}),
+            },
+            duration_ms=None,
+        )
+        self.session.add(log_entry)
+        await self.session.flush()
     
     async def load_project(self) -> Project:
         """Load project from database."""

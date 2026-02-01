@@ -29,6 +29,7 @@ import {
   getAgentReasoning,
   getIterations,
   getIterationEvaluation,
+  uploadImages,
   getProjectGallery,
   type GalleryResponse,
   type GalleryAttempt,
@@ -542,15 +543,21 @@ export default function ContinuityApp() {
 
           if (toState.includes("generating_") && !event.details?.evaluation_passed) {
             const retryNumber = event.details?.retry_number as number | undefined;
-            const attemptNumber = retryNumber ? retryNumber + 1 : (lastAttemptByPhaseRef.current[phaseKey] || 0) + 1;
+            const attemptFromEvent = event.details?.attempt as number | undefined;
+            const attemptNumber = attemptFromEvent ?? (retryNumber ? retryNumber + 1 : (lastAttemptByPhaseRef.current[phaseKey] || 0) + 1);
             lastAttemptByPhaseRef.current[phaseKey] = attemptNumber;
 
-            const changes = event.details?.changes_applied as Array<Record<string, unknown>> | undefined;
+            const changes = (event.details?.policy_changes || event.details?.changes_applied) as Array<Record<string, unknown>> | undefined;
             if (changes && changes.length > 0) {
               const changeLines = changes.map((change) => `• ${formatPolicyChange(change)}`).join("\n");
               addChatMessage({
                 type: "assistant",
                 content: `🔧 **Improving Approach**\n\nBased on the evaluation, I'm adjusting:\n${changeLines}\n\nRetrying ${phaseLabel} phase...`,
+              });
+            } else if (attemptNumber > 1) {
+              addChatMessage({
+                type: "assistant",
+                content: `🔧 **Improving Approach**\n\nRefining strategy based on QC feedback.\n\nRetrying ${phaseLabel} phase...`,
               });
             }
 
@@ -561,7 +568,7 @@ export default function ContinuityApp() {
           }
 
           if (toState.includes("evaluating_")) {
-            const outputPath = event.details?.output_path as string | undefined;
+            const outputPath = (event.details?.output_path || event.details?.output_image) as string | undefined;
             addChatMessage({
               type: "assistant",
               content: `🧪 **Evaluating ${phaseLabel}** — checking constraints, geometry, hallucinations, style, and completeness...`,
@@ -1374,20 +1381,18 @@ export default function ContinuityApp() {
     setIsLoading(true);
     setError(null);
     
-    // Process images
+    // Process images (upload to backend and use returned URLs)
     const imageUrls: string[] = [];
     if (files && files.length > 0) {
-      for (const file of files) {
-        const reader = new FileReader();
-        await new Promise<void>((resolve) => {
-          reader.onload = (e) => {
-            imageUrls.push(e.target?.result as string);
-            resolve();
-          };
-          reader.readAsDataURL(file);
-        });
+      try {
+        const uploaded = await uploadImages(files);
+        imageUrls.push(...uploaded);
+        setUploadedImages(imageUrls);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Image upload failed");
+        setIsLoading(false);
+        return;
       }
-      setUploadedImages(imageUrls);
     }
 
     // Add user message to chat
@@ -1641,7 +1646,8 @@ export default function ContinuityApp() {
     });
 
     try {
-      await startOrchestration(pId);
+      const isBatch = uploadedImages.length > 1;
+      await startOrchestration(pId, false, isBatch);
       
       updateAgentCard(orchestrateCardId, {
         status: "completed",
