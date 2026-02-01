@@ -383,9 +383,9 @@ This project is organized into missions for the hackathon:
 - **Docker Compose** — Multi-container orchestration
 
 ### AI & Observability
-- **Google Gemini (Nano Banana Pro)** — Image generation and vision analysis (defaults to `gemini-3-pro-image-preview`)
-- **Weave (W&B)** — LLM observability and tracing
-- **Browserbase** — Web automation
+- **Google Gemini (Nano Banana Pro)** — Image generation (`gemini-3-pro-image-preview`) and vision analysis (`gemini-2.0-flash`)
+- **Weave (W&B)** — LLM observability, tracing, and the learning substrate for self-improvement
+- **Browserbase** — Web automation platform for future expansion
 
 ---
 
@@ -399,21 +399,56 @@ Weave is not just used for logging — it's the **core mechanism** that enables 
 
 **How Weave Enables Self-Improvement:**
 1. **Trace Capture**: Every Gemini API call, constraint analysis, and generation phase is recorded
-2. **QC Analysis**: The Quality Control Agent programmatically queries Weave traces to understand what went wrong
-3. **Policy Modification**: Based on trace analysis, the system modifies its own generation policy
+2. **QC Analysis**: The Quality Control Agent programmatically analyzes evaluation results to understand what went wrong
+3. **Policy Modification**: Based on failure analysis, the system modifies its own generation policy (prompts, creativity levels, constraint emphasis)
 4. **Feedback Loop**: Next generation uses updated policy, creating a genuine improvement loop
-5. **Trace-Linked UI**: The frontend surfaces a Weave trace link in the Agent Activity panel after a run completes
+5. **Improvement Recording**: Every policy change is traced with `weave_record_improvement` for visibility
+6. **Trace-Linked UI**: The frontend surfaces a Weave trace link in the Agent Activity panel after a run completes
+
+**The Self-Improvement Loop:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    SELF-IMPROVEMENT LOOP                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   1. GENERATE                                                   │
+│      └─> Generation Agent creates images using current policy   │
+│          └─> Traced via @weave.op("gemini_generate_image")     │
+│                                                                 │
+│   2. EVALUATE                                                   │
+│      └─> QC Agent scores output on 5 criteria                   │
+│          └─> Traced via @weave.op("qc_compute_overall_evaluation")│
+│                                                                 │
+│   3. ANALYZE FAILURES                                           │
+│      └─> If score < 0.7, analyze what went wrong               │
+│          └─> Traced via @weave.op("qc_analyze_failure")        │
+│                                                                 │
+│   4. MODIFY POLICY                                              │
+│      └─> Apply specific, targeted changes to prompts/settings  │
+│          └─> Traced via @weave.op("qc_apply_policy_changes")   │
+│          └─> Recorded via weave_record_improvement()           │
+│                                                                 │
+│   5. RETRY WITH NEW POLICY                                      │
+│      └─> Loop back to step 1 with improved configuration       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 **Recommended Weave Setup:**
 - Set `WANDB_ENTITY` (optional) and `WEAVE_PROJECT_NAME` to ensure traces land in the right workspace
-- For image outputs, Continuity saves generated images to disk and returns paths in traces
+- For image outputs, Continuity logs generated images to Weave via `log_image_media()` for visualization
 
 **What Gets Traced:**
-- `requirements_agent_analyze_goal` — Goal parsing and question generation
-- `spatial_agent_analyze_image` — Constraint extraction from images
-- `gemini_generate_image` — Every image generation call with prompts
-- `qc_compute_overall_evaluation` — Quality assessments
-- `orchestrator_run_pipeline` — Full pipeline orchestration
+| Operation | Weave Op Name | Purpose |
+|-----------|---------------|---------|
+| Goal analysis | `requirements_agent_analyze_goal` | Parse user intent and generate questions |
+| Image analysis | `spatial_agent_analyze_image` | Extract constraints from photos |
+| Image generation | `gemini_generate_image` | Call Gemini with prompts (logged to Weave UI) |
+| Quality evaluation | `qc_compute_overall_evaluation` | Score outputs on 5 criteria |
+| Failure analysis | `qc_analyze_failure` | Understand what went wrong |
+| Policy changes | `qc_apply_policy_changes` | Modify prompts/settings |
+| Improvement record | `weave_record_improvement` | Track self-improvement events |
+| Pipeline orchestration | `orchestrator_run_pipeline` | Full pipeline coordination |
 
 **View your traces at**: [wandb.ai/home](https://wandb.ai/home)
 
@@ -435,6 +470,40 @@ Redis is used for performance-critical caching and session management:
 - **Real-time Updates**: Orchestration progress is updated without database writes
 
 **Redis Service Location**: `backend/app/redis_service.py`
+
+### Google Gemini (Nano Banana Pro) — Vision & Generation
+
+Continuity uses Google Gemini's cutting-edge models for both image analysis and generation:
+
+**Vision Analysis (Spatial Agent):**
+- Model: `gemini-2.0-flash` (configurable via `GEMINI_VISION_MODEL`)
+- Used for extracting physical constraints from uploaded photos
+- Identifies: plumbing, electrical, HVAC, structural elements
+- Results cached in Redis to avoid redundant API calls
+
+**Image Generation (Generation Agent):**
+- Model: `gemini-3-pro-image-preview` (Nano Banana Pro)
+- Configuration follows latest API spec:
+  ```python
+  generationConfig = {
+      "responseModalities": ["TEXT", "IMAGE"],
+      "imageConfig": {
+          "aspectRatio": "16:9",  # Configurable
+          "imageSize": "2K"       # Options: 1K, 2K, 4K
+      }
+  }
+  ```
+- Four-phase generation: Cleanup → Structural → Fixture → Style
+- Each phase uses constraint-aware prompts to prevent hallucinations
+
+**Environment Variables:**
+```bash
+GEMINI_API_KEY=your_api_key
+GEMINI_VISION_MODEL=gemini-2.0-flash
+GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview
+GEMINI_IMAGE_ASPECT_RATIO=16:9
+GEMINI_IMAGE_SIZE=2K
+```
 
 ### Browserbase — Web Automation Platform
 

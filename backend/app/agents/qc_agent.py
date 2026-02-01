@@ -27,6 +27,7 @@ from app.models import (
     PolicyCreator, ConstraintClassification, GenerationPhase
 )
 from app.redis_service import redis_service
+from app.weave_ops import record_policy_improvement
 
 
 # ============================================
@@ -796,6 +797,17 @@ Return a JSON response:
             await redis_service.invalidate_policy_cache(str(project_id))
         except Exception:
             pass  # Redis unavailable, continue
+        
+        # Record the self-improvement event in Weave traces
+        # This creates a visible record of how the system learns
+        record_policy_improvement(
+            project_id=str(project_id),
+            old_policy_version=old_version,
+            new_policy_version=new_policy.version,
+            changes_made=changes_applied,
+            trigger_reason="evaluation_failure",
+            evaluation_score=0.0  # Will be populated by caller
+        )
         
         return {
             "success": True,

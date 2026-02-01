@@ -29,6 +29,7 @@ from app.models import (
     ProjectStatus, GenerationPhase, IterationStatus, ConstraintClassification
 )
 from app.redis_service import redis_service
+from app.weave_ops import log_image_media
 
 
 # ============================================
@@ -426,7 +427,7 @@ class GenerationAgent:
                         image_payload = part["inlineData"]
                         break
             
-            # For now, return the prompt response (in production, this would be image data)
+            # Process and save any generated image
             output_path = None
             if image_payload and image_payload.get("data"):
                 try:
@@ -440,6 +441,18 @@ class GenerationAgent:
                     output_path = str(self.output_dir / f"gen_{int(time.time())}.{ext}")
                     with open(output_path, "wb") as f:
                         f.write(image_bytes)
+                    
+                    # Log the generated image to Weave for visualization
+                    log_image_media(
+                        output_path,
+                        description=f"Generated image from {self.gemini_model}",
+                        metadata={
+                            "model": self.gemini_model,
+                            "latency_ms": latency_ms,
+                            "aspect_ratio": self.image_aspect_ratio,
+                            "size": self.image_size,
+                        }
+                    )
                 except Exception:
                     output_path = None
 
