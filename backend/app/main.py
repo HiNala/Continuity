@@ -34,13 +34,13 @@ async def lifespan(app: FastAPI):
     
     # Initialize Weave for observability
     if settings.wandb_api_key:
-        if "/" in settings.weave_project_name:
-            weave.init(settings.weave_project_name)
-            print(f"✅ Weave initialized: {settings.weave_project_name}")
-        else:
-            weave.init(settings.weave_project_name, entity=settings.wandb_entity)
-            entity_label = settings.wandb_entity or "default"
-            print(f"✅ Weave initialized: {entity_label}/{settings.weave_project_name}")
+        # Weave project name format: "entity/project" or just "project"
+        project_name = settings.weave_project_name
+        if settings.wandb_entity and "/" not in project_name:
+            project_name = f"{settings.wandb_entity}/{project_name}"
+        
+        weave.init(project_name)
+        print(f"✅ Weave initialized: {project_name}")
     else:
         print("⚠️  WANDB_API_KEY not set - Weave tracing disabled")
     
