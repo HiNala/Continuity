@@ -27,7 +27,7 @@ from app.models import (
     PolicyCreator, ConstraintClassification, GenerationPhase
 )
 from app.redis_service import redis_service
-from app.weave_ops import record_policy_improvement
+from app.weave_ops import record_policy_improvement, record_cross_project_learning
 
 
 # ============================================
@@ -817,6 +817,209 @@ Return a JSON response:
             "changes_applied": changes_applied,
         }
     
+    @weave.op(name="qc_mark_improvement_effective")
+    async def mark_improvement_effective(
+        self,
+        session: AsyncSession,
+        project_id: UUID,
+        policy_id: int,
+        effective: bool = True
+    ) -> bool:
+        """
+        Mark a policy change as effective (the retry succeeded).
+        
+        This is called when:
+        1. A retry after policy change passes evaluation
+        2. The improvement actually helped
+        
+        This enables cross-project learning by identifying
+        which policy changes are genuinely beneficial.
+        """
+        # Find the policy change that created this policy
+        result = await session.execute(
+            select(PolicyChange)
+            .where(and_(
+                PolicyChange.project_id == project_id,
+                PolicyChange.new_policy_id == policy_id
+            ))
+            .order_by(desc(PolicyChange.created_at))
+            .limit(1)
+        )
+        policy_change = result.scalar_one_or_none()
+        
+        if policy_change:
+            policy_change.improvement_observed = effective
+            await session.flush()
+            
+            # Log to Weave for learning
+            record_policy_improvement(
+                project_id=str(project_id),
+                old_policy_version=0,
+                new_policy_version=policy_id,
+                changes_made=policy_change.changes_made or [],
+                trigger_reason="improvement_verified" if effective else "improvement_failed",
+                evaluation_score=1.0 if effective else 0.0
+            )
+            
+            return True
+        
+        return False
+    
+    @weave.op(name="qc_get_effective_patterns")
+    async def get_effective_patterns(
+        self,
+        session: AsyncSession,
+        space_type: Optional[str] = None,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Get policy changes that were proven effective across ALL projects.
+        
+        This enables cross-project learning by:
+        1. Finding patterns that worked in past projects
+        2. Applying those patterns to new projects automatically
+        
+        Args:
+            space_type: Optional filter by space type (bathroom, kitchen, etc.)
+            limit: Maximum number of patterns to return
+            
+        Returns:
+            List of effective policy change patterns
+        """
+        # Query successful policy changes
+        query = (
+            select(PolicyChange)
+            .where(PolicyChange.improvement_observed.is_(True))
+            .order_by(desc(PolicyChange.created_at))
+            .limit(limit)
+        )
+        
+        result = await session.execute(query)
+        changes = result.scalars().all()
+        
+        # Aggregate patterns by type
+        patterns = {}
+        for change in changes:
+            if change.changes_made:
+                for mod in change.changes_made:
+                    mod_type = mod.get("type", "unknown")
+                    if mod_type not in patterns:
+                        patterns[mod_type] = {
+                            "type": mod_type,
+                            "occurrences": 0,
+                            "examples": [],
+                        }
+                    patterns[mod_type]["occurrences"] += 1
+                    patterns[mod_type]["examples"].append({
+                        "project_id": str(change.project_id),
+                        "change": mod,
+                    })
+        
+        return list(patterns.values())
+    
+    @weave.op(name="qc_seed_policy_from_learnings")
+    async def seed_policy_from_learnings(
+        self,
+        session: AsyncSession,
+        project_id: UUID,
+        space_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create an initial policy for a new project using learned patterns.
+        
+        This is called when starting a new project to give it a head start
+        based on what worked in similar past projects.
+        
+        Args:
+            project_id: The new project ID
+            space_type: The space type being processed
+            
+        Returns:
+            The seeded policy configuration
+        """
+        # Get effective patterns
+        patterns = await self.get_effective_patterns(session, space_type=space_type)
+        
+        if not patterns:
+            return {"seeded": False, "reason": "No learned patterns available"}
+        
+        # Start with default configuration
+        from app.agents.generation_agent import DEFAULT_POLICY
+        
+        new_config = {
+            "cleanup_config": dict(DEFAULT_POLICY["cleanup_config"]),
+            "structural_config": dict(DEFAULT_POLICY["structural_config"]),
+            "fixture_config": dict(DEFAULT_POLICY["fixture_config"]),
+            "style_config": dict(DEFAULT_POLICY["style_config"]),
+        }
+        
+        changes_applied = []
+        
+        # Apply learned patterns
+        for pattern in patterns:
+            if pattern["type"] == "constraint_emphasis" and pattern["occurrences"] >= 2:
+                # If constraint issues are common, start with high emphasis
+                for key in new_config:
+                    new_config[key]["constraint_emphasis"] = "high"
+                changes_applied.append({
+                    "type": "constraint_emphasis",
+                    "value": "high",
+                    "reason": f"Learned from {pattern['occurrences']} past projects"
+                })
+            
+            elif pattern["type"] == "creativity_reduction" and pattern["occurrences"] >= 2:
+                # If hallucinations are common, start with lower creativity
+                for key in new_config:
+                    new_config[key]["creativity_level"] = 0.4
+                changes_applied.append({
+                    "type": "creativity_level",
+                    "value": 0.4,
+                    "reason": f"Learned from {pattern['occurrences']} past projects"
+                })
+        
+        if not changes_applied:
+            return {"seeded": False, "reason": "No applicable patterns found"}
+        
+        # Create the seeded policy
+        seeded_policy = Policy(
+            project_id=project_id,
+            version=1,
+            cleanup_config=new_config["cleanup_config"],
+            structural_config=new_config["structural_config"],
+            fixture_config=new_config["fixture_config"],
+            style_config=new_config["style_config"],
+            created_by=PolicyCreator.SYSTEM,
+            notes=f"Seeded from {len(changes_applied)} learned patterns",
+            is_active=True,
+        )
+        session.add(seeded_policy)
+        await session.flush()
+        
+        # Log to Weave
+        record_policy_improvement(
+            project_id=str(project_id),
+            old_policy_version=0,
+            new_policy_version=1,
+            changes_made=changes_applied,
+            trigger_reason="cross_project_learning",
+            evaluation_score=0.0
+        )
+        
+        # Also log as cross-project learning event
+        record_cross_project_learning(
+            source_project_id="aggregated_patterns",
+            target_project_id=str(project_id),
+            patterns_transferred=changes_applied,
+            space_type=space_type
+        )
+        
+        return {
+            "seeded": True,
+            "policy_id": seeded_policy.id,
+            "changes_applied": changes_applied,
+            "patterns_used": len(patterns),
+        }
+    
     @weave.op(name="qc_get_policy_history")
     async def get_policy_history(
         self,
@@ -842,6 +1045,7 @@ Return a JSON response:
                 "trigger_reason": c.trigger_reason,
                 "changes_made": c.changes_made,
                 "rationale": c.rationale,
+                "improvement_observed": c.improvement_observed,
                 "created_at": c.created_at.isoformat(),
             }
             for c in changes

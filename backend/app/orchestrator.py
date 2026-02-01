@@ -26,6 +26,7 @@ from app.agents.requirements_agent import requirements_agent
 from app.agents.spatial_agent import spatial_agent
 from app.agents.generation_agent import generation_agent
 from app.agents.qc_agent import qc_agent
+from app.weave_ops import record_batch_learning, record_cross_project_learning
 
 
 # ============================================
@@ -245,12 +246,15 @@ class Orchestrator:
     @weave.op(name="orchestrator_run_batch")
     async def run_batch(self) -> Dict[str, Any]:
         """
-        Process all scenes in a batch project.
+        Process all scenes in a batch project with cross-scene learning.
         
         This is the main entry point for batch processing:
         1. Requirements are gathered ONCE for the entire batch
-        2. Each image is then processed independently through the pipeline
-        3. Progress is tracked per-scene and for the overall batch
+        2. Policy is SEEDED from past successful projects (cross-project learning)
+        3. Each image is processed independently through the pipeline
+        4. Policy improvements from early scenes benefit later scenes
+        5. Progress is tracked per-scene and for the overall batch
+        6. Learning summary is generated at the end
         """
         await self.load_project()
         
@@ -273,9 +277,25 @@ class Orchestrator:
         # Step 1: Requirements gathering (once for entire batch)
         await self._ensure_requirements_complete()
         
-        # Step 2: Process each scene
+        # Step 2: Seed policy from cross-project learnings
+        learning_summary = {"seeded_from_past": False, "improvements_made": 0, "scenes_benefited": []}
+        try:
+            requirements = await generation_agent.load_requirements(self.session, self.project_id)
+            space_type = requirements.get("space_type") if requirements else None
+            
+            seed_result = await qc_agent.seed_policy_from_learnings(
+                self.session, self.project_id, space_type=space_type
+            )
+            if seed_result.get("seeded"):
+                learning_summary["seeded_from_past"] = True
+                learning_summary["seed_details"] = seed_result
+        except Exception as e:
+            # Log but don't fail - seeding is enhancement only
+            print(f"Policy seeding failed: {e}")
+        
+        # Step 3: Process each scene with cross-scene learning
         results = []
-        for scene in scenes:
+        for idx, scene in enumerate(scenes):
             if scene.status in [SceneStatus.COMPLETED, SceneStatus.SKIPPED]:
                 results.append({
                     "scene_id": str(scene.id),
@@ -287,6 +307,16 @@ class Orchestrator:
             self._current_scene = scene
             scene_result = await self._process_scene(scene)
             results.append(scene_result)
+            
+            # Track policy improvements for learning summary
+            if scene.metadata_ and scene.metadata_.get("policy_improvements"):
+                learning_summary["improvements_made"] += scene.metadata_["policy_improvements"]
+                # Scenes after this one will benefit from the improved policy
+                if idx < len(scenes) - 1:
+                    learning_summary["scenes_benefited"].extend([
+                        str(s.id) for s in scenes[idx+1:] 
+                        if s.status not in [SceneStatus.COMPLETED, SceneStatus.SKIPPED]
+                    ])
             
             # Update project progress
             if scene_result.get("status") == SceneStatus.COMPLETED:
@@ -309,12 +339,27 @@ class Orchestrator:
         
         await self.session.commit()
         
+        # Compile final learning summary
+        learning_summary["scenes_benefited"] = list(set(learning_summary["scenes_benefited"]))
+        
+        # Record batch learning to Weave for observability
+        record_batch_learning(
+            project_id=str(self.project_id),
+            total_scenes=self.project.total_scenes,
+            completed_scenes=self.project.completed_scenes,
+            improvements_made=learning_summary["improvements_made"],
+            scenes_benefited=learning_summary["scenes_benefited"],
+            seeded_from_past=learning_summary["seeded_from_past"],
+            effective_patterns=learning_summary.get("seed_details", {}).get("changes_applied", [])
+        )
+        
         return {
             "success": True,
             "project_id": str(self.project_id),
             "total_scenes": self.project.total_scenes,
             "completed_scenes": self.project.completed_scenes,
             "results": results,
+            "learning_summary": learning_summary,
         }
     
     async def _ensure_requirements_complete(self) -> None:
@@ -403,7 +448,7 @@ class Orchestrator:
         phase: str,
         input_image: str
     ) -> Dict[str, Any]:
-        """Run a single generation phase for a scene with retries."""
+        """Run a single generation phase for a scene with retries and learning."""
         scene.current_phase = phase
         await self.session.flush()
         
@@ -414,6 +459,8 @@ class Orchestrator:
         policy = await generation_agent.load_policy(self.session, self.project_id)
         
         max_retries = self.config.MAX_RETRIES_PER_PHASE
+        last_policy_id = policy.get("id")  # Track for improvement verification
+        policy_changed = False
         
         for attempt in range(max_retries + 1):
             try:
@@ -448,6 +495,11 @@ class Orchestrator:
                         )
                         
                         if eval_result.get("passed"):
+                            # SUCCESS! If we had a policy change, mark it as effective
+                            if policy_changed and policy.get("id"):
+                                await qc_agent.mark_improvement_effective(
+                                    self.session, self.project_id, policy["id"], effective=True
+                                )
                             return result
                         
                         # Failed evaluation - try to improve policy
@@ -455,16 +507,29 @@ class Orchestrator:
                             analysis = await qc_agent.analyze_failure(self.session, iteration_id)
                             changes = analysis.get("recommended_changes", [])
                             if changes:
-                                await qc_agent.apply_policy_changes(
+                                policy_result = await qc_agent.apply_policy_changes(
                                     self.session, self.project_id, changes, iteration_id
                                 )
                                 policy = await generation_agent.load_policy(self.session, self.project_id)
+                                policy_changed = True
+                                
+                                # Track that policy was updated for this scene
+                                if not scene.metadata_:
+                                    scene.metadata_ = {}
+                                scene.metadata_["policy_improvements"] = scene.metadata_.get("policy_improvements", 0) + 1
+                                scene.metadata_["last_improvement_phase"] = phase
                     else:
                         return result
                         
             except Exception as e:
                 if attempt == max_retries:
                     return {"error": str(e)}
+        
+        # Max retries exceeded - mark last policy change as ineffective
+        if policy_changed and policy.get("id"):
+            await qc_agent.mark_improvement_effective(
+                self.session, self.project_id, policy["id"], effective=False
+            )
         
         return {"error": "Max retries exceeded"}
     

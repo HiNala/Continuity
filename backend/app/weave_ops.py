@@ -149,3 +149,123 @@ def record_policy_improvement(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "improvement_cycle": "complete",
     }
+
+
+@weave.op(name="weave_record_batch_learning")
+def record_batch_learning(
+    project_id: str,
+    total_scenes: int,
+    completed_scenes: int,
+    improvements_made: int,
+    scenes_benefited: list,
+    seeded_from_past: bool,
+    effective_patterns: list
+) -> Dict[str, Any]:
+    """
+    Record batch processing learning summary in Weave traces.
+    
+    This creates a trace record of cross-scene learning that occurred
+    during batch processing, showing how early scenes' failures led
+    to improvements for later scenes.
+    
+    Args:
+        project_id: The batch project ID
+        total_scenes: Total number of scenes in batch
+        completed_scenes: Number successfully completed
+        improvements_made: Number of policy improvements made
+        scenes_benefited: List of scene IDs that benefited from improvements
+        seeded_from_past: Whether policy was seeded from past projects
+        effective_patterns: Patterns applied from cross-project learning
+        
+    Returns:
+        Record of the batch learning event
+    """
+    return {
+        "event_type": "batch_learning",
+        "project_id": project_id,
+        "batch_stats": {
+            "total_scenes": total_scenes,
+            "completed_scenes": completed_scenes,
+            "success_rate": completed_scenes / total_scenes if total_scenes > 0 else 0,
+        },
+        "learning_metrics": {
+            "improvements_made": improvements_made,
+            "scenes_benefited_count": len(scenes_benefited),
+            "scenes_benefited": scenes_benefited,
+        },
+        "cross_project_learning": {
+            "seeded_from_past": seeded_from_past,
+            "patterns_applied": effective_patterns,
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@weave.op(name="weave_record_cross_project_learning")
+def record_cross_project_learning(
+    source_project_id: str,
+    target_project_id: str,
+    patterns_transferred: list,
+    space_type: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Record cross-project learning event in Weave traces.
+    
+    This creates a trace record when learnings from one project
+    are applied to a new project, showing the system's ability
+    to improve across sessions.
+    
+    Args:
+        source_project_id: Project where patterns were learned
+        target_project_id: Project receiving the patterns
+        patterns_transferred: List of patterns being applied
+        space_type: Space type being processed
+        
+    Returns:
+        Record of the cross-project learning event
+    """
+    return {
+        "event_type": "cross_project_learning",
+        "source_project": source_project_id,
+        "target_project": target_project_id,
+        "space_type": space_type,
+        "patterns_transferred": patterns_transferred,
+        "transfer_count": len(patterns_transferred),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@weave.op(name="weave_record_improvement_verified")
+def record_improvement_verified(
+    project_id: str,
+    policy_id: int,
+    improvement_effective: bool,
+    retry_attempt: int,
+    phase: str
+) -> Dict[str, Any]:
+    """
+    Record when a policy improvement is verified as effective.
+    
+    This creates a trace record confirming whether a policy change
+    actually helped improve generation quality, enabling the system
+    to learn which changes are beneficial.
+    
+    Args:
+        project_id: The project ID
+        policy_id: The policy that was verified
+        improvement_effective: Whether the improvement helped
+        retry_attempt: Which retry attempt succeeded/failed
+        phase: The generation phase being retried
+        
+    Returns:
+        Record of the verification event
+    """
+    return {
+        "event_type": "improvement_verified",
+        "project_id": project_id,
+        "policy_id": policy_id,
+        "verification_result": "effective" if improvement_effective else "ineffective",
+        "retry_attempt": retry_attempt,
+        "phase": phase,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }

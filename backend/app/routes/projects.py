@@ -1512,8 +1512,14 @@ async def generate_orchestration_stream(
     """
     Generator for streaming orchestration progress events.
     Sends Server-Sent Events (SSE) format.
+    
+    Includes batch processing events:
+    - batch_progress: Overall batch completion status
+    - scene_start: Scene processing started
+    - scene_complete: Scene processing completed
+    - learning: Policy improvement or cross-scene learning events
     """
-    from app.models import OrchestrationLog, Project, OrchestrationState
+    from app.models import OrchestrationLog, Project, OrchestrationState, Scene, SceneStatus
     
     def format_sse(event: str, data: dict) -> str:
         """Format data as SSE event."""
@@ -1533,15 +1539,27 @@ async def generate_orchestration_stream(
         })
         return
     
+    # Check if this is a batch project
+    is_batch = project.is_batch and project.total_scenes > 1
+    
     # Send initial state
+    initial_details = {"state": project.orchestration_state, "phase": project.current_phase}
+    if is_batch:
+        initial_details["is_batch"] = True
+        initial_details["total_scenes"] = project.total_scenes
+        initial_details["completed_scenes"] = project.completed_scenes
+    
     yield format_sse("progress", {
         "event": "progress",
         "agent": "orchestrator",
         "action": "starting",
         "message": f"Starting orchestration. Current state: {project.orchestration_state}",
-        "details": {"state": project.orchestration_state, "phase": project.current_phase},
+        "details": initial_details,
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
+    
+    # For batch projects, track scene progress
+    last_scene_status = {} if is_batch else None
     
     # Track last log entry
     last_log_id = None
@@ -1660,12 +1678,114 @@ async def generate_orchestration_stream(
             })
             break
         
+        # For batch projects, check scene progress
+        if is_batch and last_scene_status is not None:
+            scene_result = await session.execute(
+                select(Scene).where(Scene.project_id == project_id).order_by(Scene.scene_index)
+            )
+            scenes = scene_result.scalars().all()
+            
+            for scene in scenes:
+                scene_id = str(scene.id)
+                current_status = scene.status
+                
+                # Check if scene status changed
+                if scene_id not in last_scene_status or last_scene_status[scene_id] != current_status:
+                    if current_status == SceneStatus.ANALYZING:
+                        yield format_sse("scene_start", {
+                            "event": "scene_start",
+                            "agent": "orchestrator",
+                            "action": "scene_processing",
+                            "message": f"Processing scene {scene.scene_index + 1} of {project.total_scenes}",
+                            "details": {
+                                "scene_id": scene_id,
+                                "scene_index": scene.scene_index,
+                                "input_image": scene.input_image_path,
+                                "total_scenes": project.total_scenes,
+                            },
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                    elif current_status == SceneStatus.COMPLETED:
+                        # Check for learning events
+                        learning_info = {}
+                        if scene.metadata_ and scene.metadata_.get("policy_improvements"):
+                            learning_info = {
+                                "improvements_made": scene.metadata_["policy_improvements"],
+                                "learning_applied": True,
+                            }
+                        
+                        yield format_sse("scene_complete", {
+                            "event": "scene_complete",
+                            "agent": "orchestrator",
+                            "action": "scene_success",
+                            "message": f"Scene {scene.scene_index + 1} completed successfully",
+                            "details": {
+                                "scene_id": scene_id,
+                                "scene_index": scene.scene_index,
+                                "output_image": scene.output_image_path,
+                                "space_type": scene.space_type_detected,
+                                **learning_info,
+                            },
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                        
+                        # If learning occurred, emit learning event
+                        if learning_info.get("learning_applied"):
+                            yield format_sse("learning", {
+                                "event": "learning",
+                                "agent": "qc",
+                                "action": "cross_scene_improvement",
+                                "message": f"Policy improved from scene {scene.scene_index + 1} - future scenes will benefit",
+                                "details": {
+                                    "scene_id": scene_id,
+                                    "improvements": learning_info["improvements_made"],
+                                    "benefiting_scenes": project.total_scenes - scene.scene_index - 1,
+                                },
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                    elif current_status == SceneStatus.FAILED:
+                        yield format_sse("scene_error", {
+                            "event": "scene_error",
+                            "agent": "orchestrator",
+                            "action": "scene_failed",
+                            "message": f"Scene {scene.scene_index + 1} failed: {scene.error_message or 'Unknown error'}",
+                            "details": {
+                                "scene_id": scene_id,
+                                "scene_index": scene.scene_index,
+                                "error": scene.error_message,
+                            },
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                    
+                    last_scene_status[scene_id] = current_status
+            
+            # Emit batch progress update
+            await session.refresh(project)
+            if project.completed_scenes > 0:
+                yield format_sse("batch_progress", {
+                    "event": "batch_progress",
+                    "agent": "orchestrator",
+                    "action": "batch_update",
+                    "message": f"Batch progress: {project.completed_scenes}/{project.total_scenes} scenes completed",
+                    "details": {
+                        "completed": project.completed_scenes,
+                        "total": project.total_scenes,
+                        "progress_percent": int((project.completed_scenes / project.total_scenes) * 100),
+                    },
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+        
         # Send heartbeat
         if iteration % 10 == 0:
+            heartbeat_details = {"state": project.orchestration_state}
+            if is_batch:
+                heartbeat_details["completed_scenes"] = project.completed_scenes
+                heartbeat_details["total_scenes"] = project.total_scenes
+            
             yield format_sse("heartbeat", {
                 "event": "heartbeat",
                 "message": "Connection alive",
-                "details": {"state": project.orchestration_state},
+                "details": heartbeat_details,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
         
