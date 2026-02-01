@@ -62,6 +62,8 @@ class ClarifyingQuestion(BaseModel):
     question_text: str
     possible_answers: List[QuestionOption]
     multi_select: bool = False
+    question_type: Optional[str] = None
+    scene_scope: Optional[str] = None
 
 
 class InspirationImage(BaseModel):
@@ -234,8 +236,33 @@ async def analyze_goal(
                 for a in q["possible_answers"]
             ],
             multi_select=q.get("multi_select", False),
+            question_type=q.get("question_type"),
+            scene_scope=q.get("scene_scope"),
         )
         questions.append(question)
+
+    # Add cross-scene batch questions when multiple images are present
+    if project.images and len(project.images) > 1:
+        batch_questions = requirements_agent.generate_batch_questions(
+            analysis,
+            image_analysis=image_analysis
+        )
+        for q in batch_questions:
+            if len(questions) >= requirements_agent.max_questions:
+                break
+            questions.append(
+                ClarifyingQuestion(
+                    question_id=q["question_id"],
+                    question_text=q["question_text"],
+                    possible_answers=[
+                        QuestionOption(answer_id=a["answer_id"], answer_text=a["answer_text"])
+                        for a in q["possible_answers"]
+                    ],
+                    multi_select=q.get("multi_select", False),
+                    question_type=q.get("question_type"),
+                    scene_scope=q.get("scene_scope"),
+                )
+            )
     
     # Build response with auto-detected info
     identified = analysis["identified"]
@@ -1471,6 +1498,39 @@ async def get_project_scenes(
             for s in scenes
         ]
     }
+
+
+@router.get("/{project_id}/batch-patterns")
+async def get_batch_patterns(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Get detected batch patterns across scenes."""
+    orchestrator = Orchestrator(session, project_id)
+    return {
+        "project_id": str(project_id),
+        "patterns": await orchestrator.get_batch_patterns()
+    }
+
+
+@router.get("/{project_id}/batch-insights")
+async def get_batch_insights(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Get cross-scene insights and recommendations."""
+    orchestrator = Orchestrator(session, project_id)
+    return await orchestrator.get_batch_insights()
+
+
+@router.get("/{project_id}/batch-report")
+async def get_batch_report(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Get a comprehensive batch report for demo and QA."""
+    orchestrator = Orchestrator(session, project_id)
+    return await orchestrator.get_batch_report()
 
 
 @router.post("/{project_id}/retry")

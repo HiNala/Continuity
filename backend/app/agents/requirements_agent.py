@@ -688,6 +688,99 @@ class RequirementsAgent:
             questions.append(question)
         
         return questions
+
+    @weave.op(name="requirements_agent_generate_batch_questions")
+    def generate_batch_questions(
+        self,
+        analysis: Dict[str, Any],
+        image_analysis: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate cross-scene questions for batch uploads.
+
+        This avoids repeating per-image questions and focuses on shared
+        preferences or key differences across scenes.
+        """
+        if not image_analysis or not image_analysis.get("analyzed"):
+            return []
+
+        results = image_analysis.get("results", [])
+        if len(results) < 2:
+            return []
+
+        questions: List[Dict[str, Any]] = []
+
+        def add_question(question_id: str, text: str, answers: List[Dict[str, str]], multi_select: bool = False):
+            questions.append({
+                "question_id": question_id,
+                "question_text": text,
+                "possible_answers": answers,
+                "multi_select": multi_select,
+                "question_type": "batch",
+                "scene_scope": "all",
+            })
+
+        # Collect detected space types and construction states
+        space_types = [
+            r.get("space_type", {}).get("detected")
+            for r in results
+            if r.get("space_type", {}).get("detected")
+        ]
+        construction_states = [
+            r.get("construction_state", {}).get("state")
+            for r in results
+            if r.get("construction_state", {}).get("state")
+        ]
+
+        unique_spaces = sorted(set(space_types))
+        if len(unique_spaces) > 1:
+            add_question(
+                "batch_unify_style",
+                f"These images span multiple space types ({', '.join(s.replace('_', ' ') for s in unique_spaces)}). Should the style be consistent across all scenes or tailored per space?",
+                [
+                    {"answer_id": "consistent", "answer_text": "Use a consistent style across all scenes"},
+                    {"answer_id": "tailored", "answer_text": "Tailor the style per space type"},
+                ]
+            )
+
+        if len(set(construction_states)) > 1:
+            add_question(
+                "batch_construction_priority",
+                "The batch includes scenes with different construction states. Which should we prioritize for the strongest transformations?",
+                [
+                    {"answer_id": "unfinished", "answer_text": "Unfinished spaces"},
+                    {"answer_id": "partially_complete", "answer_text": "Partially complete spaces"},
+                    {"answer_id": "existing_finish", "answer_text": "Existing finished spaces"},
+                    {"answer_id": "all_equal", "answer_text": "Treat all scenes equally"},
+                ]
+            )
+
+        # Style preference for the batch if not already identified
+        if not analysis.get("identified", {}).get("styles"):
+            add_question(
+                "batch_style_targets",
+                "What styles should apply across the batch? (Select up to 3)",
+                STYLE_QUESTION["possible_answers"],
+                multi_select=True,
+            )
+
+        # Budget/priority question to avoid repetition
+        if not analysis.get("identified", {}).get("budget"):
+            add_question(
+                "batch_budget_tier",
+                "For this set of images, what budget tier should guide all scenes?",
+                BUDGET_QUESTION["possible_answers"],
+            )
+
+        # Accessibility question if any scene suggests features
+        if image_analysis.get("accessibility_visible"):
+            add_question(
+                "batch_accessibility",
+                "We noticed accessibility features in at least one image. Should the entire batch be ADA/accessibility compliant?",
+                ACCESSIBILITY_QUESTION["possible_answers"],
+            )
+
+        return questions
     
     @weave.op(name="requirements_agent_process_responses")
     def process_responses(

@@ -9,6 +9,8 @@ It handles retries, policy updates, and ensures deterministic termination.
 """
 
 import time
+import asyncio
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from uuid import UUID
@@ -20,8 +22,9 @@ from sqlalchemy import select
 from app.models import (
     Project, Requirements, OrchestrationLog, Iteration, Scene,
     OrchestrationState, OrchestrationTrigger, GenerationPhase,
-    ProjectStatus, SceneStatus
+    ProjectStatus, SceneStatus, Constraint, EvaluationDetail
 )
+from app.database import AsyncSessionLocal
 from app.agents.requirements_agent import requirements_agent
 from app.agents.spatial_agent import spatial_agent
 from app.agents.generation_agent import generation_agent
@@ -38,6 +41,7 @@ class OrchestrationConfig:
     EVALUATION_THRESHOLD: float = 0.7
     TIMEOUT_SECONDS: int = 300
     AUTO_ADVANCE_ON_MAX_RETRY: bool = True
+    BATCH_CONCURRENCY: int = 3
 
 
 # ============================================
@@ -295,34 +299,50 @@ class Orchestrator:
         
         # Step 3: Process each scene with cross-scene learning
         results = []
+        pending_scenes = [s for s in scenes if s.status not in [SceneStatus.COMPLETED, SceneStatus.SKIPPED]]
+        if pending_scenes and self.config.BATCH_CONCURRENCY > 1:
+            results = await self._process_scenes_concurrently(pending_scenes)
+        else:
+            for idx, scene in enumerate(scenes):
+                if scene.status in [SceneStatus.COMPLETED, SceneStatus.SKIPPED]:
+                    results.append({
+                        "scene_id": str(scene.id),
+                        "status": scene.status,
+                        "output": scene.output_image_path,
+                    })
+                    continue
+
+                self._current_scene = scene
+                scene_result = await self._process_scene(scene)
+                results.append(scene_result)
+
+                # Track policy improvements for learning summary
+                if scene.metadata_ and scene.metadata_.get("policy_improvements"):
+                    learning_summary["improvements_made"] += scene.metadata_["policy_improvements"]
+                    # Scenes after this one will benefit from the improved policy
+                    if idx < len(scenes) - 1:
+                        learning_summary["scenes_benefited"].extend([
+                            str(s.id) for s in scenes[idx+1:]
+                            if s.status not in [SceneStatus.COMPLETED, SceneStatus.SKIPPED]
+                        ])
+
+                # Update project progress
+                if scene_result.get("status") == SceneStatus.COMPLETED:
+                    self.project.completed_scenes += 1
+
+                await self.session.flush()
+
+        # Reload scenes to compute accurate progress and improvements
+        scenes = await self.get_scenes()
+        self.project.completed_scenes = sum(1 for s in scenes if s.status == SceneStatus.COMPLETED)
         for idx, scene in enumerate(scenes):
-            if scene.status in [SceneStatus.COMPLETED, SceneStatus.SKIPPED]:
-                results.append({
-                    "scene_id": str(scene.id),
-                    "status": scene.status,
-                    "output": scene.output_image_path,
-                })
-                continue
-            
-            self._current_scene = scene
-            scene_result = await self._process_scene(scene)
-            results.append(scene_result)
-            
-            # Track policy improvements for learning summary
             if scene.metadata_ and scene.metadata_.get("policy_improvements"):
                 learning_summary["improvements_made"] += scene.metadata_["policy_improvements"]
-                # Scenes after this one will benefit from the improved policy
                 if idx < len(scenes) - 1:
                     learning_summary["scenes_benefited"].extend([
-                        str(s.id) for s in scenes[idx+1:] 
+                        str(s.id) for s in scenes[idx+1:]
                         if s.status not in [SceneStatus.COMPLETED, SceneStatus.SKIPPED]
                     ])
-            
-            # Update project progress
-            if scene_result.get("status") == SceneStatus.COMPLETED:
-                self.project.completed_scenes += 1
-            
-            await self.session.flush()
         
         # Mark batch complete
         self.project.completed_at = datetime.now(timezone.utc)
@@ -360,6 +380,156 @@ class Orchestrator:
             "completed_scenes": self.project.completed_scenes,
             "results": results,
             "learning_summary": learning_summary,
+        }
+
+    async def _process_scenes_concurrently(self, scenes: List[Scene]) -> List[Dict[str, Any]]:
+        """Process scenes in parallel with isolated sessions."""
+        concurrency = max(1, self.config.BATCH_CONCURRENCY)
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def run_scene(scene_id: UUID) -> Dict[str, Any]:
+            async with semaphore:
+                async with AsyncSessionLocal() as session:
+                    orchestrator = Orchestrator(session, self.project_id, self.config)
+                    result = await session.execute(
+                        select(Scene).where(Scene.id == scene_id)
+                    )
+                    scene = result.scalar_one_or_none()
+                    if not scene:
+                        return {"scene_id": str(scene_id), "status": SceneStatus.FAILED, "error": "Scene not found"}
+                    scene_result = await orchestrator._process_scene(scene)
+                    await session.commit()
+                    return scene_result
+
+        tasks = [run_scene(scene.id) for scene in scenes]
+        return await asyncio.gather(*tasks)
+
+    @weave.op(name="orchestrator_get_batch_patterns")
+    async def get_batch_patterns(self) -> List[Dict[str, Any]]:
+        """Identify common patterns across batch scenes."""
+        await self.load_project()
+        scenes = await self.get_scenes()
+        if len(scenes) < 2:
+            return []
+
+        total = len(scenes)
+        patterns: List[Dict[str, Any]] = []
+
+        # Space type patterns
+        space_counts: Dict[str, List[str]] = defaultdict(list)
+        for scene in scenes:
+            if scene.space_type_detected:
+                space_counts[scene.space_type_detected].append(str(scene.id))
+
+        for space_type, scene_ids in space_counts.items():
+            frequency = len(scene_ids) / total
+            patterns.append({
+                "pattern_type": "space_type",
+                "description": f"Detected {space_type.replace('_', ' ')} across {len(scene_ids)} scenes",
+                "frequency": frequency,
+                "confidence": min(0.9, 0.5 + (0.4 * frequency)),
+                "supporting_scenes": scene_ids,
+            })
+
+        # Constraint patterns
+        constraint_result = await self.session.execute(
+            select(Constraint).where(Constraint.project_id == self.project_id)
+        )
+        constraints = constraint_result.scalars().all()
+        constraint_map: Dict[str, set] = defaultdict(set)
+        for c in constraints:
+            if c.element_type and c.scene_id:
+                constraint_map[c.element_type].add(str(c.scene_id))
+
+        for element_type, scene_ids in constraint_map.items():
+            frequency = len(scene_ids) / total
+            if frequency >= 0.5:
+                patterns.append({
+                    "pattern_type": "constraint",
+                    "description": f"{element_type.replace('_', ' ')} appears in {len(scene_ids)} scenes",
+                    "frequency": frequency,
+                    "confidence": min(0.9, 0.55 + (0.35 * frequency)),
+                    "supporting_scenes": list(scene_ids),
+                })
+
+        return patterns
+
+    @weave.op(name="orchestrator_get_batch_insights")
+    async def get_batch_insights(self) -> Dict[str, Any]:
+        """Generate batch insights and recommendations."""
+        await self.load_project()
+        scenes = await self.get_scenes()
+        patterns = await self.get_batch_patterns()
+
+        commonalities = [p for p in patterns if p.get("frequency", 0) >= 0.5]
+        differences = [p for p in patterns if p.get("frequency", 0) < 0.5]
+
+        recommendations = []
+        for pattern in commonalities:
+            if pattern["pattern_type"] == "constraint":
+                recommendations.append({
+                    "title": "Preserve common constraints across all scenes",
+                    "rationale": pattern["description"],
+                    "priority": "high",
+                })
+            elif pattern["pattern_type"] == "space_type":
+                recommendations.append({
+                    "title": "Align style direction across shared space types",
+                    "rationale": pattern["description"],
+                    "priority": "medium",
+                })
+
+        return {
+            "project_id": str(self.project_id),
+            "total_scenes": len(scenes),
+            "commonalities": commonalities,
+            "differences": differences,
+            "recommendations": recommendations,
+        }
+
+    @weave.op(name="orchestrator_get_batch_report")
+    async def get_batch_report(self) -> Dict[str, Any]:
+        """Generate a comprehensive batch report."""
+        await self.load_project()
+        scenes = await self.get_scenes()
+        patterns = await self.get_batch_patterns()
+        insights = await self.get_batch_insights()
+
+        # Collect evaluation scores
+        eval_result = await self.session.execute(
+            select(Iteration).where(Iteration.project_id == self.project_id)
+        )
+        iterations = eval_result.scalars().all()
+        scores = [i.evaluation_score for i in iterations if i.evaluation_score is not None]
+        avg_score = sum(scores) / len(scores) if scores else None
+
+        return {
+            "batch_id": str(self.project_id),
+            "project_id": str(self.project_id),
+            "summary": {
+                "total_scenes": len(scenes),
+                "completed": sum(1 for s in scenes if s.status == SceneStatus.COMPLETED),
+                "average_qc_score": avg_score,
+                "started_at": self.project.started_at.isoformat() if self.project.started_at else None,
+                "completed_at": self.project.completed_at.isoformat() if self.project.completed_at else None,
+                "patterns_identified": len(patterns),
+            },
+            "patterns": patterns,
+            "commonalities": insights.get("commonalities", []),
+            "differences": insights.get("differences", []),
+            "recommendations": insights.get("recommendations", []),
+            "individual_scenes": [
+                {
+                    "scene_id": str(s.id),
+                    "scene_index": s.scene_index,
+                    "status": s.status,
+                    "input_image": s.input_image_path,
+                    "output_image": s.output_image_path,
+                    "space_type": s.space_type_detected,
+                    "has_warnings": s.has_warnings,
+                }
+                for s in scenes
+            ],
         }
     
     async def _ensure_requirements_complete(self) -> None:

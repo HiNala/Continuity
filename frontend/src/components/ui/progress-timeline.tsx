@@ -63,11 +63,11 @@ export function ProgressTimeline({ currentStage, className = "" }: ProgressTimel
     >
       <div className="flex items-center justify-between relative">
         {/* Background line */}
-        <div className="absolute top-5 left-8 right-8 h-[2px] bg-gradient-to-r from-neutral-200 via-neutral-300 to-neutral-200 dark:from-zinc-700 dark:via-zinc-600 dark:to-zinc-700 rounded-full" />
+        <div className="absolute top-5 left-8 right-8 h-[2px] bg-gradient-to-r from-white/40 via-white/60 to-white/40 dark:from-white/10 dark:via-white/20 dark:to-white/10 rounded-full" />
         
         {/* Progress line with glow */}
         <motion.div 
-          className="absolute top-5 left-8 h-[2px] bg-gradient-to-r from-primary via-accent to-primary rounded-full"
+          className="absolute top-5 left-8 h-[2px] bg-gradient-to-r from-primary via-accent to-primary rounded-full shadow-[0_0_10px_rgba(236,72,153,0.3)]"
           initial={{ width: 0 }}
           animate={{ 
             width: `${(stages.findIndex(s => s.id === currentStage) / (stages.length - 1)) * 100}%` 
@@ -103,7 +103,7 @@ export function ProgressTimeline({ currentStage, className = "" }: ProgressTimel
                   "w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 relative",
                   status === "completed" && "bg-gradient-to-br from-emerald-400 to-emerald-500 dark:from-emerald-500 dark:to-emerald-600 text-white shadow-md shadow-emerald-500/25 dark:shadow-emerald-500/40",
                   status === "active" && "bg-gradient-to-br from-primary to-accent text-white shadow-lg shadow-primary/30 dark:shadow-primary/50",
-                  status === "pending" && "bg-white dark:bg-zinc-800 border-2 border-neutral-200 dark:border-zinc-700 text-neutral-300 dark:text-zinc-600"
+                  status === "pending" && "bg-white/70 dark:bg-zinc-900/60 border-2 border-white/40 dark:border-white/10 text-neutral-300 dark:text-zinc-600"
                 )}
               >
                 {status === "active" ? (
