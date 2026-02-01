@@ -1582,13 +1582,16 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
             variants={itemVariants}
             className="text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-zinc-100"
           >
-            Transform any space
+            See your vision,{" "}
+            <span className="bg-gradient-to-r from-pink-500 via-violet-500 to-cyan-500 bg-clip-text text-transparent">
+              realized
+            </span>
           </motion.h1>
           <motion.p
             variants={itemVariants}
-            className="text-neutral-500 dark:text-zinc-400 mt-3 text-lg"
+            className="text-neutral-500 dark:text-zinc-400 mt-3 text-lg max-w-md mx-auto"
           >
-            Upload photos and describe your vision
+            Upload photos of any space. Describe your vision. Watch AI agents transform it — learning and improving with every step.
           </motion.p>
         </div>
 
@@ -1617,27 +1620,73 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
           </span>
         </motion.div>
 
+        {/* Tech Stack - For hackathon judges */}
+        <motion.div
+          variants={itemVariants}
+          className="mt-8 pt-6 border-t border-neutral-100 dark:border-zinc-800"
+        >
+          <p className="text-[10px] uppercase tracking-wider text-neutral-400 dark:text-zinc-600 text-center mb-3">
+            Powered by
+          </p>
+          <div className="flex items-center justify-center gap-6 text-[11px] text-neutral-500 dark:text-zinc-500">
+            <span className="flex items-center gap-1.5 hover:text-neutral-700 dark:hover:text-zinc-300 transition-colors">
+              <span className="w-2 h-2 rounded-full bg-gradient-to-r from-orange-400 to-amber-500" />
+              Weave
+            </span>
+            <span className="flex items-center gap-1.5 hover:text-neutral-700 dark:hover:text-zinc-300 transition-colors">
+              <span className="w-2 h-2 rounded-full bg-gradient-to-r from-blue-400 to-indigo-500" />
+              Browserbase
+            </span>
+            <span className="flex items-center gap-1.5 hover:text-neutral-700 dark:hover:text-zinc-300 transition-colors">
+              <span className="w-2 h-2 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" />
+              Gemini
+            </span>
+          </div>
+        </motion.div>
+
         {/* Features - Clean cards with dark mode */}
         <motion.div
           variants={itemVariants}
           className="mt-10 hidden sm:grid grid-cols-3 gap-3"
         >
           {[
-            { label: "Spatial Analysis", desc: "Constraint detection", lightColor: "bg-pink-50 border-pink-100", darkColor: "dark:bg-pink-950/30 dark:border-pink-900/30" },
-            { label: "Self-Improving", desc: "Quality feedback loop", lightColor: "bg-violet-50 border-violet-100", darkColor: "dark:bg-violet-950/30 dark:border-violet-900/30" },
-            { label: "Photorealistic", desc: "High-fidelity output", lightColor: "bg-cyan-50 border-cyan-100", darkColor: "dark:bg-cyan-950/30 dark:border-cyan-900/30" },
+            { 
+              label: "Multi-Agent Pipeline", 
+              desc: "Weave-traced orchestration", 
+              lightColor: "bg-pink-50 border-pink-100", 
+              darkColor: "dark:bg-pink-950/30 dark:border-pink-900/30",
+              icon: "🎯"
+            },
+            { 
+              label: "Self-Improving AI", 
+              desc: "Learns from each iteration", 
+              lightColor: "bg-violet-50 border-violet-100", 
+              darkColor: "dark:bg-violet-950/30 dark:border-violet-900/30",
+              icon: "🧠"
+            },
+            { 
+              label: "Real-time Streaming", 
+              desc: "Watch agents think & work", 
+              lightColor: "bg-cyan-50 border-cyan-100", 
+              darkColor: "dark:bg-cyan-950/30 dark:border-cyan-900/30",
+              icon: "⚡"
+            },
           ].map((item) => (
             <motion.div
               key={item.label}
-              whileHover={{ y: -2 }}
+              whileHover={{ y: -2, scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               className={cn(
-                "p-4 rounded-xl border transition-all",
+                "p-4 rounded-xl border transition-all cursor-default",
                 item.lightColor,
                 item.darkColor
               )}
             >
-              <p className="text-sm font-medium text-neutral-900 dark:text-zinc-100">{item.label}</p>
-              <p className="text-xs text-neutral-500 dark:text-zinc-400 mt-0.5">{item.desc}</p>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-base">{item.icon}</span>
+                <p className="text-sm font-medium text-neutral-900 dark:text-zinc-100">{item.label}</p>
+              </div>
+              <p className="text-xs text-neutral-500 dark:text-zinc-400">{item.desc}</p>
             </motion.div>
           ))}
         </motion.div>

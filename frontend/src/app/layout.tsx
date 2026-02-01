@@ -13,11 +13,12 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Continuity - AI Space Visualization",
-  description: "Transform raw space photos into realistic renovation visualizations with self-improving AI agents",
+  title: "Clarity - Self-Improving AI Visualization",
+  description: "Transform raw space photos into realistic renovation visualizations with self-improving AI agents that learn and adapt",
   icons: {
     icon: "/favicon.ico",
   },
+  keywords: ["AI", "visualization", "self-improving", "agents", "Weave", "Browserbase", "Gemini"],
 };
 
 export default function RootLayout({
