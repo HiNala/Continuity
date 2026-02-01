@@ -388,53 +388,78 @@ After this call, check your [Weave Dashboard](https://wandb.ai/home) to see the 
 
 ## 📸 Batch Processing for Virtual Staging
 
-Continuity supports processing entire photoshoots with consistent style across all images:
+Continuity supports processing entire photoshoots with consistent style across all images, with **cross-scene and cross-project learning**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         BATCH PROCESSING FLOW                                │
+│                  BATCH PROCESSING WITH CROSS-LEARNING                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  1. UPLOAD FOLDER OF IMAGES                                                 │
 │     └── User uploads 10 photos from a property photoshoot                   │
 │                                                                             │
-│  2. SINGLE REQUIREMENTS GATHERING                                           │
+│  2. CROSS-PROJECT LEARNING (Automatic)                                      │
+│     └── System checks: "What patterns worked in past projects?"             │
+│     └── seed_policy_from_learnings() applies successful patterns            │
+│     └── New batch starts with OPTIMIZED settings from past experience       │
+│                                                                             │
+│  3. SINGLE REQUIREMENTS GATHERING                                           │
 │     └── Requirements Agent + Browserbase inspiration                        │
 │     └── User defines ONE style goal for ALL images                          │
 │     └── "Modern minimalist staging for entire property"                     │
 │                                                                             │
-│  3. SCENES CREATED                                                          │
-│     └── Each uploaded image becomes a "Scene"                               │
-│     └── Scene tracks: input_image, output_image, status                     │
-│                                                                             │
-│  4. PARALLEL PROCESSING                                                     │
+│  4. CROSS-SCENE LEARNING (During Processing)                                │
 │     ┌────────────────────────────────────────────────────────────────┐     │
-│     │  Scene 1 (Kitchen)    │  Scene 2 (Bathroom)  │  Scene 3 (...)  │     │
-│     │  ├── Spatial Analysis │  ├── Spatial Analysis│  ├── ...        │     │
-│     │  ├── 4-Phase Gen      │  ├── 4-Phase Gen     │  ├── ...        │     │
-│     │  └── QC Evaluation    │  └── QC Evaluation   │  └── ...        │     │
+│     │  Scene 1: Kitchen                                              │     │
+│     │  ├── Generation fails QC (constraint violation)                │     │
+│     │  ├── analyze_failure() → "Fixtures moved from original"        │     │
+│     │  ├── apply_policy_changes() → constraint_emphasis: "high"      │     │
+│     │  └── Retry succeeds → mark_improvement_effective(true)         │     │
+│     │                         ↓                                      │     │
+│     │  Scene 2: Bathroom  (BENEFITS FROM SCENE 1's LEARNING)         │     │
+│     │  ├── Loads Policy v2 with high constraint_emphasis             │     │
+│     │  └── Generates correctly on first try!                         │     │
+│     │                         ↓                                      │     │
+│     │  Scene 3: Living Room  (BENEFITS FROM ALL PRIOR LEARNING)      │     │
+│     │  └── Uses accumulated improvements from scenes 1-2             │     │
 │     └────────────────────────────────────────────────────────────────┘     │
 │                                                                             │
-│  5. CONSISTENT OUTPUT                                                       │
-│     └── Each scene gets its own output image                                │
-│     └── All share the same style requirements                               │
-│     └── Policy improvements apply to subsequent scenes                      │
+│  5. LEARNING SUMMARY (At Completion)                                        │
+│     └── record_batch_learning() logs: improvements made, scenes benefited   │
+│     └── Effective patterns stored for FUTURE projects                       │
+│     └── Next batch starts even smarter!                                     │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Cross-Learning Features:**
+
+| Feature | Within Batch | Across Projects |
+|---------|--------------|-----------------|
+| Policy improvements | ✅ Scene 2 uses Scene 1's improved policy | ✅ New projects seeded from past successes |
+| Pattern tracking | ✅ `metadata_.policy_improvements` per scene | ✅ `improvement_observed` in PolicyChange |
+| Automatic seeding | N/A | ✅ `seed_policy_from_learnings()` |
+| Weave logging | ✅ `record_batch_learning()` | ✅ `record_cross_project_learning()` |
+| SSE events | ✅ `scene_start`, `scene_complete`, `learning` | N/A |
 
 **Key Features:**
 - **One input → One output**: Each uploaded image produces one staged output
 - **Shared requirements**: Style goals defined once, applied to all images
 - **Independent processing**: Each scene has its own constraints and generation
 - **Cross-scene learning**: Policy improvements from early scenes benefit later ones
+- **Cross-project learning**: Effective patterns from past projects seed new ones
 - **Progress tracking**: Monitor per-scene status via `/api/projects/{id}/scenes`
+- **Real-time SSE events**: `scene_start`, `scene_complete`, `learning`, `batch_progress`
 
 **Use Case: Virtual Staging Product**
 ```
 Input: 50 photos of an unfurnished apartment
 Goal: "Luxury modern staging for real estate listing"
 Output: 50 professionally staged images with consistent style
+
+Learning: If scene 5 fails and learns "high constraint emphasis works better",
+          scenes 6-50 automatically use that improved setting.
+          The NEXT batch of 50 photos starts with that knowledge too!
 ```
 
 ---
