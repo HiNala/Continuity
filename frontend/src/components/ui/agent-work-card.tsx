@@ -211,7 +211,7 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
   };
 
   return (
-    <motion.div
+    <motion.article
       initial={false}
       whileHover={{ y: -1 }}
       transition={{ duration: 0.2 }}
@@ -220,6 +220,9 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
         "shadow-[0_6px_18px_rgba(0,0,0,0.08)] hover:shadow-[0_10px_28px_rgba(0,0,0,0.12)] hover:border-white/70 dark:hover:border-white/20 transition-all duration-300",
         getStatusStyles()
       )}
+      role="article"
+      aria-label={`${agentInfo.label} - ${actionInfo.label}: ${title || content.substring(0, 50)}...`}
+      aria-live={status === "running" ? "polite" : undefined}
     >
       {/* Header - cleaner design */}
       <div className="px-4 pt-3 pb-2">
@@ -485,7 +488,7 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </motion.article>
   );
 };
 

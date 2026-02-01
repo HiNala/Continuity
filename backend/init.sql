@@ -1,8 +1,13 @@
 -- ============================================
--- Continuity - Database Initialization
+-- Clarity - Database Initialization
 -- ============================================
 -- This script runs when the PostgreSQL container starts
 -- for the first time. It sets up the initial schema.
+--
+-- Migration Strategy:
+-- - For development, this script creates all tables fresh
+-- - For production, use Alembic migrations
+-- - Schema version is tracked in system_status table
 -- ============================================
 
 -- Enable useful extensions
@@ -305,6 +310,32 @@ CREATE TABLE IF NOT EXISTS policy_changes (
 CREATE INDEX IF NOT EXISTS idx_policy_changes_project_id ON policy_changes(project_id);
 
 -- ============================================
+-- Reference Images Table (Browserbase)
+-- ============================================
+CREATE TABLE IF NOT EXISTS reference_images (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    -- Image data
+    url TEXT NOT NULL,
+    thumbnail_url TEXT,
+    source_site VARCHAR(100),
+    title TEXT,
+    -- Selection state
+    is_selected BOOLEAN DEFAULT FALSE,
+    selection_order INTEGER,
+    -- Search context
+    search_query TEXT,
+    search_styles JSONB DEFAULT '[]'::jsonb,
+    search_space_type VARCHAR(100),
+    -- Metadata
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_reference_images_project_id ON reference_images(project_id);
+CREATE INDEX IF NOT EXISTS idx_reference_images_is_selected ON reference_images(is_selected);
+
+-- ============================================
 -- Insert Default Policy
 -- ============================================
 INSERT INTO policies (version, cleanup_config, structural_config, fixture_config, style_config, created_by, is_active)
@@ -381,5 +412,14 @@ CREATE INDEX IF NOT EXISTS idx_iterations_project_phase_status
 -- ============================================
 -- Grant permissions
 -- ============================================
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO continuity;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO continuity;
+-- Grant to current user (works with any POSTGRES_USER)
+DO $$
+BEGIN
+    EXECUTE format('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO %I', current_user);
+    EXECUTE format('GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO %I', current_user);
+END $$;
+
+-- ============================================
+-- Schema Version (for migration tracking)
+-- ============================================
+UPDATE system_status SET message = 'Schema v1.1.0 - Added Browserbase reference images' WHERE id = 1;

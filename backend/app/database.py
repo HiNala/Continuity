@@ -1,10 +1,14 @@
 """
-Continuity - Database Module
+Clarity - Database Module
 PostgreSQL connection and operations using SQLAlchemy.
+
+Migration Strategy:
+- Development: init.sql creates full schema, SQLAlchemy sync on startup
+- Production: Use Alembic for proper migrations (not yet implemented)
 """
 
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -14,6 +18,9 @@ from app.models import (
     Base, SystemStatus, Project, Requirements, Iteration, Constraint, Policy, 
     ProjectAnalysis, EvaluationDetail, PolicyChange, OrchestrationLog
 )
+
+# Current schema version - update when schema changes
+SCHEMA_VERSION = "1.0.0"
 
 # ============================================
 # Database Configuration
@@ -104,6 +111,49 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def check_schema_version() -> Optional[str]:
+    """
+    Check the current schema version from the database.
+    Returns the version string or None if not found.
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                text("SELECT message FROM system_status WHERE id = 1")
+            )
+            row = result.fetchone()
+            if row and row[0]:
+                # Extract version from message like "Schema v1.0.0 - Initial schema"
+                message = row[0]
+                if "Schema v" in message:
+                    version = message.split("Schema v")[1].split(" ")[0]
+                    return version
+            return None
+    except Exception as e:
+        print(f"Warning: Could not check schema version: {e}")
+        return None
+
+
+async def verify_database_ready() -> dict:
+    """
+    Verify database is ready and schema is compatible.
+    Returns status dict with version info.
+    """
+    db_version = await check_schema_version()
+    
+    status = {
+        "database_connected": True,
+        "schema_version": db_version,
+        "expected_version": SCHEMA_VERSION,
+        "compatible": db_version == SCHEMA_VERSION if db_version else True,  # Assume compatible if no version
+    }
+    
+    if not status["compatible"]:
+        print(f"Warning: Schema version mismatch. DB: {db_version}, Expected: {SCHEMA_VERSION}")
+    
+    return status
+
+
 # ============================================
 # Export models for convenience
 # ============================================
@@ -125,4 +175,7 @@ __all__ = [
     "init_db",
     "get_db_status",
     "get_async_session",
+    "check_schema_version",
+    "verify_database_ready",
+    "SCHEMA_VERSION",
 ]

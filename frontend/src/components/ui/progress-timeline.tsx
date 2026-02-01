@@ -162,7 +162,14 @@ export function CompactTimeline({ currentStage, className = "", subPhase }: Comp
   const currentLabel = stages[stageIndex]?.label || "Starting";
   
   return (
-    <div className={cn("flex items-center gap-2", className)}>
+    <div 
+      className={cn("flex items-center gap-2", className)}
+      role="progressbar"
+      aria-valuenow={progress}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={`Step ${stageIndex + 1} of ${stages.length}: ${subPhase || currentLabel}`}
+    >
       {/* Progress bar with animated pulse when active */}
       <div className="flex-1 h-1.5 bg-neutral-200 dark:bg-zinc-700 rounded-full overflow-hidden relative">
         <motion.div

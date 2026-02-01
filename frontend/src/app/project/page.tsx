@@ -40,6 +40,7 @@ import {
   evaluateAndImprove,
   startOrchestration,
   getOrchestrationStatus,
+  selectProjectReferenceImages,
   ClarifyingQuestion,
   RequirementsResponse,
   AnalysisSummaryResponse,
@@ -125,13 +126,11 @@ export default function ProjectPage() {
     setError(null);
 
     try {
-      // Combine uploaded images with inspiration images
-      const allImages = [...imageUrls, ...inspirationUrls];
-      
-      // Create the project with goal and images
+      // Create the project with goal and uploaded images
+      // Inspiration images are handled separately in the complete step
       const project = await createProject({ 
         goal: goal.trim(),
-        images: allImages,
+        images: imageUrls,
       });
       setProjectId(project.project_id);
 
@@ -232,8 +231,21 @@ export default function ProjectPage() {
     setStep("analyzing");
 
     try {
+      // Save selected reference images if any
+      if (inspirationUrls.length > 0) {
+        try {
+          await selectProjectReferenceImages(projectId, inspirationUrls);
+        } catch (err) {
+          console.warn("Failed to save reference images:", err);
+          // Continue anyway - reference images are enhancement only
+        }
+      }
+      
+      // Combine uploaded images with inspiration for analysis context
+      const allImages = [...imageUrls, ...inspirationUrls];
+      
       // Analyze with provided image URLs (if any)
-      const result = await analyzeSpace(projectId, imageUrls.length > 0 ? imageUrls : undefined);
+      const result = await analyzeSpace(projectId, allImages.length > 0 ? allImages : undefined);
       setAnalysisSummary(result);
       setStep("constraints");
     } catch (err) {
@@ -510,17 +522,6 @@ export default function ProjectPage() {
                 />
               </div>
 
-              {/* Inspiration Gallery */}
-              <div className="card">
-                <InspirationGallery
-                  query={goal}
-                  selectedImages={inspirationUrls}
-                  onSelectionChange={setInspirationUrls}
-                  maxSelection={3}
-                  autoFetch={false}
-                />
-              </div>
-
               <button
                 onClick={handleSubmitGoal}
                 disabled={loading || !goal.trim()}
@@ -741,6 +742,20 @@ export default function ProjectPage() {
               </dl>
             </div>
 
+            {/* Style Inspiration Section */}
+            <div className="card">
+              <InspirationGallery
+                query={requirements.original_goal}
+                style={requirements.style_targets?.[0]}
+                spaceType={requirements.space_type || undefined}
+                selectedImages={inspirationUrls}
+                onSelectionChange={setInspirationUrls}
+                maxSelection={3}
+                autoFetch={false}
+                showAttribution={true}
+              />
+            </div>
+
             <div className="card bg-continuity-500/5 border-continuity-500/20">
               <div className="flex items-start gap-3">
                 <Eye className="w-5 h-5 text-continuity-400 mt-0.5" />
@@ -749,6 +764,11 @@ export default function ProjectPage() {
                   <p className="text-sm text-slate-300 mb-4">
                     Our AI will analyze your space images to identify physical constraints 
                     like floor drains, plumbing, structural elements, and what can be moved.
+                    {inspirationUrls.length > 0 && (
+                      <span className="block mt-2 text-continuity-300">
+                        Your {inspirationUrls.length} selected reference image{inspirationUrls.length > 1 ? "s" : ""} will guide the styling.
+                      </span>
+                    )}
                   </p>
                   <button
                     onClick={handleAnalyzeSpace}
