@@ -489,15 +489,15 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.8 }}
                     transition={springTransition}
-                    whileHover={{ scale: 1.05 }}
+                    whileHover={{ scale: 1.02 }}
                     className="relative group"
                   >
                     {filePreviews[file.name] && (
                       <button
                         type="button"
                         className={cn(
-                          "rounded-xl overflow-hidden ring-1 ring-black/10 hover:ring-primary/50 transition-all shadow-md",
-                          compact ? "w-14 h-14" : "w-18 h-18"
+                          "rounded-lg overflow-hidden ring-1 ring-black/10 hover:ring-primary/40 transition-all shadow-sm",
+                          compact ? "w-14 h-14" : "w-16 h-16"
                         )}
                         onClick={() => setSelectedImage(filePreviews[file.name])}
                       >
@@ -512,10 +512,10 @@ export const PromptInputBox = React.forwardRef<HTMLDivElement, PromptInputBoxPro
                     <motion.button
                       type="button"
                       onClick={() => handleRemoveFile(index)}
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      whileHover={{ scale: 1.1 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-foreground/90 text-background flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                      initial={{ opacity: 0 }}
+                      whileHover={{ scale: 1.1, backgroundColor: "rgba(0,0,0,0.9)" }}
+                      animate={{ opacity: 1 }}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black/80 text-white flex items-center justify-center shadow-md border border-white/20"
                     >
                       <X className="w-3 h-3" />
                     </motion.button>
