@@ -1344,6 +1344,10 @@ class OrchestrationStatusResponse(BaseModel):
     started_at: Optional[str]
     completed_at: Optional[str]
     recent_transitions: List[Dict[str, Any]]
+    is_batch: Optional[bool] = None
+    total_scenes: Optional[int] = None
+    completed_scenes: Optional[int] = None
+    scene_progress: Optional[List[Dict[str, Any]]] = None
 
 
 class OrchestrationLogEntry(BaseModel):

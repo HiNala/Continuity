@@ -1305,7 +1305,7 @@ class Orchestrator:
         )
         recent_logs = logs_result.scalars().all()
         
-        return {
+        status_payload = {
             "project_id": str(self.project_id),
             "state": self.project.orchestration_state,
             "status": self.project.status,
@@ -1325,6 +1325,32 @@ class Orchestrator:
                 for log in recent_logs
             ],
         }
+
+        if self.project.is_batch and self.project.total_scenes > 1:
+            scenes_result = await self.session.execute(
+                select(Scene)
+                .where(Scene.project_id == self.project_id)
+                .order_by(Scene.scene_index)
+            )
+            scenes = scenes_result.scalars().all()
+            status_payload.update({
+                "is_batch": True,
+                "total_scenes": len(scenes),
+                "completed_scenes": sum(1 for s in scenes if s.status == SceneStatus.COMPLETED),
+                "scene_progress": [
+                    {
+                        "scene_id": str(s.id),
+                        "scene_index": s.scene_index,
+                        "status": s.status,
+                        "current_phase": s.current_phase,
+                        "orchestration_state": s.orchestration_state,
+                        "has_warnings": s.has_warnings,
+                    }
+                    for s in scenes
+                ],
+            })
+
+        return status_payload
     
     async def get_log(self) -> List[Dict[str, Any]]:
         """Get complete orchestration log."""
