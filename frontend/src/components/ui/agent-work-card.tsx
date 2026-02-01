@@ -107,42 +107,45 @@ export interface AgentWorkCardProps {
   browserbaseSessionId?: string;
 }
 
+// Unified neutral color for all agent icons - less visual noise
+const UNIFIED_ICON_STYLE = "from-slate-600 to-slate-700 dark:from-zinc-600 dark:to-zinc-700";
+
 const agentConfig: Record<AgentType, { label: string; icon: React.ElementType; gradient: string; accentColor: string }> = {
   requirements: { 
     label: "Requirements Agent", 
     icon: MessageSquare, 
-    gradient: "from-blue-500 to-cyan-500",
-    accentColor: "blue"
+    gradient: UNIFIED_ICON_STYLE,
+    accentColor: "slate"
   },
   spatial: { 
     label: "Spatial Analysis", 
     icon: Eye, 
-    gradient: "from-purple-500 to-pink-500",
-    accentColor: "purple"
+    gradient: UNIFIED_ICON_STYLE,
+    accentColor: "slate"
   },
   generation: { 
     label: "Generation Agent", 
     icon: Paintbrush, 
-    gradient: "from-amber-500 to-orange-500",
-    accentColor: "amber"
+    gradient: UNIFIED_ICON_STYLE,
+    accentColor: "slate"
   },
   qc: { 
     label: "Quality Control", 
     icon: ClipboardCheck, 
-    gradient: "from-emerald-500 to-teal-500",
-    accentColor: "emerald"
+    gradient: UNIFIED_ICON_STYLE,
+    accentColor: "slate"
   },
   orchestrator: { 
     label: "Orchestrator", 
     icon: Settings2, 
-    gradient: "from-slate-500 to-zinc-600",
+    gradient: UNIFIED_ICON_STYLE,
     accentColor: "slate"
   },
   system: { 
     label: "System", 
     icon: Zap, 
-    gradient: "from-gray-500 to-gray-600",
-    accentColor: "gray"
+    gradient: UNIFIED_ICON_STYLE,
+    accentColor: "slate"
   },
 };
 
