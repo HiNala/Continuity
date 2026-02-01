@@ -24,6 +24,21 @@ interface ResultsTimelineProps {
   onViewWeaveTrace?: (traceId: string) => void;
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+const resolveImagePath = (imagePath: string) => {
+  if (!imagePath) {
+    return imagePath;
+  }
+  if (imagePath.startsWith("http") || imagePath.startsWith("data:")) {
+    return imagePath;
+  }
+  if (imagePath.startsWith("/")) {
+    return `${API_URL}${imagePath}`;
+  }
+  return `${API_URL}/${imagePath}`;
+};
+
 export function ResultsTimeline({ 
   originalImage, 
   phases, 
@@ -98,11 +113,14 @@ export function ResultsTimeline({
       <div className="flex items-center gap-2 overflow-x-auto pb-4">
         {allImages.map((item, index) => (
           <div key={index} className="flex items-center gap-2 flex-shrink-0">
+            {(() => {
+              const resolvedPath = resolveImagePath(item.imagePath);
+              return (
             <div
-              onClick={() => handleImageClick(item.imagePath)}
+              onClick={() => handleImageClick(resolvedPath)}
               className={`
                 relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all
-                ${compareImages.includes(item.imagePath) 
+                ${compareImages.includes(resolvedPath) 
                   ? "border-continuity-500 ring-2 ring-continuity-500/30" 
                   : "border-slate-700 hover:border-slate-600"
                 }
@@ -111,7 +129,7 @@ export function ResultsTimeline({
               <div className="w-28 h-28 bg-slate-800">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={item.imagePath}
+                  src={resolvedPath}
                   alt={item.phase}
                   className="w-full h-full object-cover"
                   onError={(e) => {
@@ -124,12 +142,14 @@ export function ResultsTimeline({
                   {getPhaseName(item.phase)}
                 </p>
               </div>
-              {compareImages.includes(item.imagePath) && (
+              {compareImages.includes(resolvedPath) && (
                 <div className="absolute top-1 right-1 w-5 h-5 bg-continuity-500 rounded-full flex items-center justify-center text-xs text-white font-bold">
-                  {compareImages.indexOf(item.imagePath) + 1}
+                  {compareImages.indexOf(resolvedPath) + 1}
                 </div>
               )}
             </div>
+              );
+            })()}
             {index < allImages.length - 1 && (
               <ArrowRight className="w-4 h-4 text-slate-600 flex-shrink-0" />
             )}

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import weave
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.config import settings
@@ -91,6 +92,9 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+# Serve generated images from the local output directory
+app.mount("/generated_images", StaticFiles(directory="generated_images"), name="generated_images")
 
 
 # ============================================
