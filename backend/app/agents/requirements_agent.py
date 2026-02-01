@@ -35,6 +35,12 @@ SPACE_TYPE_QUESTION = {
         {"answer_id": "conference_room", "answer_text": "Conference Room"},
         {"answer_id": "retail", "answer_text": "Retail Space"},
         {"answer_id": "restaurant", "answer_text": "Restaurant"},
+        {"answer_id": "lobby", "answer_text": "Lobby / Reception"},
+        {"answer_id": "studio", "answer_text": "Studio / Loft"},
+        {"answer_id": "gym", "answer_text": "Gym / Fitness"},
+        {"answer_id": "classroom", "answer_text": "Classroom / Training"},
+        {"answer_id": "clinic", "answer_text": "Clinic / Healthcare"},
+        {"answer_id": "outdoor", "answer_text": "Outdoor / Patio"},
         {"answer_id": "other", "answer_text": "Other"},
     ]
 }
@@ -116,6 +122,12 @@ SPACE_TYPE_PATTERNS = {
     "conference_room": ["conference room", "meeting room", "boardroom"],
     "retail": ["retail", "store", "shop", "showroom"],
     "restaurant": ["restaurant", "cafe", "dining", "eatery"],
+    "lobby": ["lobby", "reception", "front desk", "entry hall"],
+    "studio": ["studio", "loft", "open plan"],
+    "gym": ["gym", "fitness", "workout", "exercise"],
+    "classroom": ["classroom", "training room", "learning space", "lecture"],
+    "clinic": ["clinic", "healthcare", "medical", "exam room"],
+    "outdoor": ["outdoor", "patio", "terrace", "balcony", "courtyard"],
 }
 
 STYLE_PATTERNS = {

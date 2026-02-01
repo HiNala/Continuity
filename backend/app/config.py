@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # ==========================================
     gemini_api_key: Optional[str] = None
     wandb_api_key: Optional[str] = None
+    wandb_entity: Optional[str] = None
     browserbase_api_key: Optional[str] = None
     browserbase_project_id: Optional[str] = None
     

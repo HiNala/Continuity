@@ -19,18 +19,18 @@
 
 ## 🎯 What is Continuity?
 
-Continuity is an intelligent agent system that transforms raw photographs of unfinished or existing spaces into realistic, professionally staged renovation visualizations. Unlike single-shot image generation tools that produce inconsistent or physically impossible results, Continuity uses a **multi-agent architecture** that:
+Continuity is an intelligent agent system that transforms raw photographs of unfinished or existing spaces into realistic, professionally staged renovation visualizations. It is designed for **any interior or commercial environment** (kitchens, offices, retail, hospitality, clinics, and more). Unlike single-shot image generation tools that produce inconsistent or physically impossible results, Continuity uses a **multi-agent architecture** that:
 
-- **Understands spatial constraints** — Floor drains, plumbing walls, and structural elements are identified and preserved
-- **Respects immovable fixtures** — Toilets stay near floor drains, sinks stay near plumbed walls
+- **Understands spatial constraints** — Plumbing, HVAC, electrical, and structural elements are identified and preserved
+- **Respects immovable fixtures** — Sinks, appliances, built-ins, and utilities remain anchored to real-world constraints
 - **Iteratively improves its own generation process** — Using Weave observability to analyze what works and what doesn't
 
 ### The Problem We Solve
 
-Current AI image generation tools fail at architectural visualization because they treat it as a pure aesthetic problem. When you ask a model to "show me this bathroom remodeled," it produces images where:
+Current AI image generation tools fail at architectural visualization because they treat it as a pure aesthetic problem. When you ask a model to "show me this space remodeled," it produces images where:
 
-- 🚫 Toilets appear in physically impossible locations
-- 🚫 Sinks float away from plumbed walls
+- 🚫 Fixtures shift away from plumbing or utility connections
+- 🚫 Appliances and built-ins appear in impossible locations
 - 🚫 Room dimensions change unexpectedly
 - 🚫 Construction debris bleeds through into "finished" outputs
 
@@ -169,6 +169,7 @@ Copy `.env.example` to `.env` and configure:
 |----------|-------------|----------|
 | `GEMINI_API_KEY` | Google Gemini API key for image generation | Yes |
 | `WANDB_API_KEY` | Weights & Biases API key for Weave | Yes |
+| `WANDB_ENTITY` | W&B entity/organization (optional) | Optional |
 | `DATABASE_URL` | PostgreSQL connection string | Auto-configured |
 | `REDIS_URL` | Redis connection string | Auto-configured |
 | `BROWSERBASE_API_KEY` | Browserbase API for web automation | Optional |
@@ -223,7 +224,9 @@ Continuity/
 ├── .gitignore              # Git ignore rules
 ├── .dockerignore           # Docker build ignore rules
 ├── README.md               # This file
-├── MISSION_01_TODO.md      # Mission tracking
+├── docs/                   # Documentation & mission tracking
+│   ├── missions/           # Mission specs
+│   └── missions_todo/      # Mission checklists
 │
 ├── frontend/               # Next.js 15 Application
 │   ├── Dockerfile
@@ -251,7 +254,7 @@ Continuity/
 ├── docs/                   # Documentation
 │   └── (future documentation)
 │
-└── missions/               # Mission specification files
+└── missions/               # Legacy mission specs (if present)
     └── (mission markdown files)
 ```
 
@@ -296,9 +299,8 @@ After this call, check your [Weave Dashboard](https://wandb.ai/home) to see the 
 ### 4. Using the Frontend
 
 1. Open http://localhost:3000
-2. Click "Test Health" to verify backend connection
-3. Click "Test Database" to verify PostgreSQL
-4. Click "Test Weave" to verify observability (check Weave dashboard for trace)
+2. Create a project with any interior or commercial space (kitchen, office, retail, etc.)
+3. Review the Agent Activity feed and Weave trace link for live updates
 
 ---
 
@@ -396,6 +398,7 @@ Weave is not just used for logging — it's the **core mechanism** that enables 
 2. **QC Analysis**: The Quality Control Agent programmatically queries Weave traces to understand what went wrong
 3. **Policy Modification**: Based on trace analysis, the system modifies its own generation policy
 4. **Feedback Loop**: Next generation uses updated policy, creating a genuine improvement loop
+5. **Trace-Linked UI**: The frontend surfaces a Weave trace link in the Agent Activity panel after a run completes
 
 **What Gets Traced:**
 - `requirements_agent_analyze_goal` — Goal parsing and question generation

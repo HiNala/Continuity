@@ -2,13 +2,16 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
-import { RotateCcw, ChevronRight, Sparkles, WifiOff } from "lucide-react";
+import { RotateCcw, ChevronRight, Sparkles, WifiOff, Zap } from "lucide-react";
 import { AnimatedBackground } from "@/components/ui/animated-background";
 import { PromptInputBox } from "@/components/ui/ai-prompt-box";
 import { ContinuityLogo, ContinuityIcon } from "@/components/ui/continuity-logo";
 import { AgentWorkCard, QuestionCard, ImageDisplayCard, type AgentWorkCardProps } from "@/components/ui/agent-work-card";
 import { SettingsDropdown } from "@/components/SettingsDropdown";
 import { StreamingChatMessage, ThinkingIndicator, LiveBadge } from "@/components/ui/streaming-text";
+import { ProgressTimeline, CompactTimeline } from "@/components/ui/progress-timeline";
+import { ToastProvider } from "@/components/ui/toast";
+import { AgentCardSkeleton } from "@/components/ui/skeleton";
 import { 
   createProject, 
   analyzeGoal, 
@@ -680,7 +683,24 @@ export default function ContinuityApp() {
     ? questions.questions.every(q => answers[q.question_id] !== undefined)
     : false;
 
+  // Derive pipeline stage from orchestration status
+  const getPipelineStage = (): "requirements" | "spatial" | "generation" | "qc" | "complete" => {
+    if (!orchestrationStatus) return "requirements";
+    const state = orchestrationStatus.state;
+    const phase = orchestrationStatus.current_phase;
+    
+    if (state === "completed") return "complete";
+    if (state === "failed") return "requirements";
+    if (phase?.includes("qc") || phase?.includes("quality")) return "qc";
+    if (phase?.includes("generat") || phase?.includes("render")) return "generation";
+    if (phase?.includes("spatial") || phase?.includes("analy")) return "spatial";
+    return "requirements";
+  };
+
+  const pipelineStage = getPipelineStage();
+
   return (
+    <ToastProvider>
     <LayoutGroup>
       <div className="min-h-screen text-foreground dark">
             <AnimatedBackground 
@@ -690,7 +710,7 @@ export default function ContinuityApp() {
             />
 
         <div className="relative z-10 min-h-screen flex flex-col">
-          {/* Animated Header */}
+          {/* Animated Header - Enhanced */}
           <motion.header
             layout
             transition={springTransition}
@@ -701,29 +721,54 @@ export default function ContinuityApp() {
                 layout
                 transition={springTransition}
                 className={cn(
-                  "mx-auto px-5 h-14 flex items-center justify-between rounded-2xl border border-white/60 bg-white/40 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.8)]",
-                  appState === "welcome" ? "max-w-3xl" : "max-w-7xl"
+                  "mx-auto px-5 h-14 flex items-center justify-between rounded-2xl border bg-white/70 backdrop-blur-2xl shadow-lg transition-all duration-300",
+                  appState === "welcome" 
+                    ? "max-w-3xl border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.06)]" 
+                    : "max-w-7xl border-black/[0.06] shadow-[0_4px_20px_rgba(0,0,0,0.04)]"
                 )}
               >
+                {/* Logo and Branding */}
                 <motion.div layout className="flex items-center gap-2.5">
-                  <ContinuityLogo size={26} />
-                  <span className="font-medium text-[15px] tracking-tight text-foreground/90">Continuity</span>
+                  <motion.div
+                    whileHover={{ scale: 1.05, rotate: 5 }}
+                    whileTap={{ scale: 0.95 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 17 }}
+                  >
+                    <ContinuityLogo size={26} />
+                  </motion.div>
+                  <span className="font-semibold text-[15px] tracking-tight text-foreground">Continuity</span>
+                  
+                  {/* Compact pipeline indicator in header when active */}
+                  <AnimatePresence>
+                    {appState !== "welcome" && (
+                      <motion.div
+                        initial={{ opacity: 0, width: 0 }}
+                        animate={{ opacity: 1, width: "auto" }}
+                        exit={{ opacity: 0, width: 0 }}
+                        className="hidden sm:flex items-center gap-2 ml-3 pl-3 border-l border-black/[0.06]"
+                      >
+                        <CompactTimeline currentStage={pipelineStage} className="w-24" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.div>
+
+                {/* Actions */}
                 <motion.div layout className="flex items-center gap-2">
                   <AnimatePresence mode="wait">
                     {appState !== "welcome" && (
                       <motion.button
                         key="reset-btn"
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.9 }}
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 10 }}
                         transition={smoothTransition}
                         onClick={resetAll}
-                        whileHover={{ scale: 1.02 }}
+                        whileHover={{ scale: 1.02, backgroundColor: "rgba(0,0,0,0.02)" }}
                         whileTap={{ scale: 0.98 }}
-                        className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-white/50"
+                        className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-transparent hover:border-black/[0.06]"
                       >
-                        <RotateCcw className="w-3.5 h-3.5" />
+                        <RotateCcw className="w-3 h-3" />
                         New project
                       </motion.button>
                     )}
@@ -759,12 +804,13 @@ export default function ContinuityApp() {
                   isConnected={isConnected}
                   currentThinking={currentThinking}
                   weaveTraceUrl={weaveTraceUrl}
+                  pipelineStage={pipelineStage}
                 />
               )}
             </AnimatePresence>
           </main>
 
-          {/* Animated Footer */}
+          {/* Animated Footer - Enhanced */}
           <motion.footer
             layout
             transition={springTransition}
@@ -775,21 +821,32 @@ export default function ContinuityApp() {
                 layout
                 transition={springTransition}
                 className={cn(
-                  "mx-auto px-5 h-11 flex items-center justify-between rounded-2xl border border-white/40 bg-white/25 backdrop-blur-xl text-xs text-muted-foreground",
-                  appState === "welcome" ? "max-w-3xl" : "max-w-7xl"
+                  "mx-auto px-4 h-10 flex items-center justify-between rounded-xl border bg-white/50 backdrop-blur-xl text-[11px]",
+                  appState === "welcome" 
+                    ? "max-w-3xl border-white/40" 
+                    : "max-w-7xl border-black/[0.04]"
                 )}
               >
-                <span className="flex items-center gap-2">
-                  <Sparkles className="w-3 h-3" />
-                  WeaveHacks 3
-                </span>
-                <span>Self-improving AI agents</span>
+                <motion.span 
+                  className="flex items-center gap-1.5 text-muted-foreground/70"
+                  whileHover={{ color: "var(--primary)" }}
+                >
+                  <motion.div
+                    animate={{ rotate: [0, 10, -10, 0] }}
+                    transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+                  >
+                    <Sparkles className="w-3 h-3" />
+                  </motion.div>
+                  <span className="font-medium">WeaveHacks 3</span>
+                </motion.span>
+                <span className="text-muted-foreground/50 font-medium">Self-improving AI agents</span>
               </motion.div>
             </div>
           </motion.footer>
         </div>
       </div>
     </LayoutGroup>
+    </ToastProvider>
   );
 }
 
@@ -929,6 +986,7 @@ interface SplitViewProps {
   isConnected: boolean;
   currentThinking: { agent: string; action: string } | null;
   weaveTraceUrl: string | null;
+  pipelineStage: "requirements" | "spatial" | "generation" | "qc" | "complete";
 }
 
 function SplitView({
@@ -949,6 +1007,7 @@ function SplitView({
   isConnected,
   currentThinking,
   weaveTraceUrl,
+  pipelineStage,
 }: SplitViewProps) {
   return (
     <motion.div
@@ -1124,25 +1183,40 @@ function SplitView({
         className="flex-1 overflow-y-auto bg-gradient-to-br from-slate-50/30 to-white scrollbar-thin"
       >
         <div className="p-6 max-w-3xl mx-auto">
+          {/* Progress Timeline */}
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="mb-6 p-4 rounded-xl bg-white/80 border border-black/[0.04] shadow-sm"
+          >
+            <ProgressTimeline currentStage={pipelineStage} />
+          </motion.div>
+
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="mb-5 flex items-center justify-between"
+            className="mb-4 flex items-center justify-between"
           >
-            <div>
-              <h2 className="text-base font-semibold text-foreground">Agent Activity</h2>
-              <p className="text-xs text-muted-foreground/70 mt-0.5">Real-time pipeline progress</p>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                <Zap className="w-3.5 h-3.5 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Agent Activity</h2>
+              </div>
             </div>
             {weaveTraceUrl && (
               <a
                 href={weaveTraceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
+                className="text-[11px] text-primary hover:text-primary/80 transition-colors flex items-center gap-1 px-2 py-1 rounded-md bg-primary/5 hover:bg-primary/10"
               >
-                View in Weave →
+                <Sparkles className="w-3 h-3" />
+                View in Weave
               </a>
             )}
           </motion.div>
@@ -1166,14 +1240,26 @@ function SplitView({
               ))}
             </AnimatePresence>
             
-            {agentCards.length === 0 && (
+            {/* Loading skeleton when waiting for agents */}
+            {agentCards.length === 0 && isLoading && (
+              <div className="space-y-3">
+                <AgentCardSkeleton />
+                <AgentCardSkeleton />
+              </div>
+            )}
+            
+            {/* Empty state */}
+            {agentCards.length === 0 && !isLoading && (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="text-center py-16 text-muted-foreground/40"
+                className="text-center py-12 rounded-xl border border-dashed border-black/[0.08] bg-black/[0.01]"
               >
-                <Sparkles className="w-8 h-8 mx-auto mb-3 opacity-40" />
-                <p className="text-sm">Agents will appear here as they work</p>
+                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-black/[0.03] flex items-center justify-center">
+                  <Sparkles className="w-5 h-5 text-muted-foreground/30" />
+                </div>
+                <p className="text-sm text-muted-foreground/50">Agents will appear here as they work</p>
+                <p className="text-xs text-muted-foreground/30 mt-1">Submit your design request to get started</p>
               </motion.div>
             )}
             

@@ -1636,7 +1636,13 @@ async def get_agent_reasoning(
     # Build Weave trace URL if available
     weave_url = None
     if settings.wandb_api_key and settings.weave_project_name:
-        weave_url = f"https://wandb.ai/{settings.weave_project_name}/weave"
+        if "/" in settings.weave_project_name:
+            project_path = settings.weave_project_name
+        elif settings.wandb_entity:
+            project_path = f"{settings.wandb_entity}/{settings.weave_project_name}"
+        else:
+            project_path = settings.weave_project_name
+        weave_url = f"https://wandb.ai/{project_path}/weave"
     
     return AgentReasoningResponse(
         project_id=str(project_id),
