@@ -457,9 +457,12 @@ class GenerationAgent:
                         "image/jpeg": "jpg",
                         "image/webp": "webp",
                     }.get(mime_type, "png")
-                    output_path = str(self.output_dir / f"gen_{int(time.time())}.{ext}")
+                    # Better filename with timestamp for uniqueness
+                    output_path = str(self.output_dir / f"gen_{int(time.time() * 1000)}.{ext}")
                     with open(output_path, "wb") as f:
                         f.write(image_bytes)
+                    
+                    print(f"[GenerationAgent] Saved image to: {output_path}")
 
                     try:
                         log_image_media(
@@ -474,7 +477,8 @@ class GenerationAgent:
                         )
                     except Exception:
                         pass
-                except Exception:
+                except Exception as e:
+                    print(f"[GenerationAgent] Failed to save image: {e}")
                     output_path = None
             else:
                 return {

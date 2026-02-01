@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/Providers";
+import { ThemeProvider } from "@/components/ThemeProvider";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -11,7 +13,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Continuity - AI Space Visualization",
+  title: "Clarity - AI Space Visualization",
   description: "Transform raw space photos into realistic renovation visualizations with self-improving AI agents",
   icons: {
     icon: "/favicon.ico",
@@ -24,11 +26,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
       <body className="font-sans antialiased">
-        <ToastProvider>
-          {children}
-        </ToastProvider>
+        <ThemeProvider defaultTheme="light" storageKey="clarity-theme">
+          <ToastProvider>
+            <ErrorBoundary>
+              {children}
+            </ErrorBoundary>
+          </ToastProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

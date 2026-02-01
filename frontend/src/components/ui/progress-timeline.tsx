@@ -9,7 +9,8 @@ import {
   ClipboardCheck,
   CheckCircle2,
   Circle,
-  Loader2
+  Loader2,
+  RefreshCw
 } from "lucide-react";
 
 const cn = (...classes: (string | undefined | null | false)[]) =>
@@ -48,11 +49,21 @@ function getStageStatus(stageId: PipelineStage, currentStage: PipelineStage): St
 }
 
 export function ProgressTimeline({ currentStage, className = "" }: ProgressTimelineProps) {
+  const currentIndex = stages.findIndex(s => s.id === currentStage);
+  const progressPercent = Math.round((currentIndex / (stages.length - 1)) * 100);
+  
   return (
-    <div className={cn("w-full py-2", className)}>
+    <div 
+      className={cn("w-full py-2", className)}
+      role="progressbar"
+      aria-valuenow={progressPercent}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={`Pipeline progress: ${stages[currentIndex]?.label || 'Starting'}`}
+    >
       <div className="flex items-center justify-between relative">
         {/* Background line */}
-        <div className="absolute top-5 left-8 right-8 h-[2px] bg-gradient-to-r from-black/[0.04] via-black/[0.06] to-black/[0.04] rounded-full" />
+        <div className="absolute top-5 left-8 right-8 h-[2px] bg-gradient-to-r from-neutral-200 via-neutral-300 to-neutral-200 dark:from-zinc-700 dark:via-zinc-600 dark:to-zinc-700 rounded-full" />
         
         {/* Progress line with glow */}
         <motion.div 
@@ -78,7 +89,7 @@ export function ProgressTimeline({ currentStage, className = "" }: ProgressTimel
               {/* Glow effect for active */}
               {status === "active" && (
                 <motion.div
-                  className="absolute top-0 w-10 h-10 rounded-full bg-primary/20 blur-md"
+                  className="absolute top-0 w-10 h-10 rounded-full bg-primary/20 dark:bg-primary/30 blur-md"
                   animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0.8, 0.5] }}
                   transition={{ duration: 2, repeat: Infinity }}
                 />
@@ -90,9 +101,9 @@ export function ProgressTimeline({ currentStage, className = "" }: ProgressTimel
                 transition={{ delay: index * 0.08, type: "spring", stiffness: 300 }}
                 className={cn(
                   "w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 relative",
-                  status === "completed" && "bg-gradient-to-br from-emerald-400 to-emerald-500 text-white shadow-md shadow-emerald-500/25",
-                  status === "active" && "bg-gradient-to-br from-primary to-accent text-white shadow-lg shadow-primary/30",
-                  status === "pending" && "bg-white/80 border-2 border-black/[0.06] text-muted-foreground/30"
+                  status === "completed" && "bg-gradient-to-br from-emerald-400 to-emerald-500 dark:from-emerald-500 dark:to-emerald-600 text-white shadow-md shadow-emerald-500/25 dark:shadow-emerald-500/40",
+                  status === "active" && "bg-gradient-to-br from-primary to-accent text-white shadow-lg shadow-primary/30 dark:shadow-primary/50",
+                  status === "pending" && "bg-white dark:bg-zinc-800 border-2 border-neutral-200 dark:border-zinc-700 text-neutral-300 dark:text-zinc-600"
                 )}
               >
                 {status === "active" ? (
@@ -121,9 +132,9 @@ export function ProgressTimeline({ currentStage, className = "" }: ProgressTimel
                 transition={{ delay: index * 0.08 + 0.15 }}
                 className={cn(
                   "text-[11px] font-medium mt-2.5 text-center whitespace-nowrap",
-                  status === "completed" && "text-emerald-600",
-                  status === "active" && "text-primary font-semibold",
-                  status === "pending" && "text-muted-foreground/40"
+                  status === "completed" && "text-emerald-600 dark:text-emerald-400",
+                  status === "active" && "text-primary dark:text-primary font-semibold",
+                  status === "pending" && "text-neutral-400 dark:text-zinc-500"
                 )}
               >
                 {stage.label}
@@ -149,7 +160,7 @@ export function CompactTimeline({ currentStage, className = "" }: CompactTimelin
   return (
     <div className={cn("flex items-center gap-2", className)}>
       {/* Progress bar */}
-      <div className="flex-1 h-1 bg-black/[0.06] rounded-full overflow-hidden">
+      <div className="flex-1 h-1 bg-neutral-200 dark:bg-zinc-700 rounded-full overflow-hidden">
         <motion.div
           className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
           initial={{ width: 0 }}
@@ -159,7 +170,7 @@ export function CompactTimeline({ currentStage, className = "" }: CompactTimelin
       </div>
       
       {/* Stage indicator */}
-      <span className="text-[10px] font-medium text-muted-foreground whitespace-nowrap">
+      <span className="text-[10px] font-medium text-neutral-500 dark:text-zinc-400 whitespace-nowrap">
         {stageIndex + 1}/{stages.length}
       </span>
     </div>
@@ -177,9 +188,9 @@ export function StageBadge({ stage, status }: { stage: PipelineStage; status: St
       animate={{ scale: 1, opacity: 1 }}
       className={cn(
         "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium",
-        status === "completed" && "bg-emerald-50 text-emerald-700 border border-emerald-200",
-        status === "active" && "bg-primary/10 text-primary border border-primary/20",
-        status === "pending" && "bg-black/[0.02] text-muted-foreground/50 border border-black/[0.06]"
+        status === "completed" && "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800",
+        status === "active" && "bg-primary/10 dark:bg-primary/20 text-primary border border-primary/20 dark:border-primary/30",
+        status === "pending" && "bg-neutral-100 dark:bg-zinc-800 text-neutral-400 dark:text-zinc-500 border border-neutral-200 dark:border-zinc-700"
       )}
     >
       {status === "active" ? (

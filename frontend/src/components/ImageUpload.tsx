@@ -84,7 +84,7 @@ export function ImageUpload({ images, onImagesChange, maxImages = 5 }: ImageUplo
             relative border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all duration-200
             ${isDragging 
               ? "border-primary bg-primary/5" 
-              : "border-black/10 hover:border-black/20 hover:bg-black/[0.02]"
+              : "border-neutral-200 dark:border-zinc-700 hover:border-neutral-300 dark:hover:border-zinc-600 hover:bg-neutral-50 dark:hover:bg-zinc-800/50"
             }
           `}
         >
@@ -118,9 +118,9 @@ export function ImageUpload({ images, onImagesChange, maxImages = 5 }: ImageUplo
         <div className="flex gap-2 flex-wrap">
           {images.map((url, index) => (
             <div key={index} className="relative group">
-              <div className="w-16 h-16 rounded-lg overflow-hidden bg-black/5 border border-black/10">
+              <div className="w-16 h-16 rounded-lg overflow-hidden bg-neutral-100 dark:bg-zinc-800 border border-neutral-200 dark:border-zinc-700">
                 {loadingImages.has(index) && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/5">
+                  <div className="absolute inset-0 flex items-center justify-center bg-neutral-100 dark:bg-zinc-800">
                     <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
                   </div>
                 )}
@@ -155,7 +155,7 @@ export function ImageUpload({ images, onImagesChange, maxImages = 5 }: ImageUplo
               className={`w-16 h-16 rounded-lg border-2 border-dashed flex items-center justify-center transition-all ${
                 isDragging 
                   ? "border-primary bg-primary/5" 
-                  : "border-black/10 hover:border-black/20 hover:bg-black/[0.02]"
+                  : "border-neutral-200 dark:border-zinc-700 hover:border-neutral-300 dark:hover:border-zinc-600 hover:bg-neutral-50 dark:hover:bg-zinc-800/50"
               }`}
             >
               <Plus className={`w-5 h-5 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />

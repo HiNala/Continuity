@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     wandb_entity: Optional[str] = None
     browserbase_api_key: Optional[str] = None
     browserbase_project_id: Optional[str] = None
-    stagehand_model_api_key: Optional[str] = None  # OpenAI/Anthropic key for Stagehand AI
+    stagehand_model_api_key: Optional[str] = None  # Model key for Stagehand AI (Gemini/OpenAI/Anthropic)
+    google_generative_ai_api_key: Optional[str] = None  # Alternative Gemini key name for Stagehand
     
     # ==========================================
     # Weave Configuration

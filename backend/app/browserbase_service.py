@@ -79,7 +79,13 @@ class StagehandBrowserbaseService:
     def __init__(self):
         self.browserbase_api_key = settings.browserbase_api_key
         self.browserbase_project_id = settings.browserbase_project_id
-        self.model_api_key = settings.stagehand_model_api_key
+        # Stagehand model key: prefer stagehand_model_api_key, fall back to gemini keys
+        # This allows using the same Gemini key for both image generation AND browser automation
+        self.model_api_key = (
+            settings.stagehand_model_api_key 
+            or settings.google_generative_ai_api_key 
+            or settings.gemini_api_key
+        )
         self.base_url = "https://www.browserbase.com/v1"
         self._stagehand_available = None
     
@@ -90,7 +96,11 @@ class StagehandBrowserbaseService:
     
     @property
     def is_stagehand_configured(self) -> bool:
-        """Check if Stagehand (with model API key) is fully configured."""
+        """Check if Stagehand (with model API key) is fully configured.
+        
+        Stagehand supports Gemini, OpenAI, and Anthropic models.
+        We use the Gemini key by default since it's already configured.
+        """
         return self.is_browserbase_configured and bool(self.model_api_key)
     
     async def _check_stagehand_availability(self) -> bool:
@@ -232,19 +242,21 @@ class StagehandBrowserbaseService:
         # Use Unsplash as primary source (free, high-quality images)
         search_url = f"https://unsplash.com/s/photos/{full_query}"
         
-        # Configure Stagehand with Browserbase
+        # Configure Stagehand with Browserbase using Gemini
+        # Stagehand supports Google Gemini as a first-class model
+        # See: https://docs.stagehand.dev/v3/configuration/models
         config = StagehandConfig(
             env="BROWSERBASE",
             api_key=self.browserbase_api_key,
             project_id=self.browserbase_project_id,
-            model_name="gpt-4o-mini",  # Cost-effective model
+            model_name="google/gemini-2.5-flash",  # Fast, accurate, cost-effective
             headless=True,
             verbose=1,
         )
         
         stagehand = Stagehand(
             config=config,
-            model_api_key=self.model_api_key,
+            model_api_key=self.model_api_key,  # Uses GEMINI_API_KEY
         )
         
         try:
@@ -524,6 +536,13 @@ class StagehandBrowserbaseService:
             "browserbase_configured": self.is_browserbase_configured,
             "stagehand_configured": self.is_stagehand_configured,
             "stagehand_available": stagehand_available,
+            "model": "google/gemini-2.5-flash" if stagehand_available else None,
+            "model_key_source": (
+                "STAGEHAND_MODEL_API_KEY" if settings.stagehand_model_api_key
+                else "GOOGLE_GENERATIVE_AI_API_KEY" if settings.google_generative_ai_api_key
+                else "GEMINI_API_KEY" if settings.gemini_api_key
+                else None
+            ) if self.model_api_key else None,
             "mode": "ai_powered" if stagehand_available else "curated_gallery",
             "capabilities": {
                 "ai_extraction": stagehand_available,

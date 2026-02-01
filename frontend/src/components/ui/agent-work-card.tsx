@@ -74,6 +74,7 @@ export interface AgentWorkCardProps {
     output?: string;
   };
   weaveTraceUrl?: string;
+  browserbaseSessionId?: string;
 }
 
 const agentConfig: Record<AgentType, { label: string; icon: React.ElementType; gradient: string; accentColor: string }> = {
@@ -121,7 +122,7 @@ const actionConfig: Record<ActionType, { icon: React.ElementType; label: string 
   generating: { icon: Sparkles, label: "Generating" },
   evaluating: { icon: ClipboardCheck, label: "Evaluating" },
   searching: { icon: Eye, label: "Searching" },
-  policy_update: { icon: Wand2, label: "Updating Policy" },
+  policy_update: { icon: Wand2, label: "Self-Improving" },
   question: { icon: MessageSquare, label: "Awaiting Input" },
   success: { icon: CheckCircle2, label: "Complete" },
   error: { icon: AlertCircle, label: "Error" },
@@ -140,6 +141,7 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
   reasoning,
   toolCall,
   weaveTraceUrl,
+  browserbaseSessionId,
 }) => {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const agentInfo = agentConfig[agent];
@@ -150,17 +152,26 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
   const hasExpandableContent = (details && Object.keys(details).length > 0) || reasoning || toolCall;
 
   const getStatusStyles = () => {
+    // Special styling for self-improvement/policy update actions
+    const isSelfImprovement = action === "policy_update";
+    
     switch (status) {
       case "running":
-        return "border-l-[3px] border-l-primary shadow-[inset_0_0_0_1px_rgba(236,72,153,0.1)]";
+        if (isSelfImprovement) {
+          return "border-l-[3px] border-l-amber-500 bg-gradient-to-r from-amber-50/50 dark:from-amber-900/20 to-transparent";
+        }
+        return "border-l-[3px] border-l-primary";
       case "completed":
+        if (isSelfImprovement) {
+          return "border-l-[3px] border-l-emerald-500 bg-gradient-to-r from-emerald-50/30 dark:from-emerald-900/20 to-transparent";
+        }
         return "border-l-[3px] border-l-emerald-500";
       case "error":
-        return "border-l-[3px] border-l-red-500 bg-red-50/30";
+        return "border-l-[3px] border-l-red-500 bg-red-50/30 dark:bg-red-900/20";
       case "warning":
-        return "border-l-[3px] border-l-amber-500 bg-amber-50/30";
+        return "border-l-[3px] border-l-amber-500 bg-gradient-to-r from-amber-50/50 dark:from-amber-900/20 to-transparent";
       default:
-        return "border-l-[3px] border-l-slate-200";
+        return "border-l-[3px] border-l-slate-200 dark:border-l-zinc-700";
     }
   };
 
@@ -170,8 +181,8 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
       whileHover={{ y: -1 }}
       transition={{ duration: 0.2 }}
       className={cn(
-        "relative rounded-xl border border-black/[0.05] bg-white/95 backdrop-blur-sm overflow-hidden",
-        "shadow-sm hover:shadow-lg hover:border-black/[0.08] transition-all duration-300",
+        "relative rounded-xl border border-neutral-200/60 dark:border-zinc-800 bg-white dark:bg-zinc-900 backdrop-blur-sm overflow-hidden",
+        "shadow-sm hover:shadow-lg hover:border-neutral-300 dark:hover:border-zinc-700 transition-all duration-300",
         getStatusStyles()
       )}
     >
@@ -192,18 +203,18 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
             <div className="min-w-0 flex-1">
               {/* Agent label and action - more compact */}
               <div className="flex items-center gap-1.5 mb-0.5">
-                <span className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wide">
+                <span className="text-[10px] font-semibold text-neutral-500 dark:text-zinc-400 uppercase tracking-wide">
                   {agentInfo.label}
                 </span>
-                <span className="text-muted-foreground/30">•</span>
-                <span className="text-[10px] text-muted-foreground/50 flex items-center gap-0.5">
+                <span className="text-neutral-300 dark:text-zinc-600">•</span>
+                <span className="text-[10px] text-neutral-400 dark:text-zinc-500 flex items-center gap-0.5">
                   <ActionIcon className="w-2.5 h-2.5" />
                   {actionInfo.label}
                 </span>
               </div>
               
               {/* Title */}
-              <h3 className="text-[13px] font-semibold text-foreground truncate">
+              <h3 className="text-[13px] font-semibold text-neutral-900 dark:text-zinc-100 truncate">
                 {title}
               </h3>
             </div>
@@ -212,7 +223,7 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
           {/* Timestamp and status */}
           <div className="flex flex-col items-end gap-1 shrink-0">
             {timestamp && (
-              <span className="text-[9px] text-muted-foreground/40 font-mono">
+              <span className="text-[9px] text-neutral-400 dark:text-zinc-500 font-mono">
                 {timestamp}
               </span>
             )}
@@ -223,7 +234,7 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
 
       {/* Content - cleaner */}
       <div className="px-4 pb-3">
-        <p className="text-xs text-muted-foreground/70 leading-relaxed">
+        <p className="text-xs text-neutral-500 dark:text-zinc-400 leading-relaxed">
           {content}
         </p>
       </div>
@@ -370,18 +381,31 @@ export const AgentWorkCard: React.FC<AgentWorkCardProps> = ({
                     </div>
                   )}
                   
-                  {/* Weave trace link */}
-                  {weaveTraceUrl && (
-                    <a
-                      href={weaveTraceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-[10px] text-primary/70 hover:text-primary transition-colors"
-                    >
-                      <Eye className="w-3 h-3" />
-                      View in Weave
-                    </a>
-                  )}
+                  {/* External links */}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {weaveTraceUrl && (
+                      <a
+                        href={weaveTraceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[10px] text-primary/70 hover:text-primary transition-colors"
+                      >
+                        <Eye className="w-3 h-3" />
+                        View in Weave
+                      </a>
+                    )}
+                    {browserbaseSessionId && (
+                      <a
+                        href={`https://browserbase.com/sessions/${browserbaseSessionId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        Browser Session
+                      </a>
+                    )}
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -428,15 +452,15 @@ function StatusBadge({ status }: { status: CardStatus }) {
   const getStyles = () => {
     switch (status) {
       case "completed":
-        return "bg-emerald-500/10 text-emerald-600 border-emerald-500/20";
+        return "bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 dark:border-emerald-500/30";
       case "running":
-        return "bg-primary/10 text-primary border-primary/20";
+        return "bg-primary/10 dark:bg-primary/20 text-primary border-primary/20 dark:border-primary/30";
       case "error":
-        return "bg-red-500/10 text-red-600 border-red-500/20";
+        return "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 border-red-500/20 dark:border-red-500/30";
       case "warning":
-        return "bg-amber-500/10 text-amber-600 border-amber-500/20";
+        return "bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/20 dark:border-amber-500/30";
       default:
-        return "bg-slate-500/10 text-slate-500 border-slate-500/20";
+        return "bg-slate-500/10 dark:bg-zinc-500/20 text-slate-500 dark:text-zinc-400 border-slate-500/20 dark:border-zinc-500/30";
     }
   };
 
@@ -509,44 +533,30 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={smoothTransition}
-      className="rounded-xl border border-black/[0.06] bg-white/80 backdrop-blur-sm p-4 shadow-sm"
-    >
-      <p className="text-[13px] font-medium text-foreground mb-3 leading-relaxed">{question.question_text}</p>
+    <div className="space-y-2">
+      <p className="text-[14px] text-neutral-800 dark:text-zinc-200 leading-relaxed">{question.question_text}</p>
       {question.multi_select && (
-        <p className="text-[10px] text-muted-foreground/60 mb-2.5 flex items-center gap-1">
-          <span className="w-1 h-1 rounded-full bg-primary/50" />
-          Select all that apply
-        </p>
+        <p className="text-[11px] text-neutral-400 dark:text-zinc-500">Select all that apply</p>
       )}
       <div className="flex flex-wrap gap-2">
-        {question.possible_answers.map((answer, index) => (
-          <motion.button
+        {question.possible_answers.map((answer) => (
+          <button
             key={answer.answer_id}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: index * 0.03, type: "spring", stiffness: 300 }}
-            whileHover={!disabled ? { scale: 1.03, y: -1 } : {}}
-            whileTap={!disabled ? { scale: 0.97 } : {}}
             onClick={() => handleSelect(answer.answer_id)}
             disabled={disabled}
             className={cn(
-              "px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200",
-              "border shadow-sm",
+              "px-3 py-1.5 rounded-md text-[13px] transition-colors",
               selected.includes(answer.answer_id)
-                ? "bg-gradient-to-br from-foreground to-foreground/90 text-background border-foreground shadow-md"
-                : "bg-white border-black/[0.08] text-foreground/70 hover:bg-black/[0.02] hover:border-black/[0.15] hover:shadow",
+                ? "bg-neutral-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
+                : "bg-neutral-100 dark:bg-zinc-800 text-neutral-600 dark:text-zinc-300 hover:bg-neutral-200 dark:hover:bg-zinc-700",
               disabled && "opacity-50 cursor-not-allowed"
             )}
           >
             {answer.answer_text}
-          </motion.button>
+          </button>
         ))}
       </div>
-    </motion.div>
+    </div>
   );
 };
 
@@ -563,26 +573,13 @@ export const ImageDisplayCard: React.FC<ImageDisplayCardProps> = ({
   if (images.length === 0) return null;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      transition={smoothTransition}
-      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-white/40 bg-white/30 backdrop-blur-xl"
-    >
-      <div className="flex items-center gap-2">
-        <ImageIcon className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
-        <span className="text-xs font-medium text-foreground/70">{title}</span>
-      </div>
-      <div className="flex gap-2 flex-wrap">
+    <div className="flex items-center gap-3">
+      <span className="text-[11px] font-medium text-neutral-400 dark:text-zinc-500">{title}</span>
+      <div className="flex gap-2">
         {images.map((img, index) => (
-          <motion.div
+          <div
             key={index}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: index * 0.05 }}
-            whileHover={{ scale: 1.05 }}
-            className="relative w-12 h-12 rounded-lg overflow-hidden border border-white/40 bg-white/20 group cursor-pointer shadow-sm"
+            className="w-12 h-12 rounded-lg overflow-hidden bg-neutral-100 dark:bg-zinc-800"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -590,9 +587,9 @@ export const ImageDisplayCard: React.FC<ImageDisplayCardProps> = ({
               alt={`Image ${index + 1}`}
               className="w-full h-full object-cover"
             />
-          </motion.div>
+          </div>
         ))}
       </div>
-    </motion.div>
+    </div>
   );
 };

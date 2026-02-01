@@ -32,8 +32,8 @@ export function AnimatedBackground({
   
   return (
     <div className="fixed inset-0 overflow-hidden pointer-events-none">
-      {/* Clean gradient base */}
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-white to-slate-50" />
+      {/* Clean gradient base - Light mode */}
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-white to-slate-50 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950" />
       
       {/* Primary Pink Orb - simplified movement */}
       <motion.div
@@ -57,7 +57,7 @@ export function AnimatedBackground({
             opacity,
           }}
           transition={propertyTransition}
-          className="rounded-full bg-gradient-to-br from-pink-300 via-rose-200 to-pink-400"
+          className="rounded-full bg-gradient-to-br from-pink-300 via-rose-200 to-pink-400 dark:from-pink-600/50 dark:via-rose-500/40 dark:to-pink-700/50"
           style={{ filter: `blur(${blur}px)` }}
         />
       </motion.div>
@@ -84,7 +84,7 @@ export function AnimatedBackground({
             opacity: opacity * 0.9,
           }}
           transition={propertyTransition}
-          className="rounded-full bg-gradient-to-br from-sky-300 via-cyan-200 to-blue-300"
+          className="rounded-full bg-gradient-to-br from-sky-300 via-cyan-200 to-blue-300 dark:from-cyan-600/50 dark:via-sky-500/40 dark:to-blue-600/50"
           style={{ filter: `blur(${blur}px)` }}
         />
       </motion.div>
@@ -109,7 +109,7 @@ export function AnimatedBackground({
             className="absolute top-[45%] left-[50%] -translate-x-1/2 -translate-y-1/2"
           >
             <div 
-              className="rounded-full bg-gradient-to-br from-violet-300 via-purple-200 to-fuchsia-300"
+              className="rounded-full bg-gradient-to-br from-violet-300 via-purple-200 to-fuchsia-300 dark:from-violet-600/50 dark:via-purple-500/40 dark:to-fuchsia-600/50"
               style={{ 
                 width: size * 0.7,
                 height: size * 0.7,
@@ -121,12 +121,11 @@ export function AnimatedBackground({
         )}
       </AnimatePresence>
 
-      {/* Frosted overlay */}
+      {/* Frosted overlay - adapts to dark mode */}
       <div 
-        className="absolute inset-0"
+        className="absolute inset-0 bg-white/30 dark:bg-zinc-900/50"
         style={{
           backdropFilter: 'blur(80px)',
-          backgroundColor: 'rgba(255,255,255,0.3)',
         }}
       />
     </div>
@@ -137,7 +136,7 @@ export function AnimatedBackground({
 export function PanelBackground({ className }: { className?: string }) {
   return (
     <div className={`absolute inset-0 overflow-hidden pointer-events-none ${className || ''}`}>
-      <div className="absolute inset-0 bg-gradient-to-b from-white/60 to-white/30" />
+      <div className="absolute inset-0 bg-gradient-to-b from-white/60 to-white/30 dark:from-zinc-900/60 dark:to-zinc-900/30" />
       <motion.div
         animate={{
           opacity: [0.2, 0.4, 0.2],
@@ -148,7 +147,7 @@ export function PanelBackground({ className }: { className?: string }) {
           repeat: Infinity,
           ease: "easeInOut",
         }}
-        className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 rounded-full bg-gradient-to-br from-pink-200/20 to-transparent blur-3xl"
+        className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 rounded-full bg-gradient-to-br from-pink-200/20 dark:from-pink-500/10 to-transparent blur-3xl"
       />
       <motion.div
         animate={{
@@ -161,7 +160,7 @@ export function PanelBackground({ className }: { className?: string }) {
           ease: "easeInOut",
           delay: 2,
         }}
-        className="absolute -bottom-1/4 -left-1/4 w-1/2 h-1/2 rounded-full bg-gradient-to-br from-cyan-200/20 to-transparent blur-3xl"
+        className="absolute -bottom-1/4 -left-1/4 w-1/2 h-1/2 rounded-full bg-gradient-to-br from-cyan-200/20 dark:from-cyan-500/10 to-transparent blur-3xl"
       />
     </div>
   );
@@ -193,7 +192,7 @@ export function GradientBorder({
       style={animate ? { backgroundSize: "200% 200%" } : {}}
       className={`relative p-[1px] rounded-2xl bg-gradient-to-r ${gradient} ${className || ''}`}
     >
-      <div className="relative rounded-2xl bg-white/80 backdrop-blur-xl">
+      <div className="relative rounded-2xl bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl">
         {children}
       </div>
     </motion.div>

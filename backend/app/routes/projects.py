@@ -87,6 +87,17 @@ class InspirationData(BaseModel):
     general_inspiration: List[InspirationImage] = []
 
 
+class ImageAnalysisResult(BaseModel):
+    """Result of image analysis before asking questions."""
+    analyzed: bool = False
+    space_type: Optional[str] = None
+    space_type_confidence: Optional[float] = None
+    space_type_reasoning: Optional[str] = None
+    construction_state: Optional[str] = None
+    existing_styles: List[str] = []
+    accessibility_features: List[str] = []
+
+
 class AnalyzeGoalResponse(BaseModel):
     """Response from goal analysis, including inspiration images."""
     project_id: str
@@ -95,6 +106,8 @@ class AnalyzeGoalResponse(BaseModel):
     questions: List[ClarifyingQuestion]
     questions_needed: bool
     inspiration: Optional[InspirationData] = None
+    # NEW: Explicit image analysis results for frontend display
+    image_analysis: Optional[ImageAnalysisResult] = None
 
 
 class SubmitAnswersRequest(BaseModel):
@@ -278,6 +291,19 @@ async def analyze_goal(
         print(f"Inspiration fetch failed: {e}")
         # Continue without inspiration - it's enhancement only
     
+    # Build image analysis result for frontend
+    image_analysis_result = None
+    if image_analysis and image_analysis.get("analyzed"):
+        image_analysis_result = ImageAnalysisResult(
+            analyzed=True,
+            space_type=image_analysis.get("space_type"),
+            space_type_confidence=image_analysis.get("space_type_confidence"),
+            space_type_reasoning=image_analysis.get("space_type_reasoning"),
+            construction_state=image_analysis.get("construction_state"),
+            existing_styles=image_analysis.get("existing_styles", []),
+            accessibility_features=image_analysis.get("accessibility_features", []),
+        )
+    
     return AnalyzeGoalResponse(
         project_id=str(project_id),
         original_goal=project.goal,
@@ -285,6 +311,7 @@ async def analyze_goal(
         questions=questions,
         questions_needed=len(questions) > 0,
         inspiration=inspiration_data,
+        image_analysis=image_analysis_result,
     )
 
 
@@ -729,6 +756,7 @@ class IterationResponse(BaseModel):
     iteration_number: int
     input_image_path: Optional[str]
     output_image_path: Optional[str]
+    output_image_url: Optional[str] = None  # Full URL for frontend
     prompt_used: Optional[str]
     generation_latency_ms: Optional[int]
     policy_version: Optional[int]
@@ -736,6 +764,12 @@ class IterationResponse(BaseModel):
     error_message: Optional[str]
     created_at: str
     metadata: Optional[Dict[str, Any]]
+    # Evaluation fields
+    evaluation_status: Optional[str] = None
+    evaluation_score: Optional[float] = None
+    evaluation_passed: Optional[bool] = None
+    # Weave trace ID for linking to traces
+    weave_run_id: Optional[str] = None
 
 
 class PolicyResponse(BaseModel):
@@ -883,6 +917,7 @@ async def get_iterations(
 ):
     """
     Retrieve all generation iterations for a project.
+    Includes ALL iterations - both successful and failed - for complete visibility.
     """
     result = await session.execute(
         select(Iteration)
@@ -891,23 +926,45 @@ async def get_iterations(
     )
     iterations = result.scalars().all()
     
-    return [
-        IterationResponse(
+    responses = []
+    for i in iterations:
+        # Build full URL for image access
+        output_url = None
+        if i.output_image_path:
+            # Convert local path to URL (e.g., "generated_images/gen_123.png" -> "/generated_images/gen_123.png")
+            if i.output_image_path.startswith("generated_images"):
+                output_url = f"/{i.output_image_path}"
+            elif i.output_image_path.startswith("/"):
+                output_url = i.output_image_path
+            else:
+                output_url = f"/generated_images/{i.output_image_path.split('/')[-1]}"
+        
+        # Determine evaluation pass/fail
+        eval_passed = None
+        if i.evaluation_status:
+            eval_passed = i.evaluation_status == "passed"
+        
+        responses.append(IterationResponse(
             id=str(i.id),
             phase=i.phase,
             iteration_number=i.iteration_number,
             input_image_path=i.input_image_path,
             output_image_path=i.output_image_path,
-            prompt_used=i.prompt_used[:500] if i.prompt_used else None,  # Truncate for response
+            output_image_url=output_url,
+            prompt_used=i.prompt_used[:500] if i.prompt_used else None,
             generation_latency_ms=i.generation_latency_ms,
             policy_version=i.policy_version,
             status=i.status,
             error_message=i.error_message,
             created_at=i.created_at.isoformat(),
             metadata=i.metadata_,
-        )
-        for i in iterations
-    ]
+            evaluation_status=i.evaluation_status,
+            evaluation_score=i.evaluation_score,
+            evaluation_passed=eval_passed,
+            weave_run_id=i.weave_run_id,
+        ))
+    
+    return responses
 
 
 @router.get("/{project_id}/policy", response_model=PolicyResponse)
@@ -1055,14 +1112,17 @@ async def get_iteration_evaluation(
     """
     Retrieve stored evaluation results for an iteration.
     """
-    # Get iteration
+    # Get iteration - validate it belongs to the project for security
     result = await session.execute(
-        select(Iteration).where(Iteration.id == iteration_id)
+        select(Iteration).where(
+            Iteration.id == iteration_id,
+            Iteration.project_id == project_id
+        )
     )
     iteration = result.scalar_one_or_none()
     
     if not iteration:
-        raise HTTPException(status_code=404, detail="Iteration not found")
+        raise HTTPException(status_code=404, detail="Iteration not found or does not belong to this project")
     
     # Get evaluation details
     details_result = await session.execute(
@@ -1624,6 +1684,8 @@ async def generate_orchestration_stream(
             elif "retrying" in log.to_state:
                 agent = "qc"
                 action = "policy_update"
+                # Extract phase being retried
+                phase = log.to_state.replace("retrying_", "")
             elif log.to_state in ["completed", "completed_with_warnings"]:
                 agent = "orchestrator"
                 action = "success"
@@ -1639,18 +1701,28 @@ async def generate_orchestration_stream(
                 elif log.details.get("error"):
                     message = f"Error: {log.details['error']}"
             
+            # Build event details with retry info if applicable
+            event_details = {
+                "from_state": log.from_state,
+                "to_state": log.to_state,
+                "trigger": log.trigger,
+                "duration_ms": log.duration_ms,
+                **log.details
+            }
+            
+            # Add retry-specific info
+            if "retrying" in log.to_state:
+                event_details["retry_number"] = project.retry_count + 1
+                event_details["phase"] = log.to_state.replace("retrying_", "")
+                event_details["failure_reason"] = log.details.get("failure_reason", "Quality evaluation below threshold")
+                event_details["changes_applied"] = log.details.get("changes_applied", [])
+            
             yield format_sse("agent", {
                 "event": "agent",
                 "agent": agent,
                 "action": action,
                 "message": message,
-                "details": {
-                    "from_state": log.from_state,
-                    "to_state": log.to_state,
-                    "trigger": log.trigger,
-                    "duration_ms": log.duration_ms,
-                    **log.details
-                },
+                "details": event_details,
                 "timestamp": log.created_at.isoformat()
             })
             

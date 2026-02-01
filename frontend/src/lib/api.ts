@@ -1,5 +1,5 @@
 /**
- * Continuity - API Client
+ * Clarity - API Client
  * Handles all communication with the backend.
  */
 
@@ -33,12 +33,23 @@ export interface ClarifyingQuestion {
   multi_select: boolean;
 }
 
+export interface ImageAnalysisResult {
+  analyzed: boolean;
+  space_type: string | null;
+  space_type_confidence: number | null;
+  space_type_reasoning: string | null;
+  construction_state: string | null;
+  existing_styles: string[];
+  accessibility_features: string[];
+}
+
 export interface AnalyzeGoalResponse {
   project_id: string;
   original_goal: string;
   identified: Record<string, string | boolean | number | string[]>;
   questions: ClarifyingQuestion[];
   questions_needed: boolean;
+  image_analysis: ImageAnalysisResult | null;
 }
 
 export interface SubmitAnswersRequest {
@@ -335,6 +346,7 @@ export interface IterationResponse {
   iteration_number: number;
   input_image_path: string | null;
   output_image_path: string | null;
+  output_image_url: string | null;  // Full URL for displaying
   prompt_used: string | null;
   generation_latency_ms: number | null;
   policy_version: number | null;
@@ -342,6 +354,12 @@ export interface IterationResponse {
   error_message: string | null;
   created_at: string;
   metadata: Record<string, unknown> | null;
+  // Evaluation fields
+  evaluation_status: string | null;
+  evaluation_score: number | null;
+  evaluation_passed: boolean | null;
+  // Weave trace ID
+  weave_run_id: string | null;
 }
 
 export interface PolicyResponse {
@@ -656,6 +674,10 @@ export interface OrchestrationStatusResponse {
     trigger: string;
     at: string;
   }>;
+  // Batch processing fields
+  total_scenes?: number;
+  completed_scenes?: number;
+  is_batch?: boolean;
 }
 
 export interface OrchestrationLogEntry {
@@ -983,12 +1005,65 @@ export async function runSelfImprovementTests(): Promise<SelfImprovementTestResu
 // ============================================
 // Streaming Types
 // ============================================
+export type StreamEventType = 
+  | "agent" 
+  | "thinking" 
+  | "progress" 
+  | "question" 
+  | "error" 
+  | "complete" 
+  | "heartbeat"
+  // Batch processing events
+  | "scene_start"
+  | "scene_complete"
+  | "scene_error"
+  | "batch_progress"
+  // Self-improvement events
+  | "learning"
+  | "policy_update";
+
+export type AgentName = 
+  | "requirements" 
+  | "spatial" 
+  | "generation" 
+  | "qc" 
+  | "orchestrator"
+  | "system";
+
 export interface StreamEvent {
-  event: "agent" | "thinking" | "progress" | "question" | "error" | "complete" | "heartbeat";
-  agent?: "requirements" | "spatial" | "generation" | "qc" | "orchestrator";
+  event: StreamEventType;
+  agent?: AgentName;
   action?: string;
   message: string;
-  details?: Record<string, unknown>;
+  details?: {
+    // Common fields
+    from_state?: string;
+    to_state?: string;
+    trigger?: string;
+    duration_ms?: number;
+    // Retry/self-improvement fields
+    retry_number?: number;
+    phase?: string;
+    score?: number;
+    policy_version?: number;
+    changes_applied?: Array<Record<string, unknown>>;
+    // Batch processing fields
+    scene_id?: string;
+    scene_index?: number;
+    total_scenes?: number;
+    completed?: number;
+    is_batch?: boolean;
+    // Learning fields
+    improvements_made?: number;
+    benefiting_scenes?: number;
+    learning_applied?: boolean;
+    // Warning/error fields
+    has_warnings?: boolean;
+    warning_details?: Array<Record<string, unknown>>;
+    error?: string;
+    // Any other fields
+    [key: string]: unknown;
+  };
   timestamp: string;
 }
 
@@ -1046,13 +1121,27 @@ export function subscribeToOrchestration(
   };
   
   // Listen to all event types
-  eventSource.addEventListener("agent", handleEvent);
-  eventSource.addEventListener("thinking", handleEvent);
-  eventSource.addEventListener("progress", handleEvent);
-  eventSource.addEventListener("question", handleEvent);
-  eventSource.addEventListener("error", handleEvent);
-  eventSource.addEventListener("complete", handleEvent);
-  eventSource.addEventListener("heartbeat", handleEvent);
+  const eventTypes: StreamEventType[] = [
+    "agent",
+    "thinking", 
+    "progress",
+    "question",
+    "error",
+    "complete",
+    "heartbeat",
+    // Batch processing events
+    "scene_start",
+    "scene_complete", 
+    "scene_error",
+    "batch_progress",
+    // Self-improvement events
+    "learning",
+    "policy_update",
+  ];
+  
+  eventTypes.forEach(eventType => {
+    eventSource.addEventListener(eventType, handleEvent);
+  });
   
   eventSource.onerror = (err) => {
     if (closedByClient) {
@@ -1091,4 +1180,63 @@ export async function getAgentReasoning(
   }
 
   return response.json();
+}
+
+// ============================================
+// Evaluation Detail Types
+// ============================================
+export interface EvaluationDetailResponse {
+  iteration_id: string;
+  phase: string;
+  iteration_number: number;
+  overall_passed: boolean;
+  overall_score: number;
+  criteria: CriterionResult[];
+  failure_reasons: string[];
+  evaluated_at: string;
+}
+
+// ============================================
+// Evaluation Detail Function
+// ============================================
+
+/**
+ * Get detailed evaluation results for a specific iteration.
+ * Returns all criteria scores, pass/fail status, and evidence.
+ */
+export async function getIterationEvaluation(
+  projectId: string,
+  iterationId: string
+): Promise<EvaluationDetailResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/iterations/${iterationId}/evaluation`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get evaluation details");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get all iterations with their images for a project.
+ * Includes both successful and failed iterations.
+ */
+export async function getAllProjectImages(
+  projectId: string
+): Promise<{
+  uploaded_images: string[];
+  iterations: IterationResponse[];
+}> {
+  const [project, iterations] = await Promise.all([
+    getProject(projectId),
+    getIterations(projectId)
+  ]);
+
+  return {
+    uploaded_images: project.images || [],
+    iterations: iterations
+  };
 }

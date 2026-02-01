@@ -34,11 +34,12 @@ from app.weave_ops import record_policy_improvement, record_cross_project_learni
 # Evaluation Criteria Weights
 # ============================================
 CRITERION_WEIGHTS = {
-    EvaluationCriterion.CONSTRAINT_COMPLIANCE: 0.35,
-    EvaluationCriterion.GEOMETRY_PRESERVATION: 0.25,
-    EvaluationCriterion.HALLUCINATION_DETECTION: 0.20,
-    EvaluationCriterion.STYLE_EXECUTION: 0.10,
+    EvaluationCriterion.CONSTRAINT_COMPLIANCE: 0.30,
+    EvaluationCriterion.GEOMETRY_PRESERVATION: 0.20,
+    EvaluationCriterion.HALLUCINATION_DETECTION: 0.15,
+    EvaluationCriterion.STYLE_EXECUTION: 0.15,
     EvaluationCriterion.PHASE_COMPLETION: 0.10,
+    "goal_alignment": 0.10,  # NEW: Does output match user's intent?
 }
 
 # Pass/fail threshold
@@ -323,6 +324,65 @@ Return a JSON response:
             "evidence": {"target_style": style},
         }
     
+    @weave.op(name="qc_evaluate_goal_alignment")
+    async def evaluate_goal_alignment(
+        self,
+        iteration: Iteration,
+        original_goal: str,
+        session: AsyncSession
+    ) -> Dict[str, Any]:
+        """
+        Evaluate whether the output aligns with the user's original goal/intent.
+        This is CRITICAL for true self-improvement - we need to match what they wanted.
+        Weight: 10%
+        """
+        prompt = f"""Analyze this interior/architectural image for alignment with the user's goal.
+
+USER'S ORIGINAL GOAL: {original_goal}
+
+Evaluate:
+1. Does the image appear to be moving toward accomplishing this goal?
+2. Are the changes/transformations consistent with what the user asked for?
+3. Is the overall direction of the design matching the user's intent?
+
+Return a JSON response:
+{{
+    "goal_aligned": true/false,
+    "alignment_score": 0.0-1.0,
+    "matching_aspects": ["list of aspects that match the goal"],
+    "missing_aspects": ["list of aspects from the goal that are not addressed"],
+    "analysis": "brief assessment of how well this serves the user's intent"
+}}"""
+
+        try:
+            result = await self._call_vision_api(prompt, iteration.output_image_path)
+            
+            if result.get("success"):
+                response_data = self._parse_json_response(result.get("response_text", ""))
+                score = response_data.get("alignment_score", 0.7)
+                
+                return {
+                    "criterion": "goal_alignment",
+                    "passed": response_data.get("goal_aligned", True) and score >= 0.5,
+                    "score": score,
+                    "details": response_data.get("analysis", "Goal alignment evaluation complete."),
+                    "evidence": {
+                        "original_goal": original_goal[:200],
+                        "matching": response_data.get("matching_aspects", []),
+                        "missing": response_data.get("missing_aspects", []),
+                    },
+                }
+        except Exception:
+            pass
+        
+        return {
+            "criterion": "goal_alignment",
+            "passed": True,
+            "score": 0.75,
+            "details": "Goal alignment check unavailable. Assuming reasonable alignment.",
+            "evidence": {"original_goal": original_goal[:200]},
+        }
+
     @weave.op(name="qc_evaluate_phase_completion")
     async def evaluate_phase_completion(
         self,
@@ -399,7 +459,10 @@ Return a JSON response:
     ) -> Dict[str, Any]:
         """
         Run all evaluations and compute overall score.
+        Includes goal alignment check to ensure output matches user intent.
         """
+        from app.models import Project
+        
         # Load iteration and constraints
         result = await session.execute(
             select(Iteration).where(Iteration.id == iteration_id)
@@ -408,6 +471,13 @@ Return a JSON response:
         
         if not iteration:
             return {"success": False, "error": "Iteration not found"}
+        
+        # Load project to get original goal
+        project_result = await session.execute(
+            select(Project).where(Project.id == iteration.project_id)
+        )
+        project = project_result.scalar_one_or_none()
+        original_goal = project.goal if project else "Transform this space"
         
         # Load constraints for the project
         constraints_result = await session.execute(
@@ -432,6 +502,10 @@ Return a JSON response:
         
         eval_phase = await self.evaluate_phase_completion(iteration, session)
         evaluations.append(eval_phase)
+        
+        # NEW: Goal alignment evaluation - does output match user's intent?
+        eval_goal = await self.evaluate_goal_alignment(iteration, original_goal, session)
+        evaluations.append(eval_goal)
         
         # Compute weighted score
         total_score = 0.0

@@ -37,10 +37,10 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
   };
 
   const bgColors = {
-    success: "bg-emerald-500/10 border-emerald-500/20",
-    error: "bg-red-500/10 border-red-500/20",
-    warning: "bg-amber-500/10 border-amber-500/20",
-    info: "bg-blue-500/10 border-blue-500/20",
+    success: "bg-emerald-950/90 border-emerald-500/30 dark:bg-emerald-900/90 dark:border-emerald-500/40",
+    error: "bg-red-950/90 border-red-500/30 dark:bg-red-900/90 dark:border-red-500/40",
+    warning: "bg-amber-950/90 border-amber-500/30 dark:bg-amber-900/90 dark:border-amber-500/40",
+    info: "bg-blue-950/90 border-blue-500/30 dark:bg-blue-900/90 dark:border-blue-500/40",
   };
 
   return (

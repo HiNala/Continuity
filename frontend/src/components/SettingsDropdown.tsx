@@ -184,7 +184,7 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
         onClick={() => setIsOpen(!isOpen)}
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
-        className="flex items-center gap-2 px-3 py-2 text-sm text-foreground/70 hover:text-foreground bg-white/60 hover:bg-white/80 backdrop-blur-sm border border-black/[0.08] hover:border-black/[0.12] rounded-xl transition-all shadow-sm hover:shadow"
+        className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-600 dark:text-zinc-400 hover:text-neutral-900 dark:hover:text-zinc-100 bg-white/60 dark:bg-zinc-900/60 hover:bg-white/80 dark:hover:bg-zinc-800/80 backdrop-blur-sm border border-neutral-200 dark:border-zinc-700 hover:border-neutral-300 dark:hover:border-zinc-600 rounded-xl transition-all shadow-sm hover:shadow"
       >
         <Settings className="w-4 h-4" />
         <span className="font-medium">Settings</span>
@@ -203,11 +203,11 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.95 }}
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
-            className="absolute right-0 mt-2 w-72 bg-white/95 backdrop-blur-xl border border-black/[0.08] rounded-2xl shadow-xl z-50 overflow-hidden"
+            className="absolute right-0 mt-2 w-72 bg-white dark:bg-zinc-900 backdrop-blur-xl border border-neutral-200 dark:border-zinc-700 rounded-2xl shadow-xl z-50 overflow-hidden"
           >
-            <div className="p-4 border-b border-black/[0.06] bg-gradient-to-r from-primary/5 to-accent/5">
-              <h3 className="font-semibold text-foreground">API Connections</h3>
-              <p className="text-xs text-muted-foreground mt-1">
+            <div className="p-4 border-b border-neutral-100 dark:border-zinc-800 bg-gradient-to-r from-primary/5 to-accent/5 dark:from-primary/10 dark:to-accent/10">
+              <h3 className="font-semibold text-neutral-900 dark:text-zinc-100">API Connections</h3>
+              <p className="text-xs text-neutral-500 dark:text-zinc-400 mt-1">
                 Test your API keys before running the demo
               </p>
             </div>
@@ -221,10 +221,10 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
                   transition={{ delay: index * 0.05 }}
                   onClick={() => handleTest(key, testFn)}
                   disabled={testing !== null}
-                  className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-foreground/80 hover:text-foreground hover:bg-black/[0.03] rounded-xl transition-all disabled:opacity-50 group"
+                  className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-neutral-700 dark:text-zinc-300 hover:text-neutral-900 dark:hover:text-zinc-100 hover:bg-neutral-50 dark:hover:bg-zinc-800 rounded-xl transition-all disabled:opacity-50 group"
                 >
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-black/[0.04] group-hover:bg-black/[0.06] flex items-center justify-center transition-colors">
+                    <div className="w-8 h-8 rounded-lg bg-neutral-100 dark:bg-zinc-800 group-hover:bg-neutral-200 dark:group-hover:bg-zinc-700 flex items-center justify-center transition-colors">
                       {getServiceIcon(key)}
                     </div>
                     <span className="font-medium">{getServiceLabel(key)}</span>
@@ -245,7 +245,7 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
               ))}
             </div>
 
-            <div className="p-3 border-t border-black/[0.06]">
+            <div className="p-3 border-t border-neutral-100 dark:border-zinc-800">
               <motion.button
                 onClick={handleTestAll}
                 disabled={testing !== null}
@@ -273,8 +273,8 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
             </div>
 
             {/* Self-Improvement Test Section */}
-            <div className="p-3 border-t border-black/[0.06]">
-              <div className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider mb-2">
+            <div className="p-3 border-t border-neutral-100 dark:border-zinc-800">
+              <div className="text-[10px] font-semibold text-neutral-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
                 Self-Improvement Tests
               </div>
               <motion.button
@@ -282,7 +282,7 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
                 disabled={testing !== null}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-foreground bg-gradient-to-r from-emerald-50 to-teal-50 hover:from-emerald-100 hover:to-teal-100 border border-emerald-200/50 rounded-xl transition-all disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/30 dark:to-teal-900/30 hover:from-emerald-100 hover:to-teal-100 dark:hover:from-emerald-900/50 dark:hover:to-teal-900/50 border border-emerald-200/50 dark:border-emerald-700/50 rounded-xl transition-all disabled:opacity-50"
               >
                 {testing === "self-improvement" ? (
                   <>
@@ -290,14 +290,14 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
                       animate={{ rotate: 360 }}
                       transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                     >
-                      <Loader2 className="w-4 h-4 text-emerald-600" />
+                      <Loader2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     </motion.div>
-                    <span className="text-emerald-700">Running Tests...</span>
+                    <span className="text-emerald-700 dark:text-emerald-400">Running Tests...</span>
                   </>
                 ) : (
                   <>
-                    <Activity className="w-4 h-4 text-emerald-600" />
-                    <span className="text-emerald-700">Test Self-Improvement</span>
+                    <Activity className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span className="text-emerald-700 dark:text-emerald-400">Test Self-Improvement</span>
                   </>
                 )}
               </motion.button>
@@ -309,14 +309,14 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
-                    className="mt-2 p-2 rounded-lg bg-white/80 border border-black/[0.06]"
+                    className="mt-2 p-2 rounded-lg bg-white dark:bg-zinc-800 border border-neutral-200 dark:border-zinc-700"
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-foreground">Results</span>
+                      <span className="text-xs font-semibold text-neutral-900 dark:text-zinc-100">Results</span>
                       <span className={`text-xs font-bold ${
                         selfImprovementResult.summary.failed === 0 
-                          ? "text-emerald-600" 
-                          : "text-red-500"
+                          ? "text-emerald-600 dark:text-emerald-400" 
+                          : "text-red-500 dark:text-red-400"
                       }`}>
                         {selfImprovementResult.summary.passed}/{selfImprovementResult.summary.total} Passed
                       </span>
@@ -324,7 +324,7 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
                     <div className="space-y-1">
                       {Object.entries(selfImprovementResult.tests).map(([key, test]) => (
                         <div key={key} className="flex items-center justify-between text-[10px]">
-                          <span className="text-muted-foreground">{test.test_name}</span>
+                          <span className="text-neutral-500 dark:text-zinc-400">{test.test_name}</span>
                           {test.passed ? (
                             <CheckCircle2 className="w-3 h-3 text-emerald-500" />
                           ) : (
@@ -355,9 +355,9 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="px-4 py-2 border-t border-black/[0.06] bg-black/[0.02]"
+                  className="px-4 py-2 border-t border-neutral-100 dark:border-zinc-800 bg-neutral-50 dark:bg-zinc-800/50"
                 >
-                  <div className="text-[10px] text-muted-foreground/60 font-medium">
+                  <div className="text-[10px] text-neutral-400 dark:text-zinc-500 font-medium">
                     Last tested:{" "}
                     {new Date(
                       Object.values(results)[0]?.timestamp || ""

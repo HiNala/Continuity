@@ -62,6 +62,8 @@ services:
     volumes:
       # Mount source for hot reloading in development
       - ./backend/app:/app/app:ro
+      # Mount generated_images for persistence and access
+      - ./generated_images:/app/generated_images
     networks:
       - continuity-network
     restart: unless-stopped

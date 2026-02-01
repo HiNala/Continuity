@@ -319,6 +319,34 @@ VALUES (
 );
 
 -- ============================================
+-- Additional Constraints for Data Integrity
+-- ============================================
+
+-- Ensure completed_scenes never exceeds total_scenes
+ALTER TABLE projects ADD CONSTRAINT IF NOT EXISTS chk_completed_scenes 
+    CHECK (completed_scenes <= total_scenes);
+
+-- Ensure evaluation scores are between 0 and 1
+ALTER TABLE iterations ADD CONSTRAINT IF NOT EXISTS chk_evaluation_score 
+    CHECK (evaluation_score IS NULL OR (evaluation_score >= 0 AND evaluation_score <= 1));
+
+-- Ensure evaluation detail scores are between 0 and 1
+ALTER TABLE evaluation_details ADD CONSTRAINT IF NOT EXISTS chk_eval_detail_score 
+    CHECK (score >= 0 AND score <= 1);
+
+-- Ensure constraint confidence is between 0 and 1
+ALTER TABLE constraints ADD CONSTRAINT IF NOT EXISTS chk_confidence_score 
+    CHECK (confidence_score >= 0 AND confidence_score <= 1);
+
+-- Ensure scene indices are unique per project
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scenes_project_scene_unique 
+    ON scenes(project_id, scene_index);
+
+-- Composite index for common iteration queries
+CREATE INDEX IF NOT EXISTS idx_iterations_project_phase_status 
+    ON iterations(project_id, phase, status);
+
+-- ============================================
 -- Grant permissions
 -- ============================================
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO continuity;

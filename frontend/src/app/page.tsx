@@ -7,11 +7,16 @@ import { AnimatedBackground } from "@/components/ui/animated-background";
 import { PromptInputBox } from "@/components/ui/ai-prompt-box";
 import { ContinuityLogo, ContinuityIcon } from "@/components/ui/continuity-logo";
 import { AgentWorkCard, QuestionCard, ImageDisplayCard, type AgentWorkCardProps } from "@/components/ui/agent-work-card";
+import { ResultsTimeline } from "@/components/ResultsTimeline";
+import { IntelligencePanel, SelfImprovingBadge } from "@/components/IntelligencePanel";
 import { SettingsDropdown } from "@/components/SettingsDropdown";
+import { EvaluationDetails, type EvaluationResult } from "@/components/EvaluationDetails";
+import { StepTimeline, StepSummary, type Step } from "@/components/StepTimeline";
 import { StreamingChatMessage, ThinkingIndicator, LiveBadge } from "@/components/ui/streaming-text";
 import { ProgressTimeline, CompactTimeline } from "@/components/ui/progress-timeline";
 import { ToastProvider } from "@/components/ui/toast";
 import { AgentCardSkeleton } from "@/components/ui/skeleton";
+import { ThemeToggle, useTheme } from "@/components/ThemeProvider";
 import { 
   createProject, 
   analyzeGoal, 
@@ -21,11 +26,15 @@ import {
   subscribeToOrchestration,
   submitOrchestrationClarification,
   getAgentReasoning,
+  getIterations,
+  getIterationEvaluation,
   type AnalyzeGoalResponse,
   type OrchestrationStatusResponse,
   type StreamEvent,
   type AgentReasoningResponse,
+  type IterationResponse,
 } from "@/lib/api";
+import { APP_CONFIG, getHeaderText, getFooterText } from "@/lib/config";
 
 const cn = (...classes: (string | undefined | null | false)[]) =>
   classes.filter(Boolean).join(" ");
@@ -72,7 +81,7 @@ interface ChatMessage {
   isNew?: boolean;
 }
 
-export default function ContinuityApp() {
+export default function ClarityApp() {
   const [appState, setAppState] = useState<AppState>("welcome");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -86,6 +95,65 @@ export default function ContinuityApp() {
   const [isConnected, setIsConnected] = useState(false);
   const [currentThinking, setCurrentThinking] = useState<{ agent: string; action: string } | null>(null);
   const [weaveTraceUrl, setWeaveTraceUrl] = useState<string | null>(null);
+  const [generatedPhases, setGeneratedPhases] = useState<Array<{
+    phase: string;
+    imagePath: string;
+    iterationId?: string;
+    evaluationPassed?: boolean | null;
+    evaluationScore?: number | null;
+    iterationNumber?: number;
+    weaveTraceId?: string;
+  }>>([]);
+  const [transformationComplete, setTransformationComplete] = useState(false);
+  const [selfImprovementRetries, setSelfImprovementRetries] = useState<Array<{
+    phase: string;
+    attemptNumber: number;
+    failureReason: string;
+    policyChanges: Array<{ field: string; oldValue: string | number; newValue: string | number; reason: string }>;
+    improved: boolean;
+    weaveTraceId?: string;
+  }>>([]);
+  
+  // Agent upgrade events for the "Agent Upgrading Agent" visualization
+  const [agentUpgradeEvents, setAgentUpgradeEvents] = useState<Array<{
+    id: string;
+    timestamp: string;
+    sourceAgent: "qc" | "orchestrator";
+    targetAgent: "generation" | "spatial" | "requirements";
+    trigger: "evaluation_failure" | "cross_scene_learning" | "pattern_detection";
+    evaluationScore?: number;
+    failureReasons?: string[];
+    policyChanges: Array<{ type: string; oldValue?: string | number; newValue?: string | number; rationale: string }>;
+    weaveTraces?: Array<{ traceId: string; url: string; operation: string; duration_ms?: number; status: "success" | "error" }>;
+    improved: boolean;
+    retryNumber?: number;
+  }>>([]);
+  
+  // Live reasoning steps
+  const [reasoningSteps, setReasoningSteps] = useState<Array<{
+    id: string;
+    timestamp: string;
+    agent: string;
+    thought: string;
+    action?: string;
+    observation?: string;
+    toolCalls?: Array<{
+      id: string;
+      timestamp: string;
+      toolName: string;
+      toolType: "weave" | "browserbase" | "gemini" | "database" | "internal";
+      input?: Record<string, unknown>;
+      output?: string;
+      status: "running" | "success" | "error";
+      duration_ms?: number;
+    }>;
+  }>>([]);
+
+  // Pipeline steps for timeline visualization
+  const [pipelineSteps, setPipelineSteps] = useState<Step[]>([]);
+  
+  // Evaluation results for all iterations
+  const [evaluationResults, setEvaluationResults] = useState<EvaluationResult[]>([]);
   
   const cardsEndRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -166,6 +234,84 @@ export default function ContinuityApp() {
           setCurrentThinking({ agent: event.agent, action: event.action });
         }
         
+        // Add to pipeline steps timeline
+        if (event.agent) {
+          const stepAgent = event.agent as Step["agent"];
+          const stepStatus: Step["status"] = event.details?.to_state?.includes("completed") 
+            ? "completed" 
+            : event.details?.to_state?.includes("failed") 
+              ? "failed" 
+              : "running";
+          
+          setPipelineSteps(prev => {
+            // Check if step already exists
+            const existingIdx = prev.findIndex(s => 
+              s.details?.to_state === event.details?.to_state
+            );
+            if (existingIdx >= 0) {
+              const updated = [...prev];
+              updated[existingIdx] = {
+                ...updated[existingIdx],
+                status: stepStatus,
+                duration_ms: event.details?.duration_ms as number | undefined,
+              };
+              return updated;
+            }
+            
+            return [...prev, {
+              id: `step-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              type: event.details?.to_state?.includes("generat") ? "generation" 
+                  : event.details?.to_state?.includes("evaluat") ? "evaluation"
+                  : "transition",
+              agent: stepAgent,
+              status: stepStatus,
+              title: event.message || getAgentTitle(event.agent, event.action || ""),
+              description: getAgentDescription(event.agent, event.action || ""),
+              timestamp: event.timestamp,
+              duration_ms: event.details?.duration_ms as number | undefined,
+              details: event.details,
+              weaveTraceId: event.details?.weave_trace_id as string | undefined,
+              phase: event.details?.phase as string | undefined,
+              iterationNumber: event.details?.iteration_number as number | undefined,
+              imagePath: event.details?.output_path as string | undefined,
+              evaluationScore: event.details?.score as number | undefined,
+              evaluationPassed: event.details?.evaluation_passed as boolean | undefined,
+              failureReasons: event.details?.failure_reasons as string[] | undefined,
+            }];
+          });
+        }
+        
+        // Add to live reasoning steps for the reasoning panel
+        if (event.agent && event.message) {
+          setReasoningSteps(prev => [...prev.slice(-50), { // Keep last 50 steps
+            id: `step-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            timestamp: new Date(event.timestamp).toLocaleTimeString(),
+            agent: event.agent || "orchestrator",
+            thought: event.message,
+            action: event.action,
+            observation: event.details?.observation as string | undefined,
+            toolCalls: event.details?.tool_calls ? (event.details.tool_calls as Array<{
+              id: string;
+              timestamp: string;
+              toolName: string;
+              toolType: "weave" | "browserbase" | "gemini" | "database" | "internal";
+              input?: Record<string, unknown>;
+              output?: string;
+              status: "running" | "success" | "error";
+              duration_ms?: number;
+            }>) : undefined,
+          }]);
+        }
+        
+        // Determine if this is a retry/self-improvement event
+        const isRetry = event.details?.to_state?.includes("retrying") || 
+                        event.action?.includes("retry") ||
+                        event.details?.retry_number;
+        const isPolicyUpdate = event.action?.includes("policy") || 
+                               event.details?.policy_version;
+        const isEvaluating = event.action?.includes("evaluating") ||
+                             event.details?.to_state?.includes("evaluating");
+        
         // Add or update agent card based on state
         setAgentCards(prev => {
           const cardExists = prev.some(c => 
@@ -173,19 +319,182 @@ export default function ContinuityApp() {
           );
           
           if (!cardExists && event.agent) {
+            // Build detailed content based on event type
+            let content = getAgentDescription(event.agent, event.action || "");
+            let action = mapActionToCardAction(event.action || "");
+            let status: "running" | "pending" | "completed" | "error" | "warning" = "running";
+            
+            // Handle retry events specially
+            if (isRetry) {
+              content = `Self-improvement triggered. Retry #${event.details?.retry_number || 1} - analyzing failure and adjusting approach...`;
+              action = "policy_update";
+              status = "warning";
+              
+              // Track retry for ImprovementStory
+              const retryPhase = event.details?.phase || event.action?.split("_")[0] || "generation";
+              const policyChanges = (event.details?.changes_applied || []).map((c: Record<string, unknown>) => ({
+                field: String(c.type || "parameter"),
+                oldValue: c.current || c.old || "default",
+                newValue: c.proposed || c.new || "improved",
+                reason: String(c.rationale || c.reason || "Optimization based on failure analysis"),
+              }));
+              
+              setSelfImprovementRetries(prev => [...prev, {
+                phase: retryPhase,
+                attemptNumber: event.details?.retry_number || prev.length + 2,
+                failureReason: event.details?.failure_reason || event.message || "Quality check did not meet threshold",
+                policyChanges,
+                improved: false,
+              }]);
+              
+              // Also add to AgentUpgradingAgent events
+              setAgentUpgradeEvents(prev => [...prev, {
+                id: `upgrade-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                timestamp: new Date(event.timestamp).toLocaleTimeString(),
+                sourceAgent: "qc",
+                targetAgent: "generation",
+                trigger: "evaluation_failure",
+                evaluationScore: event.details?.score as number | undefined,
+                failureReasons: event.details?.failure_reasons as string[] || [event.details?.failure_reason as string || "Quality threshold not met"],
+                policyChanges: policyChanges.map(pc => ({
+                  type: pc.field,
+                  oldValue: pc.oldValue,
+                  newValue: pc.newValue,
+                  rationale: pc.reason,
+                })),
+                weaveTraces: weaveTraceUrl ? [{
+                  traceId: `trace-${Date.now()}`,
+                  url: weaveTraceUrl,
+                  operation: `${retryPhase}_evaluation`,
+                  status: "success" as const,
+                }] : undefined,
+                improved: false,
+                retryNumber: event.details?.retry_number as number || 1,
+              }]);
+            }
+            
+            // Handle policy update events
+            if (isPolicyUpdate && event.details?.changes_applied) {
+              content = `Applying ${event.details.changes_applied?.length || 0} policy changes to improve results...`;
+            }
+            
+            // Handle evaluation events
+            if (isEvaluating) {
+              content = `Quality control checking output against 5 criteria: constraints, geometry, hallucinations, style, and completeness...`;
+            }
+            
             return [...prev, {
               id: `card-${Date.now()}-${Math.random().toString(36).slice(2)}`,
               agent: event.agent as AgentCard["agent"],
-              title: event.message,
-              content: getAgentDescription(event.agent, event.action || ""),
-              status: "running" as const,
-              action: mapActionToCardAction(event.action || ""),
+              title: event.message || getAgentTitle(event.agent, event.action || ""),
+              content,
+              status,
+              action,
               timestamp: new Date(event.timestamp).toLocaleTimeString(),
-              details: event.details,
+              details: {
+                ...event.details,
+                // Enhance details display
+                ...(isRetry && { 
+                  trigger: "QC failure",
+                  retry_number: event.details?.retry_number || 1,
+                }),
+                ...(event.details?.score && {
+                  score: `${(event.details.score * 100).toFixed(0)}%`,
+                }),
+              },
             }];
           }
           return prev;
         });
+        break;
+      
+      // Handle scene events for batch processing
+      case "scene_start":
+        addAgentCard({
+          agent: "orchestrator",
+          title: `Scene ${event.details?.scene_index + 1} Started`,
+          content: `Processing image ${event.details?.scene_index + 1} of ${event.details?.total_scenes}...`,
+          status: "running",
+          action: "analyzing",
+          timestamp: new Date(event.timestamp).toLocaleTimeString(),
+          details: event.details,
+        });
+        break;
+        
+      case "scene_complete":
+        // Mark previous scene card as complete and add completion card
+        setAgentCards(prev => {
+          const updated = [...prev];
+          // Find and update the scene start card
+          const sceneCardIdx = updated.findIndex(c => 
+            c.details?.scene_id === event.details?.scene_id && c.status === "running"
+          );
+          if (sceneCardIdx >= 0) {
+            updated[sceneCardIdx] = {
+              ...updated[sceneCardIdx],
+              status: "completed",
+              content: `Scene ${event.details?.scene_index + 1} completed successfully!`,
+            };
+          }
+          return updated;
+        });
+        // If output path is provided, add to generated phases (with deduplication)
+        if (event.details?.output_path) {
+          setGeneratedPhases(prev => {
+            const exists = prev.some(p => p.imagePath === event.details?.output_path);
+            if (exists) return prev;
+            return [...prev, {
+              phase: `Scene ${(event.details?.scene_index || 0) + 1}`,
+              imagePath: event.details?.output_path || "",
+              evaluationPassed: true,
+              iterationNumber: 1,
+            }];
+          });
+        }
+        break;
+        
+      // Handle learning/self-improvement events
+      case "learning":
+        addAgentCard({
+          agent: "qc",
+          title: "Self-Improvement Applied",
+          content: event.message || "Policy improved - future generations will benefit from this learning.",
+          status: "completed",
+          action: "policy_update",
+          timestamp: new Date(event.timestamp).toLocaleTimeString(),
+          details: {
+            ...event.details,
+            learning_type: "cross_scene",
+            benefiting_scenes: event.details?.benefiting_scenes,
+          },
+        });
+        addChatMessage({
+          type: "assistant",
+          content: `🧠 Self-improvement: ${event.message}`,
+        });
+        // Mark the last retry as improved
+        setSelfImprovementRetries(prev => {
+          if (prev.length === 0) return prev;
+          const updated = [...prev];
+          updated[updated.length - 1] = { ...updated[updated.length - 1], improved: true };
+          return updated;
+        });
+        // Also mark last agent upgrade event as improved
+        setAgentUpgradeEvents(prev => {
+          if (prev.length === 0) return prev;
+          const updated = [...prev];
+          updated[updated.length - 1] = { ...updated[updated.length - 1], improved: true };
+          return updated;
+        });
+        break;
+        
+      case "batch_progress":
+        // Update progress silently, don't add card
+        setOrchestrationStatus(prev => ({
+          ...prev!,
+          completed_scenes: event.details?.completed,
+          total_scenes: event.details?.total,
+        }));
         break;
         
       case "progress":
@@ -194,6 +503,22 @@ export default function ContinuityApp() {
           addChatMessage({
             type: "assistant",
             content: event.message,
+          });
+        }
+        // Capture generated images from progress events
+        if (event.details?.output_path && event.details?.phase) {
+          setGeneratedPhases(prev => {
+            // Avoid duplicates
+            const exists = prev.some(p => p.imagePath === event.details?.output_path);
+            if (exists) return prev;
+            return [...prev, {
+              phase: event.details?.phase || "Generation",
+              imagePath: event.details?.output_path || "",
+              iterationId: event.details?.iteration_id,
+              evaluationPassed: event.details?.evaluation_passed,
+              evaluationScore: event.details?.evaluation_score,
+              iterationNumber: event.details?.iteration_number || 1,
+            }];
           });
         }
         break;
@@ -211,12 +536,22 @@ export default function ContinuityApp() {
         break;
         
       case "error":
+      case "scene_error":
         setCurrentThinking(null);
         setError(event.message);
-        if (streamCleanupRef.current) {
+        if (event.event === "error" && streamCleanupRef.current) {
           streamCleanupRef.current();
           streamCleanupRef.current = null;
         }
+        addAgentCard({
+          agent: event.agent as AgentCard["agent"] || "orchestrator",
+          title: event.event === "scene_error" ? `Scene ${event.details?.scene_index + 1} Failed` : "Error",
+          content: event.message,
+          status: "error",
+          action: "error",
+          timestamp: new Date(event.timestamp).toLocaleTimeString(),
+          details: event.details,
+        });
         addChatMessage({
           type: "system",
           content: `Error: ${event.message}`,
@@ -225,27 +560,27 @@ export default function ContinuityApp() {
         
       case "complete":
         setCurrentThinking(null);
+        setTransformationComplete(true);
         if (streamCleanupRef.current) {
           streamCleanupRef.current();
           streamCleanupRef.current = null;
         }
-        // Mark last agent card as completed
+        // Mark all running agent cards as completed
         setAgentCards(prev => {
-          const updated = [...prev];
-          if (updated.length > 0) {
-            updated[updated.length - 1] = {
-              ...updated[updated.length - 1],
-              status: "completed",
-            };
-          }
-          return updated;
+          return prev.map(card => 
+            card.status === "running" ? { ...card, status: "completed" as const } : card
+          );
         });
         addChatMessage({
           type: "assistant",
           content: event.details?.has_warnings 
-            ? "Transformation complete with some minor adjustments. Check the results on the right."
-            : "Your visualization is ready! Check the results on the right.",
+            ? "Transformation complete with some minor adjustments. Check the results below!"
+            : "Your visualization is ready! Check out the transformation timeline below.",
         });
+        // Fetch all iterations to display in timeline
+        if (projectId) {
+          fetchIterations(projectId);
+        }
         break;
         
       case "heartbeat":
@@ -253,7 +588,7 @@ export default function ContinuityApp() {
         setIsConnected(true);
         break;
     }
-  }, [addChatMessage]);
+  }, [addChatMessage, addAgentCard]);
 
   // Helper functions for streaming
   const getAgentDescription = (agent: string, action: string): string => {
@@ -261,10 +596,12 @@ export default function ContinuityApp() {
       requirements: {
         analyzing: "Parsing your design goals and extracting structured requirements...",
         question: "Need additional information to understand your preferences...",
+        skip: "Requirements already available from previous analysis.",
         default: "Processing requirements specification...",
       },
       spatial: {
         analyzing: "Examining images to identify physical constraints, fixtures, and boundaries...",
+        skip: "Skipping - spatial data already analyzed.",
         default: "Analyzing spatial layout...",
       },
       generation: {
@@ -272,15 +609,27 @@ export default function ContinuityApp() {
         generating_structural: "Adding structural elements while respecting constraints...",
         generating_fixture: "Placing fixtures and furniture according to specifications...",
         generating_style: "Applying style and aesthetic transformations...",
+        retrying_cleanup: "Re-generating cleanup phase with improved policy settings...",
+        retrying_structural: "Re-generating structural phase with adjusted constraints...",
+        retrying_fixture: "Re-generating fixtures with enhanced constraint emphasis...",
+        retrying_style: "Re-generating style with modified creative parameters...",
         default: "Generating visualization...",
       },
       qc: {
         evaluating: "Checking output against quality criteria and constraints...",
-        policy_update: "Analyzing results and adjusting generation parameters...",
+        evaluating_cleanup: "Evaluating cleanup phase: checking debris removal and image clarity...",
+        evaluating_structural: "Evaluating structural phase: verifying wall/floor completion and geometry...",
+        evaluating_fixture: "Evaluating fixtures: checking placement accuracy and constraint compliance...",
+        evaluating_style: "Evaluating style: assessing aesthetic match and visual quality...",
+        policy_update: "Analyzing failure patterns and adjusting generation policy...",
+        cross_scene_improvement: "Learning from this scene to improve future generations...",
+        failure_analysis: "Identifying what went wrong and recommending specific fixes...",
         default: "Evaluating quality...",
       },
       orchestrator: {
         starting: "Initializing the multi-agent pipeline...",
+        scene_processing: "Coordinating agents for current scene...",
+        batch_update: "Updating batch processing progress...",
         success: "All phases completed successfully!",
         error: "An error occurred during processing.",
         default: "Coordinating agent workflow...",
@@ -288,6 +637,54 @@ export default function ContinuityApp() {
     };
     
     return descriptions[agent]?.[action] || descriptions[agent]?.default || "Processing...";
+  };
+
+  const getAgentTitle = (agent: string, action: string): string => {
+    const titles: Record<string, Record<string, string>> = {
+      requirements: {
+        analyzing: "Analyzing Requirements",
+        question: "Awaiting Clarification",
+        skip: "Requirements Ready",
+        default: "Requirements Agent",
+      },
+      spatial: {
+        analyzing: "Spatial Analysis",
+        skip: "Spatial Data Ready",
+        default: "Analyzing Space",
+      },
+      generation: {
+        generating_cleanup: "Cleanup Phase",
+        generating_structural: "Structural Phase",
+        generating_fixture: "Fixture Phase",
+        generating_style: "Style Phase",
+        retrying_cleanup: "Retrying Cleanup",
+        retrying_structural: "Retrying Structural",
+        retrying_fixture: "Retrying Fixtures",
+        retrying_style: "Retrying Style",
+        default: "Generating",
+      },
+      qc: {
+        evaluating: "Quality Check",
+        evaluating_cleanup: "Evaluating Cleanup",
+        evaluating_structural: "Evaluating Structure",
+        evaluating_fixture: "Evaluating Fixtures",
+        evaluating_style: "Evaluating Style",
+        policy_update: "Self-Improvement",
+        cross_scene_improvement: "Cross-Scene Learning",
+        failure_analysis: "Analyzing Failure",
+        default: "Quality Control",
+      },
+      orchestrator: {
+        starting: "Initializing Pipeline",
+        scene_processing: "Processing Scene",
+        batch_update: "Batch Progress",
+        success: "Complete",
+        error: "Error",
+        default: "Orchestrator",
+      },
+    };
+    
+    return titles[agent]?.[action] || titles[agent]?.default || "Processing";
   };
 
   const mapActionToCardAction = (action: string): AgentCard["action"] => {
@@ -329,6 +726,85 @@ export default function ContinuityApp() {
     }
   }, []);
 
+  // Fetch all iterations to display in results timeline
+  const fetchIterations = useCallback(async (pId: string) => {
+    try {
+      const iterations = await getIterations(pId);
+      const phases: typeof generatedPhases = [];
+      const seenPaths = new Set<string>(); // Deduplication for successful iterations
+      
+      // Group by phase and show all attempts (including failures)
+      for (const iter of iterations) {
+        const imagePath = iter.output_image_url || iter.output_image_path || "";
+        const isFailed = iter.status === "failed" || iter.status === "error";
+        
+        // Show successful iterations with images (deduped) or failed ones
+        if (isFailed && !imagePath) {
+          // Failed iteration without output - still show in timeline
+          phases.push({
+            phase: `${iter.phase}${iter.iteration_number > 1 ? ` #${iter.iteration_number}` : ""} (failed)`,
+            imagePath: "", // Empty - will show error state
+            iterationId: iter.id,
+            evaluationPassed: false,
+            evaluationScore: 0,
+            iterationNumber: iter.iteration_number,
+            weaveTraceId: iter.weave_run_id || undefined,
+          });
+        } else if (imagePath && !seenPaths.has(imagePath)) {
+          seenPaths.add(imagePath);
+          phases.push({
+            phase: `${iter.phase}${iter.iteration_number > 1 ? ` #${iter.iteration_number}` : ""}`,
+            imagePath,
+            iterationId: iter.id,
+            evaluationPassed: iter.evaluation_passed,
+            evaluationScore: iter.evaluation_score,
+            iterationNumber: iter.iteration_number,
+            weaveTraceId: iter.weave_run_id || undefined,
+          });
+        }
+      }
+      
+      setGeneratedPhases(phases);
+      
+      // Fetch detailed evaluation results for evaluated iterations
+      const evaluatedIterations = iterations.filter(
+        (iter: IterationResponse) => iter.evaluation_status && iter.evaluation_status !== "pending"
+      );
+      
+      if (evaluatedIterations.length > 0) {
+        const evalPromises = evaluatedIterations.map(async (iter: IterationResponse) => {
+          try {
+            const evalDetail = await getIterationEvaluation(pId, iter.id);
+            return {
+              iterationId: iter.id,
+              phase: iter.phase,
+              iterationNumber: iter.iteration_number,
+              overallPassed: evalDetail.overall_passed,
+              overallScore: evalDetail.overall_score,
+              criteria: evalDetail.criteria.map(c => ({
+                criterion: c.criterion,
+                passed: c.passed,
+                score: c.score,
+                details: c.details,
+                evidence: c.evidence,
+              })),
+              failureReasons: evalDetail.failure_reasons || [],
+              evaluatedAt: evalDetail.evaluated_at,
+            };
+          } catch {
+            // Skip iterations where evaluation fetch fails
+            return null;
+          }
+        });
+        
+        const evalResults = (await Promise.all(evalPromises)).filter(Boolean);
+        setEvaluationResults(evalResults as EvaluationResult[]);
+      }
+    } catch (err) {
+      console.error("Failed to fetch iterations:", err);
+    }
+  }, []);
+
   // Fetch reasoning when orchestration completes
   useEffect(() => {
     if (projectId && orchestrationStatus?.state && 
@@ -338,7 +814,29 @@ export default function ContinuityApp() {
     }
   }, [projectId, orchestrationStatus?.state, fetchAgentReasoning]);
 
+  // Helper for user-friendly error messages
+  const getErrorMessage = useCallback((err: unknown, context: string): string => {
+    if (err instanceof Error) {
+      if (err.message.includes("network") || err.message.includes("fetch") || err.message.includes("Failed to fetch")) {
+        return "Connection issue. Please check your internet and try again.";
+      }
+      if (err.message.includes("timeout")) {
+        return "Request timed out. Please try again.";
+      }
+      if (err.message.includes("500")) {
+        return "Server error. Please try again in a moment.";
+      }
+    }
+    return `Unable to ${context}. Please try again.`;
+  }, []);
+
   const handleSend = async (message: string, files?: File[]) => {
+    // Validation
+    if (!message.trim() && (!files || files.length === 0)) {
+      setError("Please provide a message or upload images.");
+      return;
+    }
+    
     setIsLoading(true);
     setError(null);
     
@@ -396,7 +894,20 @@ export default function ContinuityApp() {
         content: "I've received your request. Let me analyze your requirements...",
       });
 
-      // Analyze goal
+      // First, show image analysis step (if images were uploaded)
+      let imageAnalysisCardId: string | null = null;
+      if (imageUrls.length > 0) {
+        imageAnalysisCardId = addAgentCard({
+          agent: "spatial",
+          title: "Analyzing Your Images",
+          content: "Using AI vision to understand what's in your uploaded images...",
+          status: "running",
+          action: "analyzing",
+          timestamp: new Date().toLocaleTimeString(),
+        });
+      }
+
+      // Analyze goal (includes image analysis)
       const analysisCardId = addAgentCard({
         agent: "requirements",
         title: "Analyzing Requirements",
@@ -407,6 +918,61 @@ export default function ContinuityApp() {
       });
 
       const analysis = await analyzeGoal(project.project_id);
+      
+      // Show image analysis results if available
+      if (analysis.image_analysis?.analyzed && imageAnalysisCardId) {
+        const ia = analysis.image_analysis;
+        const detectedInfo: string[] = [];
+        
+        if (ia.space_type) {
+          const confidence = ia.space_type_confidence ? ` (${Math.round(ia.space_type_confidence * 100)}% confident)` : "";
+          detectedInfo.push(`Space type: ${ia.space_type.replace(/_/g, " ")}${confidence}`);
+        }
+        if (ia.construction_state) {
+          detectedInfo.push(`State: ${ia.construction_state.replace(/_/g, " ")}`);
+        }
+        if (ia.existing_styles?.length > 0) {
+          detectedInfo.push(`Existing styles: ${ia.existing_styles.join(", ")}`);
+        }
+        
+        updateAgentCard(imageAnalysisCardId, {
+          status: "completed",
+          title: "Image Analysis Complete",
+          content: detectedInfo.length > 0 
+            ? detectedInfo.join(" • ")
+            : "Image analyzed successfully",
+          details: {
+            space_type: ia.space_type,
+            construction_state: ia.construction_state,
+            existing_styles: ia.existing_styles,
+            reasoning: ia.space_type_reasoning,
+          },
+        });
+
+        // Add chat message about what we detected
+        if (ia.space_type || ia.construction_state) {
+          const chatParts: string[] = [];
+          if (ia.construction_state === "unfinished" || ia.construction_state === "under_renovation") {
+            chatParts.push(`I can see this is a **${ia.construction_state.replace(/_/g, " ")}** space`);
+          }
+          if (ia.space_type) {
+            chatParts.push(`that appears to be a **${ia.space_type.replace(/_/g, " ")}**`);
+          }
+          if (ia.space_type_reasoning) {
+            chatParts.push(`(${ia.space_type_reasoning})`);
+          }
+          
+          addChatMessage({
+            type: "assistant",
+            content: `🔍 ${chatParts.join(" ")}. I'll tailor my questions based on what I see in your image.`,
+          });
+        }
+      } else if (imageAnalysisCardId) {
+        updateAgentCard(imageAnalysisCardId, {
+          status: "completed",
+          content: "Image received - will analyze during processing",
+        });
+      }
       
       updateAgentCard(analysisCardId, {
         status: "completed",
@@ -420,7 +986,9 @@ export default function ContinuityApp() {
         setQuestions(analysis);
         addChatMessage({
           type: "assistant",
-          content: "I have a few questions to better understand your vision. Please answer them below.",
+          content: analysis.image_analysis?.analyzed 
+            ? "Based on my image analysis, I have a few targeted questions to refine your vision:"
+            : "I have a few questions to better understand your vision. Please answer them below.",
         });
         addAgentCard({
           agent: "requirements",
@@ -439,15 +1007,16 @@ export default function ContinuityApp() {
       }
 
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      const errorMsg = getErrorMessage(err, "start the transformation");
+      setError(errorMsg);
       updateAgentCard(initCardId, {
         status: "error",
-        content: `Error: ${err instanceof Error ? err.message : "An error occurred"}`,
+        content: errorMsg,
         action: "error",
       });
       addChatMessage({
         type: "system",
-        content: `Error: ${err instanceof Error ? err.message : "Something went wrong. Please try again."}`,
+        content: errorMsg,
       });
     } finally {
       setIsLoading(false);
@@ -513,10 +1082,11 @@ export default function ContinuityApp() {
       }
 
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to submit answers");
+      const errorMsg = getErrorMessage(err, "submit your answers");
+      setError(errorMsg);
       updateAgentCard(submitCardId, {
         status: "error",
-        content: `Error: ${err instanceof Error ? err.message : "Failed to submit answers"}`,
+        content: errorMsg,
         action: "error",
       });
     } finally {
@@ -567,10 +1137,10 @@ export default function ContinuityApp() {
       setIsConnected(true);
 
     } catch (err) {
+      console.error("SSE connection failed, falling back to polling:", err);
       updateAgentCard(orchestrateCardId, {
-        status: "error",
-        content: `Error: ${err instanceof Error ? err.message : "Failed to start pipeline"}`,
-        action: "error",
+        status: "running",
+        content: "Connecting to pipeline (polling mode)...",
       });
       // Fall back to polling
       startStatusPolling(pId);
@@ -583,6 +1153,7 @@ export default function ContinuityApp() {
     }
 
     let lastState = "";
+    let lastRetryCount = 0;
     let hasReportedTerminal = false; // Prevent duplicate terminal state messages
 
     const poll = async () => {
@@ -590,36 +1161,110 @@ export default function ContinuityApp() {
         const status = await getOrchestrationStatus(pId);
         setOrchestrationStatus(status);
 
+        // Detect retry events (self-improvement)
+        if (status.retry_count > lastRetryCount) {
+          lastRetryCount = status.retry_count;
+          const phase = status.current_phase || "generation";
+          addAgentCard({
+            agent: "qc",
+            title: `Self-Improvement #${status.retry_count}`,
+            content: `Quality check detected issues. Analyzing failure and adjusting ${phase} policy for better results...`,
+            status: "warning",
+            action: "policy_update",
+            timestamp: new Date().toLocaleTimeString(),
+            details: {
+              retry_number: status.retry_count,
+              phase: phase,
+              trigger: "QC evaluation failed",
+            },
+          });
+          addChatMessage({
+            type: "assistant",
+            content: `🔄 Self-improvement triggered: Retry #${status.retry_count} for ${phase} phase. Adjusting approach based on quality feedback...`,
+          });
+        }
+
         if (status.state !== lastState) {
+          const previousState = lastState;
           lastState = status.state;
 
-          if (status.state.includes("analyzing")) {
+          // Handle state transitions with clear agent handoffs
+          if (status.state.includes("gathering_requirements")) {
+            addAgentCard({
+              agent: "requirements",
+              title: "Requirements Agent Active",
+              content: "Analyzing your design goals and preparing clarifying questions...",
+              status: "running",
+              action: "analyzing",
+              timestamp: new Date().toLocaleTimeString(),
+            });
+          } else if (status.state.includes("analyzing_space") || status.state.includes("analyzing")) {
+            // Mark previous agent as complete
+            setAgentCards(prev => prev.map(c => 
+              c.agent === "requirements" && c.status === "running" 
+                ? { ...c, status: "completed" as const }
+                : c
+            ));
             addAgentCard({
               agent: "spatial",
-              title: "Spatial Analysis",
-              content: "Detecting physical constraints, fixtures, and spatial boundaries...",
+              title: "Spatial Analysis Agent Active",
+              content: "Detecting physical constraints, fixtures, plumbing, and spatial boundaries...",
               status: "running",
               action: "analyzing",
               timestamp: new Date().toLocaleTimeString(),
             });
           } else if (status.state.includes("generating")) {
-            const phase = status.current_phase || "generation";
+            // Mark spatial agent as complete if transitioning from analysis
+            if (previousState.includes("analyzing")) {
+              setAgentCards(prev => prev.map(c => 
+                c.agent === "spatial" && c.status === "running" 
+                  ? { ...c, status: "completed" as const }
+                  : c
+              ));
+            }
+            const phase = status.current_phase || "cleanup";
+            const isRetrying = status.state.includes("retrying") || status.retry_count > 0;
             addAgentCard({
               agent: "generation",
-              title: `${phase.charAt(0).toUpperCase() + phase.slice(1)} Phase`,
-              content: `Generating visualization for ${phase} transformation...`,
+              title: isRetrying ? `Retrying ${phase.charAt(0).toUpperCase() + phase.slice(1)}` : `${phase.charAt(0).toUpperCase() + phase.slice(1)} Phase`,
+              content: isRetrying 
+                ? `Re-generating ${phase} with improved policy settings (attempt ${status.retry_count + 1})...`
+                : `Generating visualization for ${phase} transformation...`,
               status: "running",
-              action: "generating",
+              action: isRetrying ? "policy_update" : "generating",
               timestamp: new Date().toLocaleTimeString(),
+              details: {
+                phase: phase,
+                retry_count: status.retry_count,
+              },
             });
           } else if (status.state.includes("evaluating")) {
+            const phase = status.current_phase || "generation";
             addAgentCard({
               agent: "qc",
-              title: "Quality Evaluation",
-              content: "Assessing output quality and constraint compliance...",
+              title: `Quality Control - ${phase.charAt(0).toUpperCase() + phase.slice(1)}`,
+              content: `Evaluating ${phase} output against 5 quality criteria: constraint compliance, geometry preservation, hallucination check, style execution, and phase completion...`,
               status: "running",
               action: "evaluating",
               timestamp: new Date().toLocaleTimeString(),
+              details: {
+                phase: phase,
+                criteria: ["constraints", "geometry", "hallucinations", "style", "completion"],
+              },
+            });
+          } else if (status.state.includes("retrying")) {
+            const phase = status.current_phase || "generation";
+            addAgentCard({
+              agent: "qc",
+              title: "Analyzing Failure",
+              content: `Quality check failed for ${phase}. Analyzing what went wrong and generating policy improvements...`,
+              status: "warning",
+              action: "policy_update",
+              timestamp: new Date().toLocaleTimeString(),
+              details: {
+                phase: phase,
+                action: "failure_analysis",
+              },
             });
           }
         }
@@ -636,23 +1281,32 @@ export default function ContinuityApp() {
 
           const isSuccess = status.state !== "failed";
           
+          // Mark all running cards as complete
+          setAgentCards(prev => prev.map(c => 
+            c.status === "running" ? { ...c, status: isSuccess ? "completed" as const : "error" as const } : c
+          ));
+          
           addAgentCard({
             agent: "orchestrator",
             title: isSuccess ? "Transformation Complete" : "Pipeline Failed",
             content: isSuccess 
               ? status.has_warnings 
-                ? "Visualization complete with minor warnings."
-                : "Your space transformation is ready!"
+                ? `Visualization complete with minor warnings. ${status.retry_count > 0 ? `Self-improved ${status.retry_count} time(s).` : ""}`
+                : `Your space transformation is ready! ${status.retry_count > 0 ? `Self-improved ${status.retry_count} time(s) for optimal quality.` : ""}`
               : "The generation pipeline encountered an error.",
             status: isSuccess ? "completed" : "error",
             action: isSuccess ? "success" : "error",
             timestamp: new Date().toLocaleTimeString(),
+            details: {
+              retry_count: status.retry_count,
+              has_warnings: status.has_warnings,
+            },
           });
 
           addChatMessage({
             type: "assistant",
             content: isSuccess 
-              ? "Your visualization is complete! Check the results on the right." 
+              ? `Your visualization is complete! ${status.retry_count > 0 ? `The system self-improved ${status.retry_count} time(s) to ensure quality.` : ""} Check the results on the right.`
               : "I encountered an issue. Please try again or adjust your requirements.",
           });
         }
@@ -687,6 +1341,13 @@ export default function ContinuityApp() {
     setIsConnected(false);
     setCurrentThinking(null);
     setWeaveTraceUrl(null);
+    setGeneratedPhases([]);
+    setTransformationComplete(false);
+    setSelfImprovementRetries([]);
+    setAgentUpgradeEvents([]);
+    setReasoningSteps([]);
+    setPipelineSteps([]);
+    setEvaluationResults([]);
   };
 
   const allQuestionsAnswered = questions 
@@ -712,7 +1373,7 @@ export default function ContinuityApp() {
   return (
     <ToastProvider>
     <LayoutGroup>
-      <div className="min-h-screen text-foreground dark">
+      <div className="min-h-screen text-foreground bg-background transition-colors duration-300">
             <AnimatedBackground 
               isActive={appState === "active"} 
               intensity={appState === "active" ? "intense" : "normal"} 
@@ -720,7 +1381,7 @@ export default function ContinuityApp() {
             />
 
         <div className="relative z-10 min-h-screen flex flex-col">
-          {/* Animated Header - Enhanced */}
+          {/* Header - Clean and minimal with dark mode support */}
           <motion.header
             layout
             transition={springTransition}
@@ -731,33 +1392,33 @@ export default function ContinuityApp() {
                 layout
                 transition={springTransition}
                 className={cn(
-                  "mx-auto px-5 h-14 flex items-center justify-between rounded-2xl border bg-white/70 backdrop-blur-2xl shadow-lg transition-all duration-300",
+                  "mx-auto px-5 h-14 flex items-center justify-between rounded-2xl border backdrop-blur-2xl transition-all duration-300",
                   appState === "welcome" 
-                    ? "max-w-3xl border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.06)]" 
-                    : "max-w-7xl border-black/[0.06] shadow-[0_4px_20px_rgba(0,0,0,0.04)]"
+                    ? "max-w-2xl bg-white/60 dark:bg-zinc-900/70 border-neutral-200/50 dark:border-zinc-700/50 shadow-sm" 
+                    : "max-w-7xl bg-white/80 dark:bg-zinc-900/80 border-neutral-200/60 dark:border-zinc-700/60 shadow-sm"
                 )}
               >
-                {/* Logo and Branding */}
+                {/* Logo */}
                 <motion.div layout className="flex items-center gap-2.5">
-                  <motion.div
-                    whileHover={{ scale: 1.05, rotate: 5 }}
-                    whileTap={{ scale: 0.95 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 17 }}
-                  >
-                    <ContinuityLogo size={26} />
-                  </motion.div>
-                  <span className="font-semibold text-[15px] tracking-tight text-foreground">Continuity</span>
+                  <ContinuityLogo size={24} />
+                  <span className="font-semibold text-sm text-neutral-900 dark:text-zinc-100">Clarity</span>
                   
-                  {/* Compact pipeline indicator in header when active */}
+                  {/* Status in header when active */}
                   <AnimatePresence>
                     {appState !== "welcome" && (
                       <motion.div
                         initial={{ opacity: 0, width: 0 }}
                         animate={{ opacity: 1, width: "auto" }}
                         exit={{ opacity: 0, width: 0 }}
-                        className="hidden sm:flex items-center gap-2 ml-3 pl-3 border-l border-black/[0.06]"
+                        className="hidden sm:flex items-center gap-3 ml-4 pl-4 border-l border-neutral-200 dark:border-zinc-700"
                       >
-                        <CompactTimeline currentStage={pipelineStage} className="w-24" />
+                        <CompactTimeline currentStage={pipelineStage} className="w-20" />
+                        {orchestrationStatus && orchestrationStatus.retry_count > 0 && (
+                          <SelfImprovingBadge 
+                            cycleCount={orchestrationStatus.retry_count}
+                            isActive={orchestrationStatus.state?.includes("evaluating") || orchestrationStatus.state?.includes("retrying") || false}
+                          />
+                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -772,17 +1433,15 @@ export default function ContinuityApp() {
                         initial={{ opacity: 0, x: 10 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: 10 }}
-                        transition={smoothTransition}
                         onClick={resetAll}
-                        whileHover={{ scale: 1.02, backgroundColor: "rgba(0,0,0,0.02)" }}
-                        whileTap={{ scale: 0.98 }}
-                        className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-transparent hover:border-black/[0.06]"
+                        className="text-xs font-medium text-neutral-500 dark:text-zinc-400 hover:text-neutral-900 dark:hover:text-zinc-100 transition-colors flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-zinc-800"
                       >
                         <RotateCcw className="w-3 h-3" />
-                        New project
+                        <span className="hidden sm:inline">New</span>
                       </motion.button>
                     )}
                   </AnimatePresence>
+                  <ThemeToggle />
                   <SettingsDropdown />
                 </motion.div>
               </motion.div>
@@ -815,12 +1474,19 @@ export default function ContinuityApp() {
                   currentThinking={currentThinking}
                   weaveTraceUrl={weaveTraceUrl}
                   pipelineStage={pipelineStage}
+                  pipelineSteps={pipelineSteps}
+                  evaluationResults={evaluationResults}
+                  agentUpgradeEvents={agentUpgradeEvents}
+                  reasoningSteps={reasoningSteps}
+                  selfImprovementRetries={selfImprovementRetries}
+                  generatedPhases={generatedPhases}
+                  transformationComplete={transformationComplete}
                 />
               )}
             </AnimatePresence>
           </main>
 
-          {/* Animated Footer - Enhanced */}
+          {/* Footer - Minimal */}
           <motion.footer
             layout
             transition={springTransition}
@@ -831,25 +1497,16 @@ export default function ContinuityApp() {
                 layout
                 transition={springTransition}
                 className={cn(
-                  "mx-auto px-4 h-10 flex items-center justify-between rounded-xl border bg-white/50 backdrop-blur-xl text-[11px]",
-                  appState === "welcome" 
-                    ? "max-w-3xl border-white/40" 
-                    : "max-w-7xl border-black/[0.04]"
+                  "mx-auto px-4 h-9 flex items-center justify-center rounded-lg text-[11px] text-neutral-400 dark:text-zinc-500",
+                  appState === "welcome" ? "max-w-2xl" : "max-w-7xl"
                 )}
               >
-                <motion.span 
-                  className="flex items-center gap-1.5 text-muted-foreground/70"
-                  whileHover={{ color: "var(--primary)" }}
-                >
-                  <motion.div
-                    animate={{ rotate: [0, 10, -10, 0] }}
-                    transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
-                  >
-                    <Sparkles className="w-3 h-3" />
-                  </motion.div>
-                  <span className="font-medium">WeaveHacks 3</span>
-                </motion.span>
-                <span className="text-muted-foreground/50 font-medium">Self-improving AI agents</span>
+                <span className="flex items-center gap-2">
+                  <Sparkles className="w-3 h-3" />
+                  <span>{APP_CONFIG.event}</span>
+                  <span className="text-neutral-300 dark:text-zinc-600">•</span>
+                  <span>Self-improving AI agents</span>
+                </span>
               </motion.div>
             </div>
           </motion.footer>
@@ -860,30 +1517,30 @@ export default function ContinuityApp() {
   );
 }
 
-// Welcome View with staggered animations
+// Welcome View - Clean, minimal, Apple-inspired with dark mode
 function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: File[]) => void; isLoading: boolean }) {
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.08,
-        delayChildren: 0.1,
+        staggerChildren: 0.1,
+        delayChildren: 0.15,
       },
     },
     exit: {
       opacity: 0,
-      scale: 0.98,
-      transition: { duration: 0.3 },
+      y: -20,
+      transition: { duration: 0.25 },
     },
   };
 
   const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
+    hidden: { opacity: 0, y: 24 },
     visible: { 
       opacity: 1, 
       y: 0,
-      transition: smoothTransition,
+      transition: { duration: 0.5, ease: [0.25, 0.1, 0.25, 1] },
     },
   };
 
@@ -893,48 +1550,43 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
       initial="hidden"
       animate="visible"
       exit="exit"
-      className="flex-1 flex items-center justify-center px-6 py-16"
+      className="flex-1 flex items-center justify-center px-6 py-12"
     >
       <div className="w-full max-w-xl">
-        {/* Hero - Enhanced */}
-        <div className="text-center mb-10">
-          {/* Animated logo */}
-          <motion.div
-            variants={itemVariants}
-            className="flex justify-center mb-6"
-          >
-            <motion.div
-              whileHover={{ scale: 1.05 }}
-              className="relative"
-            >
-              {/* Glow effect */}
-              <div className="absolute inset-0 blur-2xl bg-gradient-to-r from-primary/30 to-accent/30 rounded-full scale-150 opacity-50" />
-              <ContinuityLogo size={56} animate className="relative" />
-            </motion.div>
+        {/* Hero */}
+        <div className="text-center mb-8">
+          {/* Logo */}
+          <motion.div variants={itemVariants} className="flex justify-center mb-8">
+            <div className="relative">
+              <motion.div
+                animate={{ opacity: [0.4, 0.6, 0.4] }}
+                transition={{ duration: 3, repeat: Infinity }}
+                className="absolute inset-0 blur-3xl bg-gradient-to-r from-pink-300/40 via-violet-300/40 to-cyan-300/40 dark:from-pink-500/20 dark:via-violet-500/20 dark:to-cyan-500/20 rounded-full scale-[2]"
+              />
+              <ContinuityLogo size={48} animate className="relative" />
+            </div>
           </motion.div>
           
-          <motion.div
-            variants={itemVariants}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-primary/20 bg-gradient-to-r from-primary/10 to-accent/10 backdrop-blur-xl text-xs font-semibold text-primary mb-5 shadow-sm"
-          >
-            <motion.span
-              animate={{ scale: [1, 1.3, 1], opacity: [0.7, 1, 0.7] }}
-              transition={{ duration: 2, repeat: Infinity }}
-              className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-primary to-accent"
-            />
-            WeaveHacks 3
+          {/* Badge */}
+          <motion.div variants={itemVariants}>
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-neutral-100 dark:bg-zinc-800 text-xs font-medium text-neutral-600 dark:text-zinc-300 mb-6">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              {getFooterText()}
+            </span>
           </motion.div>
+
+          {/* Headline */}
           <motion.h1
             variants={itemVariants}
-            className="text-4xl md:text-5xl font-bold tracking-tight text-balance bg-gradient-to-br from-foreground via-foreground to-foreground/70 bg-clip-text"
+            className="text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-zinc-100"
           >
             Transform any space
           </motion.h1>
           <motion.p
             variants={itemVariants}
-            className="text-foreground/70 mt-4 text-base font-medium"
+            className="text-neutral-500 dark:text-zinc-400 mt-4 text-lg"
           >
-            Upload photos and describe your ideal renovation
+            Upload photos and describe your vision
           </motion.p>
         </div>
 
@@ -943,47 +1595,47 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
           <PromptInputBox 
             onSend={onSend} 
             isLoading={isLoading}
-            placeholder="A warm, modern space with natural wood, soft lighting, and clean lines..." 
+            placeholder={APP_CONFIG.demo.placeholderPrompt}
           />
         </motion.div>
 
-        {/* Hints */}
+        {/* Hints - Minimal */}
         <motion.div
           variants={itemVariants}
-          className="mt-6 flex items-center justify-center gap-6 text-xs text-muted-foreground/70"
+          className="mt-4 flex items-center justify-center gap-4 text-xs text-neutral-400 dark:text-zinc-500"
         >
-          <span className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-pink-400 to-rose-400" />
-            Drop images or paste
+          <span className="flex items-center gap-1.5">
+            <span className="w-1 h-1 rounded-full bg-pink-400" />
+            Drop images
           </span>
-          <span className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-sky-400" />
-            Describe style in detail
+          <span className="text-neutral-300 dark:text-zinc-600">•</span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-1 h-1 rounded-full bg-cyan-400" />
+            Paste from clipboard
           </span>
         </motion.div>
 
-        {/* Features - more vibrant */}
+        {/* Features - Clean cards with dark mode */}
         <motion.div
           variants={itemVariants}
-          className="mt-12 grid grid-cols-3 gap-3"
+          className="mt-14 grid grid-cols-3 gap-3"
         >
           {[
-            { label: "Spatial analysis", desc: "Constraint detection", color: "bg-pink-50 border-pink-200/60 hover:border-pink-300", icon: "from-pink-400 to-rose-500" },
-            { label: "Multi-agent", desc: "Progressive refinement", color: "bg-sky-50 border-sky-200/60 hover:border-sky-300", icon: "from-sky-400 to-cyan-500" },
-            { label: "Photorealistic", desc: "High-fidelity renders", color: "bg-violet-50 border-violet-200/60 hover:border-violet-300", icon: "from-violet-400 to-purple-500" },
+            { label: "Spatial Analysis", desc: "Constraint detection", lightColor: "bg-pink-50 border-pink-100", darkColor: "dark:bg-pink-950/30 dark:border-pink-900/30" },
+            { label: "Self-Improving", desc: "Quality feedback loop", lightColor: "bg-violet-50 border-violet-100", darkColor: "dark:bg-violet-950/30 dark:border-violet-900/30" },
+            { label: "Photorealistic", desc: "High-fidelity output", lightColor: "bg-cyan-50 border-cyan-100", darkColor: "dark:bg-cyan-950/30 dark:border-cyan-900/30" },
           ].map((item) => (
             <motion.div
               key={item.label}
-              whileHover={{ scale: 1.03, y: -3 }}
-              whileTap={{ scale: 0.98 }}
+              whileHover={{ y: -2 }}
               className={cn(
-                "relative p-4 rounded-xl border transition-all duration-200 cursor-default shadow-sm hover:shadow-md",
-                item.color
+                "p-4 rounded-xl border transition-all",
+                item.lightColor,
+                item.darkColor
               )}
             >
-              <div className={cn("w-2 h-2 rounded-full bg-gradient-to-br mb-2", item.icon)} />
-              <p className="text-sm font-semibold text-foreground">{item.label}</p>
-              <p className="text-xs text-muted-foreground/80 mt-0.5">{item.desc}</p>
+              <p className="text-sm font-medium text-neutral-900 dark:text-zinc-100">{item.label}</p>
+              <p className="text-xs text-neutral-500 dark:text-zinc-400 mt-0.5">{item.desc}</p>
             </motion.div>
           ))}
         </motion.div>
@@ -1012,6 +1664,58 @@ interface SplitViewProps {
   currentThinking: { agent: string; action: string } | null;
   weaveTraceUrl: string | null;
   pipelineStage: "requirements" | "spatial" | "generation" | "qc" | "complete";
+  // Pipeline steps and evaluations
+  pipelineSteps: Step[];
+  evaluationResults: EvaluationResult[];
+  // Self-improvement data
+  agentUpgradeEvents: Array<{
+    id: string;
+    timestamp: string;
+    sourceAgent: "qc" | "orchestrator";
+    targetAgent: "generation" | "spatial" | "requirements";
+    trigger: "evaluation_failure" | "cross_scene_learning" | "pattern_detection";
+    evaluationScore?: number;
+    failureReasons?: string[];
+    policyChanges: Array<{ type: string; oldValue?: string | number; newValue?: string | number; rationale: string }>;
+    weaveTraces?: Array<{ traceId: string; url: string; operation: string; duration_ms?: number; status: "success" | "error" }>;
+    improved: boolean;
+    retryNumber?: number;
+  }>;
+  reasoningSteps: Array<{
+    id: string;
+    timestamp: string;
+    agent: string;
+    thought: string;
+    action?: string;
+    observation?: string;
+    toolCalls?: Array<{
+      id: string;
+      timestamp: string;
+      toolName: string;
+      toolType: "weave" | "browserbase" | "gemini" | "database" | "internal";
+      input?: Record<string, unknown>;
+      output?: string;
+      status: "running" | "success" | "error";
+      duration_ms?: number;
+    }>;
+  }>;
+  selfImprovementRetries: Array<{
+    phase: string;
+    attemptNumber: number;
+    failureReason: string;
+    policyChanges: Array<{ field: string; oldValue: string | number; newValue: string | number; reason: string }>;
+    improved: boolean;
+    weaveTraceId?: string;
+  }>;
+  generatedPhases: Array<{
+    phase: string;
+    imagePath: string;
+    iterationId?: string;
+    evaluationPassed?: boolean | null;
+    evaluationScore?: number | null;
+    iterationNumber?: number;
+  }>;
+  transformationComplete: boolean;
 }
 
 function SplitView({
@@ -1033,6 +1737,13 @@ function SplitView({
   currentThinking,
   weaveTraceUrl,
   pipelineStage,
+  pipelineSteps,
+  evaluationResults,
+  agentUpgradeEvents,
+  reasoningSteps,
+  selfImprovementRetries,
+  generatedPhases,
+  transformationComplete,
 }: SplitViewProps) {
   const [splitPosition, setSplitPosition] = useState(50); // Default 50%
   const [isDragging, setIsDragging] = useState(false);
@@ -1081,174 +1792,121 @@ function SplitView({
         {...slideInLeft}
         transition={{ ...smoothTransition, delay: 0.1 }}
         style={{ width: `${splitPosition}%` }}
-        className="flex flex-col border-r border-black/[0.06] min-w-[280px]"
+        className="flex flex-col border-r border-neutral-200/60 dark:border-zinc-800 min-w-[280px] bg-white dark:bg-zinc-950"
       >
-        {/* Enhanced header */}
-        <div className="shrink-0 h-14 flex items-center justify-between px-4 border-b border-black/[0.04] bg-white/70 backdrop-blur-xl">
-          <div className="flex items-center gap-3">
-            <motion.div 
-              whileHover={{ scale: 1.05 }}
-              className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 via-accent/20 to-primary/20 flex items-center justify-center shadow-sm border border-primary/10"
-            >
-              <ContinuityIcon size={15} />
-            </motion.div>
-            <div className="flex flex-col">
-              <span className="text-sm font-bold text-foreground tracking-tight">Continuity</span>
-              <span className="text-[9px] text-muted-foreground/60 font-medium -mt-0.5">AI Design Studio</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {isConnected ? (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-50 border border-emerald-200/50"
-              >
-                <div className="relative">
-                  <motion.div
-                    animate={{ scale: [1, 1.5, 1], opacity: [0.5, 0, 0.5] }}
-                    transition={{ duration: 2, repeat: Infinity }}
-                    className="absolute inset-0 w-1.5 h-1.5 rounded-full bg-emerald-500"
-                  />
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                </div>
-                <span className="text-[10px] font-semibold text-emerald-700">Live</span>
-              </motion.div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-50 border border-red-200/50">
-                <WifiOff className="w-3 h-3 text-red-500" />
-                <span className="text-[10px] font-medium text-red-600">Offline</span>
-              </div>
-            )}
-          </div>
+        {/* Minimal header */}
+        <div className="shrink-0 h-11 flex items-center justify-between px-4 border-b border-neutral-100 dark:border-zinc-800/80">
+          <span className="text-[13px] font-medium text-neutral-600 dark:text-zinc-300">Conversation</span>
+          <span className={`text-[10px] ${isConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-400 dark:text-zinc-500'}`}>
+            {isConnected ? '● Connected' : '○ Offline'}
+          </span>
         </div>
 
-        {/* Messages area - clean, minimal */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin">
-          <div className="p-4 space-y-3">
-          {/* Uploaded Images */}
-          <AnimatePresence>
+        {/* Messages area - clean, document-like */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-2xl mx-auto px-6 py-4">
+            {/* Uploaded Images - Compact at top */}
             {uploadedImages.length > 0 && (
-              <ImageDisplayCard images={uploadedImages} title="Your space" />
-            )}
-          </AnimatePresence>
-
-          {/* Chat messages */}
-          <AnimatePresence mode="popLayout">
-            {chatMessages.map((msg, index) => (
-              <ChatBubble key={msg.id} message={msg} index={index} />
-            ))}
-          </AnimatePresence>
-
-          {/* Questions */}
-          <AnimatePresence>
-            {questions && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-3"
-              >
-                {questions.questions.map((q, index) => (
-                  <motion.div
-                    key={q.question_id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                  >
-                    <QuestionCard
-                      question={q}
-                      onAnswer={onQuestionAnswer}
-                      selectedAnswer={answers[q.question_id]}
-                      disabled={isLoading}
-                    />
-                  </motion.div>
-                ))}
-                
-                {/* Submit button - clean style */}
-                <motion.button
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  whileHover={allQuestionsAnswered && !isLoading ? { scale: 1.01 } : {}}
-                  whileTap={allQuestionsAnswered && !isLoading ? { scale: 0.99 } : {}}
-                  onClick={onSubmitAnswers}
-                  disabled={!allQuestionsAnswered || isLoading}
-                  className={cn(
-                    "w-full py-2.5 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2",
-                    allQuestionsAnswered && !isLoading
-                      ? "bg-foreground text-background hover:bg-foreground/90"
-                      : "bg-black/[0.04] text-muted-foreground/40 cursor-not-allowed"
-                  )}
-                >
-                  {isLoading ? (
-                    <>
-                      <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                        className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full"
-                      />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      Continue
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </>
-                  )}
-                </motion.button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Status indicator */}
-          <AnimatePresence>
-            {orchestrationStatus && !questions && (
-              <StatusIndicator status={orchestrationStatus} />
-            )}
-          </AnimatePresence>
-
-          {/* Thinking indicator - cleaner */}
-          <AnimatePresence>
-            {currentThinking && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                className="flex gap-2.5"
-              >
-                <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary/25 to-accent/25 flex items-center justify-center shrink-0">
-                  <ContinuityIcon size={12} />
+              <div className="pb-4 mb-4 border-b border-neutral-100 dark:border-zinc-800">
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] font-medium text-neutral-400 dark:text-zinc-500">Uploaded</span>
+                  <div className="flex gap-2">
+                    {uploadedImages.map((img, i) => (
+                      <div key={i} className="w-12 h-12 rounded-lg overflow-hidden bg-neutral-100 dark:bg-zinc-800">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={img} alt="" className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="rounded-xl px-3 py-2 bg-black/[0.02] border border-black/[0.04] text-sm">
+              </div>
+            )}
+
+            {/* Chat messages - Clean conversation thread */}
+            <div className="divide-y divide-neutral-100 dark:divide-zinc-800/50">
+              {chatMessages.map((msg) => (
+                <ChatBubble key={msg.id} message={msg} index={0} />
+              ))}
+            </div>
+
+            {/* Thinking indicator - Simple and clean */}
+            <AnimatePresence>
+              {currentThinking && !questions && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="py-4 border-t border-neutral-100 dark:border-zinc-800/50"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[11px] font-medium text-neutral-400 dark:text-zinc-500">Continuity</span>
+                  </div>
                   <ThinkingIndicator 
                     agent={currentThinking.agent} 
                     action={currentThinking.action} 
                   />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Questions - Clean, inline */}
+            {questions && (
+              <div className="py-4 border-t border-neutral-100 dark:border-zinc-800/50 space-y-4">
+                {questions.questions.map((q) => (
+                  <QuestionCard
+                    key={q.question_id}
+                    question={q}
+                    onAnswer={onQuestionAnswer}
+                    selectedAnswer={answers[q.question_id]}
+                    disabled={isLoading}
+                  />
+                ))}
+                
+                <button
+                  onClick={onSubmitAnswers}
+                  disabled={!allQuestionsAnswered || isLoading}
+                  className={cn(
+                    "w-full py-2.5 rounded-lg text-[13px] font-medium transition-colors",
+                    allQuestionsAnswered && !isLoading
+                      ? "bg-neutral-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-neutral-800 dark:hover:bg-zinc-200"
+                      : "bg-neutral-100 dark:bg-zinc-800 text-neutral-400 dark:text-zinc-500 cursor-not-allowed"
+                  )}
+                >
+                  {isLoading ? "Processing..." : "Continue →"}
+                </button>
+              </div>
+            )}
+
+            {/* Results - Clean completion state */}
+            {transformationComplete && generatedPhases.length > 0 && uploadedImages.length > 0 && (
+              <div className="py-4 border-t border-neutral-100 dark:border-zinc-800/50">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">✓ Complete</span>
                 </div>
-              </motion.div>
+                <ResultsTimeline
+                  originalImage={uploadedImages[0] || ""}
+                  originalImages={uploadedImages}
+                  phases={generatedPhases}
+                  onViewWeaveTrace={() => {
+                    if (weaveTraceUrl) window.open(weaveTraceUrl, "_blank");
+                  }}
+                />
+              </div>
             )}
-          </AnimatePresence>
 
-          {/* Error display - cleaner */}
-          <AnimatePresence>
+            {/* Error - Simple text */}
             {error && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="rounded-lg border border-red-200 bg-red-50 p-3"
-              >
-                <p className="text-xs text-red-700">{error}</p>
-              </motion.div>
+              <div className="py-4 border-t border-neutral-100 dark:border-zinc-800/50">
+                <p className="text-[13px] text-red-600 dark:text-red-400">{error}</p>
+              </div>
             )}
-          </AnimatePresence>
 
-          <div ref={chatEndRef} />
+            <div ref={chatEndRef} className="h-4" />
           </div>
         </div>
 
-        {/* Input - Claude-style minimal */}
-        <div className="shrink-0 p-3 border-t border-black/[0.04] bg-white/60 backdrop-blur-sm">
+        {/* Input - Minimal */}
+        <div className="shrink-0 px-6 py-3 border-t border-neutral-100 dark:border-zinc-800 bg-white dark:bg-zinc-950">
           <PromptInputBox
             onSend={onSend}
             isLoading={isLoading}
@@ -1262,140 +1920,148 @@ function SplitView({
       <div
         onMouseDown={handleMouseDown}
         className={cn(
-          "w-1 hover:w-1.5 bg-transparent hover:bg-primary/20 cursor-col-resize transition-all duration-150 flex-shrink-0 relative group",
-          isDragging && "w-1.5 bg-primary/30"
+          "w-1 hover:w-1.5 bg-transparent hover:bg-primary/20 dark:hover:bg-primary/30 cursor-col-resize transition-all duration-150 flex-shrink-0 relative group",
+          isDragging && "w-1.5 bg-primary/30 dark:bg-primary/40"
         )}
       >
         {/* Drag handle indicator */}
         <div className={cn(
-          "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity",
+          "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full bg-black/10 dark:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity",
           isDragging && "opacity-100 bg-primary/50"
         )} />
       </div>
 
-      {/* Right Panel - Agent Activity */}
+      {/* Right Panel - Agent Activity & Intelligence */}
       <motion.div
         {...slideInRight}
         transition={{ ...smoothTransition, delay: 0.15 }}
         style={{ width: `${100 - splitPosition}%` }}
-        className="flex-1 overflow-y-auto bg-gradient-to-br from-slate-50/30 to-white scrollbar-thin min-w-[280px]"
+        className="flex-1 overflow-y-auto bg-gradient-to-br from-neutral-50/50 to-white dark:from-zinc-900/50 dark:to-zinc-950 scrollbar-thin min-w-[300px]"
       >
-        <div className="p-6 max-w-3xl mx-auto">
-          {/* Progress Timeline */}
+        <div className="p-5 space-y-5">
+          {/* Progress Timeline - Clean header */}
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
-            className="mb-6 p-4 rounded-xl bg-white/80 border border-black/[0.04] shadow-sm"
+            className="p-4 rounded-xl bg-white dark:bg-zinc-900 border border-neutral-200/60 dark:border-zinc-800 shadow-sm"
           >
             <ProgressTimeline currentStage={pipelineStage} />
           </motion.div>
 
-          {/* Header - Enhanced */}
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="mb-5 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-2.5">
-              <motion.div 
-                animate={{ rotate: [0, 5, 0, -5, 0] }}
-                transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary/15 to-accent/15 flex items-center justify-center shadow-sm border border-primary/10"
-              >
-                <Zap className="w-4 h-4 text-primary" />
-              </motion.div>
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">Agent Activity</h2>
-              </div>
-            </div>
-            {weaveTraceUrl && (
-              <a
-                href={weaveTraceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[11px] text-primary hover:text-primary/80 transition-colors flex items-center gap-1 px-2 py-1 rounded-md bg-primary/5 hover:bg-primary/10"
-              >
-                <Sparkles className="w-3 h-3" />
-                View in Weave
-              </a>
-            )}
-          </motion.div>
-
-          {/* Agent cards */}
-          <div className="space-y-3">
-            <AnimatePresence mode="popLayout">
-              {agentCards.map((card, index) => (
-                <motion.div
-                  key={card.id}
-                  initial={{ opacity: 0, y: 20, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.98 }}
-                  transition={{
-                    ...smoothTransition,
-                    delay: Math.min(index * 0.04, 0.2),
-                  }}
-                >
-                  <AgentWorkCard {...card} weaveTraceUrl={weaveTraceUrl || undefined} />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-            
-            {/* Loading skeleton when waiting for agents */}
-            {agentCards.length === 0 && isLoading && (
-              <div className="space-y-3">
-                <AgentCardSkeleton />
-                <AgentCardSkeleton />
-              </div>
-            )}
-            
-            {/* Empty state - enhanced */}
-            {agentCards.length === 0 && !isLoading && (
+          {/* Self-Improvement Intelligence Panel - KEY FEATURE */}
+          <AnimatePresence>
+            {(selfImprovementRetries.length > 0 || reasoningSteps.length > 0) && (
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
-                className="text-center py-16 px-6 rounded-2xl border-2 border-dashed border-black/[0.06] bg-gradient-to-b from-white/50 to-transparent"
+                exit={{ opacity: 0, y: -10 }}
               >
-                {/* Animated icon container */}
-                <motion.div 
-                  className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center shadow-sm border border-primary/10"
-                  animate={{ 
-                    scale: [1, 1.05, 1],
-                    rotate: [0, 2, -2, 0]
-                  }}
-                  transition={{ 
-                    duration: 4, 
-                    repeat: Infinity,
-                    ease: "easeInOut"
-                  }}
-                >
-                  <Sparkles className="w-7 h-7 text-primary/50" />
-                </motion.div>
-                
-                <h3 className="text-base font-semibold text-foreground/70 mb-1">
-                  Ready to Transform
-                </h3>
-                <p className="text-sm text-muted-foreground/50 max-w-xs mx-auto">
-                  Upload an image and describe your vision to start the AI-powered design process
-                </p>
-                
-                {/* Decorative dots */}
-                <div className="flex justify-center gap-1.5 mt-6">
-                  {[0, 1, 2].map((i) => (
-                    <motion.div
-                      key={i}
-                      className="w-1.5 h-1.5 rounded-full bg-primary/20"
-                      animate={{ opacity: [0.3, 1, 0.3] }}
-                      transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.2 }}
-                    />
-                  ))}
-                </div>
+                <IntelligencePanel
+                  cycles={selfImprovementRetries.map((retry, idx) => ({
+                    id: `cycle-${idx}`,
+                    timestamp: new Date().toLocaleTimeString(),
+                    phase: retry.phase,
+                    attemptNumber: retry.attemptNumber,
+                    evaluationScore: retry.improved ? 0.85 : 0.55,
+                    passed: retry.improved,
+                    failureReasons: [retry.failureReason],
+                    policyChanges: retry.policyChanges.map(pc => ({
+                      type: pc.field,
+                      oldValue: pc.oldValue,
+                      newValue: pc.newValue,
+                      rationale: pc.reason,
+                    })),
+                    weaveTraceUrl: weaveTraceUrl || undefined,
+                  }))}
+                  reasoningSteps={reasoningSteps.map(step => ({
+                    id: step.id,
+                    timestamp: step.timestamp,
+                    agent: step.agent,
+                    thought: step.thought,
+                    action: step.action,
+                  }))}
+                  weaveProjectUrl={weaveTraceUrl || undefined}
+                  isActive={orchestrationStatus?.state?.includes("generating") || orchestrationStatus?.state?.includes("evaluating") || false}
+                />
               </motion.div>
             )}
-            
-            <div ref={cardsEndRef} className="h-4" />
+          </AnimatePresence>
+
+          {/* Step Timeline - Comprehensive view of all steps */}
+          {pipelineSteps.length > 0 && (
+            <div className="p-4 rounded-xl bg-white dark:bg-zinc-900 border border-neutral-200/60 dark:border-zinc-800">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-medium text-neutral-700 dark:text-zinc-300">Pipeline Steps</h2>
+                  <StepSummary steps={pipelineSteps} />
+                </div>
+                {weaveTraceUrl && (
+                  <a
+                    href={weaveTraceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-neutral-500 dark:text-zinc-400 hover:text-neutral-700 dark:hover:text-zinc-200 transition-colors"
+                  >
+                    All traces →
+                  </a>
+                )}
+              </div>
+              <StepTimeline 
+                steps={pipelineSteps} 
+                weaveProjectUrl={weaveTraceUrl || undefined}
+              />
+            </div>
+          )}
+
+          {/* Evaluation Results */}
+          {evaluationResults.length > 0 && (
+            <EvaluationDetails evaluations={evaluationResults} />
+          )}
+
+          {/* Agent Activity Section - Compact cards */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[13px] font-medium text-neutral-600 dark:text-zinc-400">Activity Log</span>
+              {agentCards.length > 0 && (
+                <span className="text-[10px] text-neutral-400 dark:text-zinc-500">
+                  {agentCards.length} events
+                </span>
+              )}
+            </div>
+
+            {/* Agent cards */}
+            <div className="space-y-2">
+              <AnimatePresence mode="popLayout">
+                {agentCards.map((card) => (
+                  <motion.div
+                    key={card.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <AgentWorkCard {...card} weaveTraceUrl={weaveTraceUrl || undefined} />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+              
+              {/* Loading skeleton */}
+              {agentCards.length === 0 && isLoading && (
+                <div className="space-y-2">
+                  <AgentCardSkeleton />
+                  <AgentCardSkeleton />
+                </div>
+              )}
+              
+              {/* Empty state */}
+              {agentCards.length === 0 && !isLoading && pipelineSteps.length === 0 && (
+                <div className="text-center py-8">
+                  <p className="text-sm text-neutral-400 dark:text-zinc-500">Waiting for activity...</p>
+                </div>
+              )}
+              
+              <div ref={cardsEndRef} className="h-2" />
+            </div>
           </div>
         </div>
       </motion.div>
@@ -1403,104 +2069,76 @@ function SplitView({
   );
 }
 
-// Chat Bubble with polished design and streaming text
+// Chat Bubble - Clean, minimal, Anthropic-inspired
 function ChatBubble({ message, index }: { message: ChatMessage; index: number }) {
   const isUser = message.type === "user";
-  const isSystem = message.type === "system";
   const isAssistant = message.type === "assistant";
   const shouldStream = isAssistant && message.isNew;
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -8, scale: 0.98 }}
-      transition={{
-        duration: 0.3,
-        delay: Math.min(index * 0.02, 0.1),
-        ease: [0.25, 0.1, 0.25, 1],
-      }}
-      className={cn(
-        "flex gap-3 group",
-        isUser ? "flex-row-reverse" : "flex-row"
-      )}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
+      className="py-3"
     >
-      {/* Avatar */}
-      {!isUser && (
-        <motion.div
-          initial={{ scale: 0.8 }}
-          animate={{ scale: 1 }}
-          className={cn(
-            "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 shadow-sm",
-            isSystem 
-              ? "bg-gradient-to-br from-amber-100 to-amber-200 border border-amber-300/50" 
-              : "bg-gradient-to-br from-primary/15 to-accent/15 border border-primary/10"
-          )}
-        >
-          {isSystem ? (
-            <span className="text-amber-600 text-[10px] font-bold">!</span>
-          ) : (
-            <ContinuityIcon size={13} />
-          )}
-        </motion.div>
-      )}
-      
-      {/* Message bubble */}
-      <div
-        className={cn(
-          "rounded-2xl px-4 py-2.5 max-w-[80%] shadow-sm transition-shadow duration-200",
-          isUser 
-            ? "bg-gradient-to-br from-foreground to-foreground/90 text-background rounded-br-md shadow-md"
-            : isSystem
-              ? "bg-gradient-to-br from-amber-50 to-amber-100/80 border border-amber-200/60 text-amber-900 rounded-bl-md"
-              : "bg-white/80 backdrop-blur-sm border border-black/[0.06] text-foreground rounded-bl-md hover:shadow-md"
+      {/* Simple role label */}
+      <div className="flex items-center gap-2 mb-1.5">
+        {isUser ? (
+          <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">You</span>
+        ) : (
+          <span className="text-[11px] font-medium text-neutral-500 dark:text-zinc-400">Clarity</span>
         )}
-      >
+        {message.timestamp && (
+          <span className="text-[10px] text-neutral-300 dark:text-zinc-600">{message.timestamp}</span>
+        )}
+      </div>
+      
+      {/* Message content - just text, no bubble */}
+      <div className={cn(
+        "text-[14px] leading-[1.7] text-neutral-800 dark:text-zinc-200",
+        isUser && "text-neutral-600 dark:text-zinc-300"
+      )}>
         {shouldStream ? (
           <StreamingChatMessage 
             content={message.content}
             isNew={true}
-            speed={50}
-            className="text-[13px] leading-[1.6]"
+            speed={40}
           />
         ) : (
-          <p className="text-[13px] leading-[1.6]">{message.content}</p>
-        )}
-        
-        {/* Compact image thumbnails in messages */}
-        {message.images && message.images.length > 0 && (
-          <div className="mt-2.5 flex gap-2 flex-wrap">
-            {message.images.map((img, i) => (
-              <motion.div
-                key={i}
-                whileHover={{ scale: 1.05 }}
-                className="w-12 h-12 rounded-lg overflow-hidden border border-white/20 shadow-sm cursor-pointer"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={img} alt="" className="w-full h-full object-cover" />
-              </motion.div>
-            ))}
-          </div>
-        )}
-        
-        {/* Subtle timestamp on hover */}
-        {message.timestamp && (
-          <p className="text-[10px] text-current/40 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            {message.timestamp}
-          </p>
+          <span className="whitespace-pre-wrap">{message.content}</span>
         )}
       </div>
+      
+      {/* Images - clean thumbnails */}
+      {message.images && message.images.length > 0 && (
+        <div className="mt-3 flex gap-2">
+          {message.images.map((img, i) => (
+            <div
+              key={i}
+              className="w-16 h-16 rounded-lg overflow-hidden bg-neutral-100 dark:bg-zinc-800"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={img} alt="" className="w-full h-full object-cover" />
+            </div>
+          ))}
+        </div>
+      )}
     </motion.div>
   );
 }
 
-// Status Indicator with animations
+// Status Indicator with animations and self-improvement info
 function StatusIndicator({ status }: { status: OrchestrationStatusResponse }) {
   const getStatusColor = () => {
-    if (status.state === "completed") return "text-green-600 bg-green-500/10 border-green-500/20";
-    if (status.state === "failed") return "text-red-600 bg-red-500/10 border-red-500/20";
-    return "text-amber-600 bg-amber-500/10 border-amber-500/20";
+    if (status.state === "completed") return "text-green-600 dark:text-green-400 bg-green-500/10 dark:bg-green-500/20 border-green-500/20 dark:border-green-500/30";
+    if (status.state === "failed") return "text-red-600 dark:text-red-400 bg-red-500/10 dark:bg-red-500/20 border-red-500/20 dark:border-red-500/30";
+    if (status.retry_count > 0) return "text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/20 border-amber-500/20 dark:border-amber-500/30";
+    return "text-blue-600 dark:text-blue-400 bg-blue-500/10 dark:bg-blue-500/20 border-blue-500/20 dark:border-blue-500/30";
   };
+
+  const isRetrying = status.state.includes("retrying");
+  const isEvaluating = status.state.includes("evaluating");
 
   return (
     <motion.div
@@ -1522,15 +2160,44 @@ function StatusIndicator({ status }: { status: OrchestrationStatusResponse }) {
           {status.state.replace(/_/g, ' ')}
         </motion.span>
       </div>
+      
       {status.current_phase && (
         <p className="text-xs opacity-80">
-          Phase: {status.current_phase}
+          Phase: <span className="font-medium capitalize">{status.current_phase}</span>
         </p>
       )}
+      
+      {/* Self-Improvement Indicator */}
       {status.retry_count > 0 && (
-        <p className="text-xs opacity-80 mt-1">
-          Retries: {status.retry_count}
-        </p>
+        <motion.div 
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          className="mt-3 pt-3 border-t border-current/20"
+        >
+          <div className="flex items-center gap-2">
+            <motion.div
+              animate={{ rotate: [0, 360] }}
+              transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+              className="w-4 h-4 rounded-full border-2 border-current border-t-transparent"
+            />
+            <span className="text-xs font-semibold">Self-Improving</span>
+          </div>
+          <p className="text-xs opacity-70 mt-1">
+            {isRetrying 
+              ? `Analyzing failure and updating policy (attempt ${status.retry_count + 1})...`
+              : isEvaluating
+                ? `Checking quality after ${status.retry_count} improvement${status.retry_count > 1 ? 's' : ''}...`
+                : `Made ${status.retry_count} improvement${status.retry_count > 1 ? 's' : ''} to optimize results`
+            }
+          </p>
+        </motion.div>
+      )}
+      
+      {/* Batch Progress */}
+      {status.total_scenes && status.total_scenes > 1 && (
+        <div className="mt-2 text-xs opacity-70">
+          Scene {(status.completed_scenes || 0) + 1} of {status.total_scenes}
+        </div>
       )}
     </motion.div>
   );

@@ -1,18 +1,15 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  // Enable standalone output for Docker
-  output: "standalone",
-
-  // Ensure Next uses the frontend directory as tracing root
-  outputFileTracingRoot: __dirname,
-  
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   // Image optimization
   images: {
     remotePatterns: [
       {
         protocol: "http",
         hostname: "localhost",
+      },
+      {
+        protocol: "http",
+        hostname: "backend",
       },
     ],
   },

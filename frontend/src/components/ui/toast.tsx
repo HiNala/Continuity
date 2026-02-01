@@ -87,7 +87,13 @@ function ToastContainer({
   removeToast: (id: string) => void;
 }) {
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+    <div 
+      className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"
+      role="region"
+      aria-label="Notifications"
+      aria-live="polite"
+      aria-atomic="false"
+    >
       <AnimatePresence mode="popLayout">
         {toasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} onClose={() => removeToast(toast.id)} />
@@ -106,11 +112,13 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   };
   
   const styles = {
-    success: "bg-gradient-to-r from-emerald-50 to-emerald-100/80 border-emerald-200/60 text-emerald-900",
-    error: "bg-gradient-to-r from-red-50 to-red-100/80 border-red-200/60 text-red-900",
-    info: "bg-gradient-to-r from-blue-50 to-blue-100/80 border-blue-200/60 text-blue-900",
-    loading: "bg-white/95 border-black/[0.08] text-foreground",
+    success: "bg-gradient-to-r from-emerald-50 to-emerald-100/80 dark:from-emerald-950/80 dark:to-emerald-900/60 border-emerald-200/60 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-100",
+    error: "bg-gradient-to-r from-red-50 to-red-100/80 dark:from-red-950/80 dark:to-red-900/60 border-red-200/60 dark:border-red-800/60 text-red-900 dark:text-red-100",
+    info: "bg-gradient-to-r from-blue-50 to-blue-100/80 dark:from-blue-950/80 dark:to-blue-900/60 border-blue-200/60 dark:border-blue-800/60 text-blue-900 dark:text-blue-100",
+    loading: "bg-white/95 dark:bg-zinc-900/95 border-black/[0.08] dark:border-white/[0.08] text-foreground",
   };
+  
+  const ariaRole = toast.type === "error" ? "alert" : "status";
   
   const iconStyles = {
     success: "text-emerald-500",
@@ -120,9 +128,9 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   };
 
   const iconBgStyles = {
-    success: "bg-emerald-100",
-    error: "bg-red-100",
-    info: "bg-blue-100",
+    success: "bg-emerald-100 dark:bg-emerald-900/50",
+    error: "bg-red-100 dark:bg-red-900/50",
+    info: "bg-blue-100 dark:bg-blue-900/50",
     loading: "bg-primary/10",
   };
 
@@ -142,6 +150,8 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
       animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
       exit={{ opacity: 0, x: 30, scale: 0.95 }}
       transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+      role={ariaRole}
+      aria-live={toast.type === "error" ? "assertive" : "polite"}
       className={cn(
         "pointer-events-auto flex items-start gap-3 px-4 py-3.5 rounded-xl border shadow-xl backdrop-blur-xl min-w-[300px] max-w-[400px] relative overflow-hidden",
         styles[toast.type]
