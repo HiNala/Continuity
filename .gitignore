@@ -1,5 +1,5 @@
 # ============================================
-# Continuity - Self-Improving Agent System
+# Clarity - Self-Improving Agent System
 # .gitignore
 # ============================================
 
@@ -148,6 +148,7 @@ coverage/
 # ============================================
 uploads/
 generated/
+generated_images/
 outputs/
 *.generated.*
 
