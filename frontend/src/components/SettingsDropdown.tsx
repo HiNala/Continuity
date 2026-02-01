@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Settings,
   Loader2,
@@ -127,11 +128,11 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
 
   const getServiceIcon = (service: string) => {
     const icons: Record<string, React.ReactNode> = {
-      weave: <Activity className="w-4 h-4" />,
-      gemini: <Sparkles className="w-4 h-4" />,
-      browserbase: <Globe className="w-4 h-4" />,
-      redis: <Database className="w-4 h-4 text-red-400" />,
-      database: <Database className="w-4 h-4" />,
+      weave: <Activity className="w-4 h-4 text-amber-500" />,
+      gemini: <Sparkles className="w-4 h-4 text-blue-500" />,
+      browserbase: <Globe className="w-4 h-4 text-violet-500" />,
+      redis: <Database className="w-4 h-4 text-red-500" />,
+      database: <Database className="w-4 h-4 text-emerald-500" />,
     };
     return icons[service] || <Settings className="w-4 h-4" />;
   };
@@ -155,82 +156,119 @@ export function SettingsDropdown({ onTestResult }: SettingsDropdownProps = {}) {
 
   return (
     <div className="relative" ref={dropdownRef}>
-      <button
+      <motion.button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white bg-slate-800/50 hover:bg-slate-800 border border-slate-700 rounded-lg transition-colors"
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        className="flex items-center gap-2 px-3 py-2 text-sm text-foreground/70 hover:text-foreground bg-white/60 hover:bg-white/80 backdrop-blur-sm border border-black/[0.08] hover:border-black/[0.12] rounded-xl transition-all shadow-sm hover:shadow"
       >
         <Settings className="w-4 h-4" />
-        <span>Settings</span>
-        <ChevronDown
-          className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
-        />
-      </button>
+        <span className="font-medium">Settings</span>
+        <motion.div
+          animate={{ rotate: isOpen ? 180 : 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <ChevronDown className="w-4 h-4" />
+        </motion.div>
+      </motion.button>
 
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden">
-          <div className="p-3 border-b border-slate-700">
-            <h3 className="font-medium text-white">API Key Testing</h3>
-            <p className="text-xs text-slate-400 mt-1">
-              Test your API keys before running the demo
-            </p>
-          </div>
-
-          <div className="p-2">
-            {services.map(({ key, testFn }) => (
-              <button
-                key={key}
-                onClick={() => handleTest(key, testFn)}
-                disabled={testing !== null}
-                className="w-full flex items-center justify-between px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-md transition-colors disabled:opacity-50"
-              >
-                <div className="flex items-center gap-2">
-                  {getServiceIcon(key)}
-                  <span>{getServiceLabel(key)}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {testing === key ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-continuity-400" />
-                  ) : (
-                    getResultIcon(key)
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
-
-          <div className="p-2 border-t border-slate-700">
-            <button
-              onClick={handleTestAll}
-              disabled={testing !== null}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-continuity-600 hover:bg-continuity-500 rounded-md transition-colors disabled:opacity-50"
-            >
-              {testing === "all" ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Testing All...
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4" />
-                  Test All APIs
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* Results Summary */}
-          {Object.keys(results).length > 0 && (
-            <div className="p-2 border-t border-slate-700 bg-slate-800/50">
-              <div className="text-xs text-slate-400">
-                Last tested:{" "}
-                {new Date(
-                  Object.values(results)[0]?.timestamp || ""
-                ).toLocaleTimeString()}
-              </div>
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+            transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+            className="absolute right-0 mt-2 w-72 bg-white/95 backdrop-blur-xl border border-black/[0.08] rounded-2xl shadow-xl z-50 overflow-hidden"
+          >
+            <div className="p-4 border-b border-black/[0.06] bg-gradient-to-r from-primary/5 to-accent/5">
+              <h3 className="font-semibold text-foreground">API Connections</h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                Test your API keys before running the demo
+              </p>
             </div>
-          )}
-        </div>
-      )}
+
+            <div className="p-2">
+              {services.map(({ key, testFn }, index) => (
+                <motion.button
+                  key={key}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  onClick={() => handleTest(key, testFn)}
+                  disabled={testing !== null}
+                  className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-foreground/80 hover:text-foreground hover:bg-black/[0.03] rounded-xl transition-all disabled:opacity-50 group"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-black/[0.04] group-hover:bg-black/[0.06] flex items-center justify-center transition-colors">
+                      {getServiceIcon(key)}
+                    </div>
+                    <span className="font-medium">{getServiceLabel(key)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {testing === key ? (
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      >
+                        <Loader2 className="w-4 h-4 text-primary" />
+                      </motion.div>
+                    ) : (
+                      getResultIcon(key)
+                    )}
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+
+            <div className="p-3 border-t border-black/[0.06]">
+              <motion.button
+                onClick={handleTestAll}
+                disabled={testing !== null}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-primary to-accent hover:opacity-90 rounded-xl transition-all disabled:opacity-50 shadow-md shadow-primary/20"
+              >
+                {testing === "all" ? (
+                  <>
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    >
+                      <Loader2 className="w-4 h-4" />
+                    </motion.div>
+                    Testing All...
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4" />
+                    Test All APIs
+                  </>
+                )}
+              </motion.button>
+            </div>
+
+            {/* Results Summary */}
+            <AnimatePresence>
+              {Object.keys(results).length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="px-4 py-2 border-t border-black/[0.06] bg-black/[0.02]"
+                >
+                  <div className="text-[10px] text-muted-foreground/60 font-medium">
+                    Last tested:{" "}
+                    {new Date(
+                      Object.values(results)[0]?.timestamp || ""
+                    ).toLocaleTimeString()}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

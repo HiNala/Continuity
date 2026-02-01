@@ -259,7 +259,7 @@ export function StreamingChatMessage({
 }
 
 // ============================================
-// Agent Thinking Indicator
+// Agent Thinking Indicator - Enhanced
 // ============================================
 interface ThinkingIndicatorProps {
   agent: string;
@@ -277,56 +277,121 @@ export function ThinkingIndicator({
   useEffect(() => {
     const interval = setInterval(() => {
       setDotIndex((prev) => (prev + 1) % 4);
-    }, 500);
+    }, 400);
     return () => clearInterval(interval);
   }, []);
 
   const dots = ["", ".", "..", "..."];
 
-  const getActionText = () => {
+  const getActionConfig = () => {
     switch (action) {
       case "analyzing":
-        return "Analyzing";
+        return { text: "Analyzing", color: "from-purple-500 to-pink-500" };
       case "generating":
-        return "Generating";
+        return { text: "Generating", color: "from-amber-500 to-orange-500" };
       case "evaluating":
-        return "Evaluating";
+        return { text: "Evaluating", color: "from-emerald-500 to-teal-500" };
       case "searching":
-        return "Searching";
+        return { text: "Searching", color: "from-blue-500 to-cyan-500" };
       case "policy_update":
-        return "Updating policy";
+        return { text: "Updating policy", color: "from-violet-500 to-purple-500" };
       default:
-        return "Thinking";
+        return { text: "Thinking", color: "from-primary to-accent" };
     }
   };
 
+  const config = getActionConfig();
+
   return (
-    <div className={`flex items-center gap-2 text-sm text-muted-foreground ${className}`}>
-      <motion.div
-        animate={{ rotate: 360 }}
-        transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-        className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full"
-      />
-      <span>
-        {agent.charAt(0).toUpperCase() + agent.slice(1)} is {getActionText().toLowerCase()}
-        {dots[dotIndex]}
+    <motion.div 
+      initial={{ opacity: 0, y: 5 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`flex items-center gap-2.5 text-sm ${className}`}
+    >
+      {/* Animated spinner with gradient */}
+      <div className="relative">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+          className={`w-4 h-4 rounded-full border-2 border-transparent bg-gradient-to-r ${config.color}`}
+          style={{ 
+            WebkitMask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
+            WebkitMaskComposite: "xor",
+            maskComposite: "exclude",
+            padding: "2px",
+          }}
+        />
+        {/* Inner glow */}
+        <motion.div
+          animate={{ opacity: [0.3, 0.6, 0.3] }}
+          transition={{ duration: 1.5, repeat: Infinity }}
+          className={`absolute inset-0 rounded-full bg-gradient-to-r ${config.color} blur-sm opacity-30`}
+        />
+      </div>
+      
+      <span className="text-muted-foreground">
+        <span className="font-medium text-foreground/80">
+          {agent.charAt(0).toUpperCase() + agent.slice(1)}
+        </span>
+        {" is "}
+        <span className="text-foreground/70">{config.text.toLowerCase()}</span>
+        <span className="text-primary/70 font-mono">{dots[dotIndex]}</span>
       </span>
+    </motion.div>
+  );
+}
+
+// ============================================
+// Live Update Badge - Enhanced with pulse ring
+// ============================================
+export function LiveBadge({ className = "" }: { className?: string }) {
+  return (
+    <div className={`inline-flex items-center gap-1.5 ${className}`}>
+      <div className="relative">
+        {/* Pulse ring */}
+        <motion.div
+          animate={{ scale: [1, 2], opacity: [0.5, 0] }}
+          transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
+          className="absolute inset-0 w-2 h-2 rounded-full bg-emerald-500"
+        />
+        {/* Core dot */}
+        <motion.div
+          animate={{ scale: [1, 1.15, 1] }}
+          transition={{ duration: 1.5, repeat: Infinity }}
+          className="relative w-2 h-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50"
+        />
+      </div>
+      <span className="text-[11px] font-semibold text-emerald-600 tracking-wide">LIVE</span>
     </div>
   );
 }
 
 // ============================================
-// Live Update Badge
+// Connection Status Badge
 // ============================================
-export function LiveBadge({ className = "" }: { className?: string }) {
+interface ConnectionStatusProps {
+  isConnected: boolean;
+  className?: string;
+}
+
+export function ConnectionStatus({ isConnected, className = "" }: ConnectionStatusProps) {
   return (
-    <div className={`inline-flex items-center gap-1.5 ${className}`}>
-      <motion.div
-        animate={{ scale: [1, 1.2, 1], opacity: [1, 0.7, 1] }}
-        transition={{ duration: 1.5, repeat: Infinity }}
-        className="w-2 h-2 rounded-full bg-green-500"
-      />
-      <span className="text-xs font-medium text-green-600">Live</span>
-    </div>
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full ${className}`}
+    >
+      <div className="relative">
+        <motion.div
+          animate={isConnected ? { scale: [1, 1.3, 1], opacity: [0.6, 0, 0.6] } : {}}
+          transition={{ duration: 2, repeat: Infinity }}
+          className={`absolute inset-0 w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500'}`}
+        />
+        <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
+      </div>
+      <span className={`text-[10px] font-medium ${isConnected ? 'text-emerald-600' : 'text-red-500'}`}>
+        {isConnected ? 'Connected' : 'Disconnected'}
+      </span>
+    </motion.div>
   );
 }

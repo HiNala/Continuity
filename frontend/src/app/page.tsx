@@ -1068,22 +1068,44 @@ function SplitView({
         style={{ width: `${splitPosition}%` }}
         className="flex flex-col border-r border-black/[0.06] min-w-[280px]"
       >
-        {/* Minimal header */}
-        <div className="shrink-0 h-14 flex items-center justify-between px-4 border-b border-black/[0.04] bg-white/60 backdrop-blur-sm">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary/30 to-accent/30 flex items-center justify-center shadow-sm">
-              <ContinuityIcon size={14} />
+        {/* Enhanced header */}
+        <div className="shrink-0 h-14 flex items-center justify-between px-4 border-b border-black/[0.04] bg-white/70 backdrop-blur-xl">
+          <div className="flex items-center gap-3">
+            <motion.div 
+              whileHover={{ scale: 1.05 }}
+              className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 via-accent/20 to-primary/20 flex items-center justify-center shadow-sm border border-primary/10"
+            >
+              <ContinuityIcon size={15} />
+            </motion.div>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-foreground tracking-tight">Continuity</span>
+              <span className="text-[9px] text-muted-foreground/60 font-medium -mt-0.5">AI Design Studio</span>
             </div>
-            <span className="text-sm font-semibold text-foreground">Continuity</span>
           </div>
-          {isConnected ? (
-            <LiveBadge />
-          ) : (
-            <div className="flex items-center gap-1 text-[10px] text-muted-foreground/50">
-              <WifiOff className="w-3 h-3" />
-              <span>Offline</span>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {isConnected ? (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-50 border border-emerald-200/50"
+              >
+                <div className="relative">
+                  <motion.div
+                    animate={{ scale: [1, 1.5, 1], opacity: [0.5, 0, 0.5] }}
+                    transition={{ duration: 2, repeat: Infinity }}
+                    className="absolute inset-0 w-1.5 h-1.5 rounded-full bg-emerald-500"
+                  />
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                </div>
+                <span className="text-[10px] font-semibold text-emerald-700">Live</span>
+              </motion.div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-50 border border-red-200/50">
+                <WifiOff className="w-3 h-3 text-red-500" />
+                <span className="text-[10px] font-medium text-red-600">Offline</span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Messages area - clean, minimal */}
@@ -1254,17 +1276,21 @@ function SplitView({
             <ProgressTimeline currentStage={pipelineStage} />
           </motion.div>
 
-          {/* Header */}
+          {/* Header - Enhanced */}
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="mb-4 flex items-center justify-between"
+            className="mb-5 flex items-center justify-between"
           >
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-                <Zap className="w-3.5 h-3.5 text-primary" />
-              </div>
+            <div className="flex items-center gap-2.5">
+              <motion.div 
+                animate={{ rotate: [0, 5, 0, -5, 0] }}
+                transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary/15 to-accent/15 flex items-center justify-center shadow-sm border border-primary/10"
+              >
+                <Zap className="w-4 h-4 text-primary" />
+              </motion.div>
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Agent Activity</h2>
               </div>
