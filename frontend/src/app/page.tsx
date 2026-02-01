@@ -2821,7 +2821,7 @@ function SplitView({
         className="relative flex flex-col h-full border-r border-white/30 dark:border-white/10 min-w-[280px] bg-gradient-to-b from-white/60 to-white/40 dark:from-zinc-950/70 dark:to-zinc-950/50 backdrop-blur-2xl"
       >
         {/* Minimal header */}
-        <div className="shrink-0 h-12 flex items-center justify-between px-5 border-b border-white/20 dark:border-white/5 bg-white/40 dark:bg-zinc-950/40 backdrop-blur-xl">
+        <div className="shrink-0 h-12 flex items-center justify-between px-5 border-b border-black/5 dark:border-white/5">
           <span className="text-[13px] font-semibold text-neutral-700 dark:text-zinc-200">Conversation</span>
           <span className={cn(
             "text-[9px] px-1.5 py-0.5 rounded-full flex items-center gap-1 transition-all duration-300",
@@ -3063,7 +3063,7 @@ function SplitView({
         className="flex-1 flex flex-col overflow-hidden bg-gradient-to-br from-slate-50/80 via-white/60 to-slate-50/80 dark:from-zinc-900/80 dark:via-zinc-950/60 dark:to-zinc-900/80 backdrop-blur-2xl min-w-[300px]"
       >
         {/* Panel header */}
-        <div className="shrink-0 h-12 flex items-center justify-between px-5 border-b border-white/20 dark:border-white/5 bg-white/40 dark:bg-zinc-950/40 backdrop-blur-xl">
+        <div className="shrink-0 h-12 flex items-center justify-between px-5 border-b border-black/5 dark:border-white/5">
           <span className="text-[13px] font-semibold text-neutral-700 dark:text-zinc-200">Activity Log</span>
           <div className="flex items-center gap-2">
             {/* Weave Trace Link - prominently visible */}
