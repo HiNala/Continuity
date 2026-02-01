@@ -14,200 +14,119 @@ export function AnimatedBackground({
   intensity = "normal",
   isLoading = false,
 }: AnimatedBackgroundProps) {
-  // Configuration for different intensity levels
-  // Orbs are positioned closer to center in a foursquare pattern
+  // Simplified configuration - cleaner, more subtle
   const config = useMemo(() => ({
-    subtle: { offset: 60, blur: 70, duration: 18, size: 380 },
-    normal: { offset: 80, blur: 80, duration: 14, size: 420 },
-    intense: { offset: 100, blur: 90, duration: 8, size: 460 },
+    subtle: { blur: 100, duration: 25, size: 280, opacity: 0.25 },
+    normal: { blur: 110, duration: 20, size: 320, opacity: 0.3 },
+    intense: { blur: 120, duration: 12, size: 360, opacity: 0.4 },
   }), []);
   
-  const { offset, blur, duration: baseDuration, size } = config[intensity];
-  // Speed up significantly when loading
-  const duration = isLoading ? baseDuration * 0.4 : isActive ? baseDuration * 0.7 : baseDuration;
-  
-  // Smooth transition for orbit movement
-  const blobTransition = {
-    duration,
-    repeat: Infinity,
-    ease: "easeInOut" as const,
-  };
+  const { blur, duration: baseDuration, size, opacity: baseOpacity } = config[intensity];
+  const duration = isLoading ? baseDuration * 0.5 : baseDuration;
+  const opacity = isLoading ? baseOpacity * 1.3 : baseOpacity;
 
-  // Transition for property changes
   const propertyTransition = {
-    duration: isLoading ? 0.5 : 1.2,
+    duration: 1.5,
     ease: [0.25, 0.1, 0.25, 1] as const,
   };
   
   return (
     <div className="fixed inset-0 overflow-hidden pointer-events-none">
-      {/* Base gradient layer */}
-      <motion.div
-        initial={false}
-        animate={{ opacity: 1 }}
-        transition={propertyTransition}
-        className="absolute inset-0 bg-gradient-to-br from-slate-50/80 via-white to-slate-100/80"
-      />
+      {/* Clean gradient base */}
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-white to-slate-50" />
       
-      {/* Subtle grid pattern - less visible */}
+      {/* Primary Pink Orb - simplified movement */}
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 0.012 }}
-        transition={{ duration: 1 }}
-        className="absolute inset-0"
-        style={{
-          backgroundImage: `
-            linear-gradient(rgba(0,0,0,0.08) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0,0,0,0.08) 1px, transparent 1px)
-          `,
-          backgroundSize: '50px 50px'
-        }}
-      />
-      
-      {/* Primary Pink Orb - Top Left Quadrant (closer to center) */}
-      <motion.div
-        key={`pink-${intensity}-${isLoading}`}
         initial={false}
         animate={{
-          // Foursquare rotation pattern - smaller, tighter movement
-          x: [-offset * 0.6, offset * 0.4, offset * 0.6, -offset * 0.4, -offset * 0.6],
-          y: [-offset * 0.4, -offset * 0.6, offset * 0.4, offset * 0.6, -offset * 0.4],
-          scale: isLoading ? [1, 1.2, 1, 1.2, 1] : [1, 1.08, 1, 1.05, 1],
+          x: isLoading ? [0, 30, -30, 0] : [0, 20, 0],
+          y: isLoading ? [0, -30, 30, 0] : [0, -15, 0],
         }}
-        transition={blobTransition}
-        className="absolute top-[35%] left-[38%] -translate-x-1/2 -translate-y-1/2"
+        transition={{
+          duration,
+          repeat: Infinity,
+          ease: "easeInOut",
+        }}
+        className="absolute top-[30%] left-[35%] -translate-x-1/2 -translate-y-1/2"
       >
         <motion.div
           initial={false}
           animate={{
-            width: isLoading ? size * 1.15 : size,
-            height: isLoading ? size * 1.15 : size,
-            filter: `blur(${blur}px)`,
-            opacity: isLoading ? 0.7 : 0.55,
+            width: size,
+            height: size,
+            opacity,
           }}
           transition={propertyTransition}
-          className="rounded-full bg-gradient-to-br from-pink-400/60 via-rose-300/50 to-pink-500/40"
+          className="rounded-full bg-gradient-to-br from-pink-300 via-rose-200 to-pink-400"
+          style={{ filter: `blur(${blur}px)` }}
         />
       </motion.div>
       
-      {/* Secondary Cyan Orb - Bottom Right Quadrant (closer to center) */}
+      {/* Secondary Cyan Orb */}
       <motion.div
-        key={`cyan-${intensity}-${isLoading}`}
         initial={false}
         animate={{
-          // Counter-rotation for foursquare effect
-          x: [offset * 0.6, -offset * 0.4, -offset * 0.6, offset * 0.4, offset * 0.6],
-          y: [offset * 0.4, offset * 0.6, -offset * 0.4, -offset * 0.6, offset * 0.4],
-          scale: isLoading ? [1.2, 1, 1.2, 1, 1.2] : [1.05, 1, 1.08, 1, 1.05],
+          x: isLoading ? [0, -25, 25, 0] : [0, -15, 0],
+          y: isLoading ? [0, 25, -25, 0] : [0, 10, 0],
         }}
         transition={{
-          ...blobTransition,
-          duration: duration * 1.05,
+          duration: duration * 1.1,
+          repeat: Infinity,
+          ease: "easeInOut",
         }}
-        className="absolute top-[55%] left-[58%] -translate-x-1/2 -translate-y-1/2"
+        className="absolute top-[60%] left-[60%] -translate-x-1/2 -translate-y-1/2"
       >
         <motion.div
           initial={false}
           animate={{
-            width: isLoading ? size * 1.1 : size * 0.95,
-            height: isLoading ? size * 1.1 : size * 0.95,
-            filter: `blur(${blur}px)`,
-            opacity: isLoading ? 0.65 : 0.5,
+            width: size * 0.9,
+            height: size * 0.9,
+            opacity: opacity * 0.9,
           }}
           transition={propertyTransition}
-          className="rounded-full bg-gradient-to-br from-sky-400/60 via-cyan-300/50 to-blue-400/40"
+          className="rounded-full bg-gradient-to-br from-sky-300 via-cyan-200 to-blue-300"
+          style={{ filter: `blur(${blur}px)` }}
         />
       </motion.div>
 
-      {/* Third Violet Orb - appears in intense/loading modes - Top Right */}
+      {/* Third orb - only when loading or intense */}
       <AnimatePresence>
         {(intensity === "intense" || isLoading) && (
           <motion.div
-            key="violet-blob"
-            initial={{ opacity: 0, scale: 0.6 }}
+            key="accent-orb"
+            initial={{ opacity: 0 }}
             animate={{
               opacity: 1,
-              scale: 1,
-              x: [offset * 0.3, -offset * 0.3, -offset * 0.5, offset * 0.5, offset * 0.3],
-              y: [-offset * 0.5, offset * 0.3, offset * 0.5, -offset * 0.3, -offset * 0.5],
+              x: [0, 20, -20, 0],
+              y: [0, -20, 20, 0],
             }}
-            exit={{ opacity: 0, scale: 0.6 }}
+            exit={{ opacity: 0 }}
             transition={{
-              opacity: { duration: 0.6, ease: "easeOut" },
-              scale: { duration: 0.6, ease: "easeOut" },
-              x: { duration: duration * 0.9, repeat: Infinity, ease: "easeInOut" },
-              y: { duration: duration * 0.9, repeat: Infinity, ease: "easeInOut" },
+              opacity: { duration: 0.8 },
+              x: { duration: duration * 0.8, repeat: Infinity, ease: "easeInOut" },
+              y: { duration: duration * 0.8, repeat: Infinity, ease: "easeInOut" },
             }}
-            className="absolute top-[40%] left-[55%] -translate-x-1/2 -translate-y-1/2"
-          >
-            <motion.div 
-              animate={{
-                width: isLoading ? size * 0.9 : size * 0.75,
-                height: isLoading ? size * 0.9 : size * 0.75,
-                opacity: isLoading ? 0.5 : 0.35,
-              }}
-              transition={propertyTransition}
-              className="rounded-full bg-gradient-to-br from-violet-400/50 via-purple-300/40 to-fuchsia-400/30"
-              style={{ filter: `blur(${blur * 1.1}px)` }}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Fourth Amber Orb - appears when loading - Bottom Left */}
-      <AnimatePresence>
-        {isLoading && (
-          <motion.div
-            key="amber-blob"
-            initial={{ opacity: 0, scale: 0.5 }}
-            animate={{
-              opacity: 1,
-              scale: 1,
-              x: [-offset * 0.5, offset * 0.3, offset * 0.5, -offset * 0.3, -offset * 0.5],
-              y: [offset * 0.3, offset * 0.5, -offset * 0.3, -offset * 0.5, offset * 0.3],
-            }}
-            exit={{ opacity: 0, scale: 0.5 }}
-            transition={{
-              opacity: { duration: 0.4, ease: "easeOut" },
-              scale: { duration: 0.4, ease: "easeOut" },
-              x: { duration: duration * 0.85, repeat: Infinity, ease: "easeInOut" },
-              y: { duration: duration * 0.85, repeat: Infinity, ease: "easeInOut" },
-            }}
-            className="absolute top-[58%] left-[42%] -translate-x-1/2 -translate-y-1/2"
+            className="absolute top-[45%] left-[50%] -translate-x-1/2 -translate-y-1/2"
           >
             <div 
-              className="rounded-full bg-gradient-to-br from-amber-300/40 via-orange-300/30 to-yellow-300/25"
+              className="rounded-full bg-gradient-to-br from-violet-300 via-purple-200 to-fuchsia-300"
               style={{ 
                 width: size * 0.7,
                 height: size * 0.7,
-                filter: `blur(${blur * 1.15}px)`,
-                opacity: 0.4,
+                filter: `blur(${blur * 1.1}px)`,
+                opacity: opacity * 0.6,
               }}
             />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Frosted glass overlay - lighter for better visibility */}
-      <motion.div
-        initial={false}
-        animate={{
-          backdropFilter: `blur(${isLoading ? 100 : intensity === "intense" ? 110 : 90}px)`,
-          backgroundColor: isLoading 
-            ? "rgba(255,255,255,0.15)" 
-            : intensity === "intense" 
-              ? "rgba(255,255,255,0.18)" 
-              : "rgba(255,255,255,0.22)",
-        }}
-        transition={propertyTransition}
-        className="absolute inset-0"
-      />
-      
-      {/* Very subtle vignette */}
+      {/* Frosted overlay */}
       <div 
-        className="absolute inset-0 pointer-events-none"
+        className="absolute inset-0"
         style={{
-          background: 'radial-gradient(ellipse at center, transparent 0%, transparent 70%, rgba(0,0,0,0.015) 100%)'
+          backdropFilter: 'blur(80px)',
+          backgroundColor: 'rgba(255,255,255,0.3)',
         }}
       />
     </div>
