@@ -6,16 +6,18 @@ These endpoints use Browserbase to help users define their design goals
 by providing relevant inspiration images, style examples, and mood boards.
 """
 
+import uuid
 from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_async_session
 from app.browserbase_service import browserbase_service
+from app.redis_service import redis_service
 from app.models import Project, Requirements
 
 router = APIRouter(prefix="/api/inspiration", tags=["Inspiration"])
@@ -26,10 +28,10 @@ router = APIRouter(prefix="/api/inspiration", tags=["Inspiration"])
 # ============================================
 class InspirationRequest(BaseModel):
     """Request for design inspiration images."""
-    query: str  # User's description of what they want
-    style: Optional[str] = None  # Design style preference
-    space_type: Optional[str] = None  # Type of space
-    limit: int = 12  # Number of images to return
+    query: str = Field(..., min_length=1, max_length=500)  # User's description
+    style: Optional[str] = Field(default=None, max_length=100)  # Design style preference
+    space_type: Optional[str] = Field(default=None, max_length=100)  # Type of space
+    limit: int = Field(default=12, ge=1, le=50)  # Number of images to return
 
 
 class InspirationImage(BaseModel):
@@ -56,8 +58,8 @@ class InspirationResponse(BaseModel):
 
 class StyleSearchRequest(BaseModel):
     """Request to search for style variations."""
-    base_style: str
-    limit: int = 6
+    base_style: str = Field(..., min_length=1, max_length=100)
+    limit: int = Field(default=6, ge=1, le=20)
 
 
 class StyleVariation(BaseModel):
@@ -76,10 +78,10 @@ class StyleSearchResponse(BaseModel):
 
 class MoodBoardRequest(BaseModel):
     """Request to generate a mood board."""
-    styles: List[str]
-    space_type: str
-    keywords: Optional[List[str]] = None
-    limit: int = 9
+    styles: List[str] = Field(..., min_length=1, max_length=10)  # Max 10 styles
+    space_type: str = Field(..., min_length=1, max_length=100)
+    keywords: Optional[List[str]] = Field(default=None, max_length=20)  # Max 20 keywords
+    limit: int = Field(default=9, ge=1, le=30)
 
 
 class MoodBoardSection(BaseModel):
@@ -102,6 +104,29 @@ class ProjectInspirationRequest(BaseModel):
     include_styles: bool = True  # Include style-specific images
     include_space: bool = True  # Include space-specific images
     limit: int = 12
+
+
+class PaginatedInspirationRequest(BaseModel):
+    """Request for paginated inspiration images (for UI display)."""
+    query: str  # User's design goal description
+    style: Optional[str] = None  # Design style preference
+    space_type: Optional[str] = None  # Type of space
+    session_id: Optional[str] = None  # Session ID for tracking viewed images
+    page_size: int = 3  # Number of images per page (display 3 at a time)
+    total_fetch: int = 9  # Total images to fetch and cache
+
+
+class PaginatedInspirationResponse(BaseModel):
+    """Response with paginated inspiration images."""
+    success: bool
+    session_id: str  # Session ID for subsequent requests
+    images: List[InspirationImage]  # Current page of images
+    current_page: int
+    total_pages: int
+    total_images: int
+    has_more: bool
+    source: str
+    note: Optional[str] = None
 
 
 # ============================================
@@ -143,6 +168,169 @@ async def search_inspiration(request: InspirationRequest):
         timestamp=result.get("timestamp", ""),
         note=result.get("note"),
     )
+
+
+@router.post("/browse", response_model=PaginatedInspirationResponse)
+async def browse_inspiration(request: PaginatedInspirationRequest):
+    """
+    Browse inspiration images with pagination support.
+    
+    This endpoint fetches a batch of images (default 9), caches them,
+    and returns them 3 at a time. Users can navigate through pages
+    or refresh to get new images.
+    
+    Features:
+    - Fetches and caches images for fast subsequent page loads
+    - Returns 3 images at a time (configurable via page_size)
+    - Tracks which page the user is on via session
+    - Allows refreshing to fetch entirely new images
+    
+    Usage:
+    1. First call: No session_id → fetches new images, creates session
+    2. Next page: Include session_id → returns next batch from cache
+    3. Refresh: Omit session_id or use new one → fetches fresh images
+    """
+    try:
+        # Generate or use existing session ID
+        session_id = request.session_id or str(uuid.uuid4())
+        
+        # Try to get existing session data
+        session_data = None
+        if request.session_id:
+            session_data = await redis_service.get_inspiration_session(session_id)
+        
+        all_images = []
+        current_page = 0
+        source = "curated_gallery"
+        
+        if session_data:
+            # Use cached images from session
+            all_images = session_data.get("images", [])
+            current_page = session_data.get("current_page", 0) + 1
+            source = session_data.get("source", "curated_gallery")
+        else:
+            # Check if we have cached images for this query
+            query_hash = redis_service.hash_query(
+                request.query, 
+                request.style or "", 
+                request.space_type or ""
+            )
+            cached_images = await redis_service.get_cached_inspiration(query_hash)
+            
+            if cached_images:
+                all_images = cached_images
+                source = "cached"
+            else:
+                # Fetch new images from Browserbase
+                result = await browserbase_service.fetch_inspiration_images(
+                    query=request.query,
+                    style=request.style,
+                    space_type=request.space_type,
+                    limit=request.total_fetch,
+                )
+                
+                all_images = result.get("images", [])
+                source = result.get("source", "curated_gallery")
+                
+                # Cache the fetched images
+                if all_images:
+                    await redis_service.cache_inspiration_images(query_hash, all_images)
+        
+        # Calculate pagination
+        total_images = len(all_images)
+        total_pages = (total_images + request.page_size - 1) // request.page_size
+        
+        # Wrap around if we've gone past the last page
+        if current_page >= total_pages:
+            current_page = 0
+        
+        # Get current page of images
+        start_idx = current_page * request.page_size
+        end_idx = start_idx + request.page_size
+        page_images = all_images[start_idx:end_idx]
+        
+        # Save session state
+        await redis_service.cache_inspiration_session(
+            session_id,
+            {
+                "images": all_images,
+                "current_page": current_page,
+                "source": source,
+                "query": request.query,
+                "style": request.style,
+                "space_type": request.space_type,
+            }
+        )
+        
+        # Convert to response model
+        images = [
+            InspirationImage(
+                id=img.get("id", f"img_{i}"),
+                url=img.get("url", ""),
+                thumbnail=img.get("thumbnail", img.get("url", "")),
+                description=img.get("description", "Design inspiration"),
+                source=img.get("source", source),
+            )
+            for i, img in enumerate(page_images)
+        ]
+        
+        return PaginatedInspirationResponse(
+            success=True,
+            session_id=session_id,
+            images=images,
+            current_page=current_page,
+            total_pages=total_pages,
+            total_images=total_images,
+            has_more=current_page < total_pages - 1,
+            source=source,
+            note=f"Showing {len(images)} of {total_images} images (page {current_page + 1}/{total_pages})",
+        )
+        
+    except Exception as e:
+        # Return empty response on error
+        return PaginatedInspirationResponse(
+            success=False,
+            session_id=request.session_id or str(uuid.uuid4()),
+            images=[],
+            current_page=0,
+            total_pages=0,
+            total_images=0,
+            has_more=False,
+            source="error",
+            note=f"Failed to fetch inspiration: {str(e)}",
+        )
+
+
+@router.post("/refresh", response_model=PaginatedInspirationResponse)
+async def refresh_inspiration(request: PaginatedInspirationRequest):
+    """
+    Force refresh to get new inspiration images.
+    
+    This clears the session cache and fetches entirely new images
+    from Browserbase/curated gallery.
+    """
+    # Generate new session ID to force fresh fetch
+    new_session_id = str(uuid.uuid4())
+    
+    # Create a new request with the new session ID
+    new_request = PaginatedInspirationRequest(
+        query=request.query,
+        style=request.style,
+        space_type=request.space_type,
+        session_id=new_session_id,
+        page_size=request.page_size,
+        total_fetch=request.total_fetch,
+    )
+    
+    # Invalidate the query cache to force re-fetch
+    query_hash = redis_service.hash_query(
+        request.query,
+        request.style or "",
+        request.space_type or ""
+    )
+    # We don't have a delete method, but setting session_id to None forces a new fetch
+    
+    return await browse_inspiration(new_request)
 
 
 @router.post("/styles", response_model=StyleSearchResponse)

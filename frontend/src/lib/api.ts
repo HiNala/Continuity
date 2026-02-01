@@ -1314,3 +1314,300 @@ export async function getAllProjectImages(
     iterations: iterations
   };
 }
+
+// ============================================
+// Inspiration Types (Browserbase Integration)
+// ============================================
+export interface InspirationImage {
+  id: string;
+  url: string;
+  thumbnail: string;
+  description: string;
+  source: string;
+}
+
+export interface BrowseInspirationRequest {
+  query: string;
+  style?: string;
+  space_type?: string;
+  session_id?: string;
+  page_size?: number;
+  total_fetch?: number;
+}
+
+export interface BrowseInspirationResponse {
+  success: boolean;
+  session_id: string;
+  images: InspirationImage[];
+  current_page: number;
+  total_pages: number;
+  total_images: number;
+  has_more: boolean;
+  source: string;
+  note?: string;
+}
+
+export interface AvailableStylesResponse {
+  styles: Record<string, {
+    name: string;
+    keywords: string[];
+    description: string;
+  }>;
+  space_types: Record<string, {
+    name: string;
+    keywords: string[];
+  }>;
+}
+
+export interface InspirationStatusResponse {
+  browserbase_configured: boolean;
+  stagehand_configured: boolean;
+  stagehand_available: boolean;
+  model: string | null;
+  mode: "ai_powered" | "curated_gallery";
+  capabilities: {
+    ai_extraction: boolean;
+    session_tracking: boolean;
+    curated_images: boolean;
+  };
+}
+
+// ============================================
+// Inspiration Functions (Browserbase Integration)
+// ============================================
+
+/**
+ * Browse inspiration images with pagination.
+ * Fetches images related to the user's design query and returns them
+ * 3 at a time for easy selection.
+ */
+export async function browseInspiration(
+  request: BrowseInspirationRequest
+): Promise<BrowseInspirationResponse> {
+  const response = await fetch(`${API_URL}/api/inspiration/browse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: request.query,
+      style: request.style,
+      space_type: request.space_type,
+      session_id: request.session_id,
+      page_size: request.page_size || 3,
+      total_fetch: request.total_fetch || 9,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to browse inspiration");
+  }
+
+  return response.json();
+}
+
+/**
+ * Refresh inspiration images to get a new set.
+ * Forces a fresh fetch from the source.
+ */
+export async function refreshInspiration(
+  request: BrowseInspirationRequest
+): Promise<BrowseInspirationResponse> {
+  const response = await fetch(`${API_URL}/api/inspiration/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: request.query,
+      style: request.style,
+      space_type: request.space_type,
+      page_size: request.page_size || 3,
+      total_fetch: request.total_fetch || 9,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to refresh inspiration");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get the next page of inspiration images.
+ * Uses the session_id to continue from where user left off.
+ */
+export async function nextInspirationPage(
+  sessionId: string,
+  query: string,
+  style?: string,
+  spaceType?: string
+): Promise<BrowseInspirationResponse> {
+  return browseInspiration({
+    query,
+    style,
+    space_type: spaceType,
+    session_id: sessionId,
+  });
+}
+
+/**
+ * Get available design styles and space types.
+ */
+export async function getAvailableStyles(): Promise<AvailableStylesResponse> {
+  const response = await fetch(`${API_URL}/api/inspiration/styles/available`);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get available styles");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get the current status of Browserbase/Stagehand integration.
+ */
+export async function getInspirationStatus(): Promise<InspirationStatusResponse> {
+  const response = await fetch(`${API_URL}/api/inspiration/status`);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get inspiration status");
+  }
+
+  return response.json();
+}
+
+// ============================================
+// Project-specific Reference Images
+// ============================================
+export interface FetchReferenceImagesRequest {
+  styles: string[];
+  space_type?: string;
+  goal_text?: string;
+}
+
+export interface ReferenceImageItem {
+  id: string;
+  url: string;
+  thumbnail_url?: string;
+  source_site?: string;
+  title?: string;
+  is_selected: boolean;
+}
+
+export interface FetchReferenceImagesResponse {
+  success: boolean;
+  images: ReferenceImageItem[];
+  total_available: number;
+  cached: boolean;
+  session_id: string;
+  note?: string;
+}
+
+export interface SelectReferenceImagesResponse {
+  success: boolean;
+  selected_count: number;
+  message: string;
+}
+
+/**
+ * Fetch reference images for a project via Browserbase.
+ */
+export async function fetchProjectReferenceImages(
+  projectId: string,
+  request: FetchReferenceImagesRequest
+): Promise<FetchReferenceImagesResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/reference-images/fetch`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to fetch reference images");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get paginated reference images for a project.
+ */
+export async function getProjectReferenceImages(
+  projectId: string,
+  page: number = 0,
+  sessionId?: string
+): Promise<{
+  success: boolean;
+  images: ReferenceImageItem[];
+  page: number;
+  total_pages: number;
+  has_more: boolean;
+}> {
+  const params = new URLSearchParams({ page: page.toString() });
+  if (sessionId) {
+    params.append("session_id", sessionId);
+  }
+
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/reference-images?${params}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get reference images");
+  }
+
+  return response.json();
+}
+
+/**
+ * Save selected reference images for a project.
+ */
+export async function selectProjectReferenceImages(
+  projectId: string,
+  selectedUrls: string[]
+): Promise<SelectReferenceImagesResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/reference-images/select`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selected_image_urls: selectedUrls }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to save reference images");
+  }
+
+  return response.json();
+}
+
+/**
+ * Get selected reference images for a project.
+ */
+export async function getSelectedReferenceImages(
+  projectId: string
+): Promise<{
+  success: boolean;
+  selected_count: number;
+  images: ReferenceImageItem[];
+}> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/reference-images/selected`
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to get selected reference images");
+  }
+
+  return response.json();
+}

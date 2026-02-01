@@ -1,0 +1,13 @@
+Approximate LOC (source files only)
+Total lines: 27500
+Files counted: 67
+By extension:
+  .css: 651
+  .json: 69
+  .mjs: 48
+  .py: 12828
+  .sh: 20
+  .sql: 385
+  .ts: 1622
+  .tsx: 11743
+  .yml: 134

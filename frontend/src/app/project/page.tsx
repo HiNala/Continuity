@@ -50,6 +50,7 @@ import {
 import { SettingsDropdown } from "@/components/SettingsDropdown";
 import { useToastContext } from "@/components/Providers";
 import { ImageUpload } from "@/components/ImageUpload";
+import { InspirationGallery } from "@/components/InspirationGallery";
 import { ResultsTimeline } from "@/components/ResultsTimeline";
 import { ImprovementStory } from "@/components/ImprovementStory";
 
@@ -86,6 +87,7 @@ export default function ProjectPage() {
   // Project data
   const [goal, setGoal] = useState("");
   const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [inspirationUrls, setInspirationUrls] = useState<string[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [questions, setQuestions] = useState<ClarifyingQuestion[]>([]);
   const [identified, setIdentified] = useState<Record<string, string | boolean | number | string[]>>({});
@@ -123,10 +125,13 @@ export default function ProjectPage() {
     setError(null);
 
     try {
+      // Combine uploaded images with inspiration images
+      const allImages = [...imageUrls, ...inspirationUrls];
+      
       // Create the project with goal and images
       const project = await createProject({ 
         goal: goal.trim(),
-        images: imageUrls,
+        images: allImages,
       });
       setProjectId(project.project_id);
 
@@ -495,13 +500,24 @@ export default function ProjectPage() {
               <div className="card">
                 <div className="flex items-center gap-2 mb-4">
                   <Upload className="w-5 h-5 text-slate-400" />
-                  <span className="font-medium text-slate-300">Add Images</span>
+                  <span className="font-medium text-slate-300">Upload Your Space</span>
                   <span className="text-xs text-slate-500">(optional)</span>
                 </div>
                 <ImageUpload
                   images={imageUrls}
                   onImagesChange={setImageUrls}
                   maxImages={5}
+                />
+              </div>
+
+              {/* Inspiration Gallery */}
+              <div className="card">
+                <InspirationGallery
+                  query={goal}
+                  selectedImages={inspirationUrls}
+                  onSelectionChange={setInspirationUrls}
+                  maxSelection={3}
+                  autoFetch={false}
                 />
               </div>
 
@@ -767,6 +783,7 @@ export default function ProjectPage() {
                   setStep("input");
                   setGoal("");
                   setImageUrls([]);
+                  setInspirationUrls([]);
                   setProjectId(null);
                   setQuestions([]);
                   setIdentified({});
@@ -955,6 +972,7 @@ export default function ProjectPage() {
                   setStep("input");
                   setGoal("");
                   setImageUrls([]);
+                  setInspirationUrls([]);
                   setProjectId(null);
                   setQuestions([]);
                   setIdentified({});
@@ -1304,6 +1322,7 @@ export default function ProjectPage() {
                   setStep("input");
                   setGoal("");
                   setImageUrls([]);
+                  setInspirationUrls([]);
                   setProjectId(null);
                   setQuestions([]);
                   setIdentified({});

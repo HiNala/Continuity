@@ -261,22 +261,39 @@ export default function ContinuityApp() {
       const currentState = event.details.state as string | undefined;
       
       if (toState || phase || currentState) {
-        setOrchestrationStatus(prev => ({
-          ...prev!,
-          project_id: prev?.project_id || projectId || "",
-          state: toState || currentState || prev?.state || "idle",
-          status: prev?.status || "running",
-          current_phase: phase || (toState?.includes("generating_") ? toState.replace("generating_", "") : 
-                         toState?.includes("evaluating_") ? toState.replace("evaluating_", "") :
-                         toState?.includes("retrying_") ? toState.replace("retrying_", "") :
-                         prev?.current_phase) || null,
-          retry_count: (event.details.retry_number as number) || prev?.retry_count || 0,
-          has_warnings: (event.details.has_warnings as boolean) || prev?.has_warnings || false,
-          warning_details: prev?.warning_details || null,
-          started_at: prev?.started_at || null,
-          completed_at: prev?.completed_at || null,
-          recent_transitions: prev?.recent_transitions || [],
-        }));
+        const currentProjectId = projectIdRef.current || projectId || "";
+        setOrchestrationStatus(prev => {
+          // Safe defaults for null prev
+          const defaults: OrchestrationStatusResponse = {
+            project_id: currentProjectId,
+            state: "idle",
+            status: "running",
+            current_phase: null,
+            retry_count: 0,
+            has_warnings: false,
+            warning_details: null,
+            started_at: null,
+            completed_at: null,
+            recent_transitions: [],
+          };
+          const base = prev || defaults;
+          return {
+            ...base,
+            project_id: base.project_id || currentProjectId,
+            state: toState || currentState || base.state,
+            status: base.status,
+            current_phase: phase || (toState?.includes("generating_") ? toState.replace("generating_", "") : 
+                           toState?.includes("evaluating_") ? toState.replace("evaluating_", "") :
+                           toState?.includes("retrying_") ? toState.replace("retrying_", "") :
+                           base.current_phase),
+            retry_count: (event.details.retry_number as number) || base.retry_count,
+            has_warnings: (event.details.has_warnings as boolean) || base.has_warnings,
+            warning_details: base.warning_details,
+            started_at: base.started_at,
+            completed_at: base.completed_at,
+            recent_transitions: base.recent_transitions,
+          };
+        });
       }
       
       // UPDATE DETAILED GENERATION PHASE PROGRESS
@@ -693,33 +710,52 @@ export default function ContinuityApp() {
         
       case "batch_progress":
         // Update progress silently, don't add card
-        setOrchestrationStatus(prev => ({
-          ...prev!,
-          completed_scenes: event.details?.completed,
-          total_scenes: event.details?.total,
-        }));
+        setOrchestrationStatus(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            completed_scenes: event.details?.completed as number | undefined,
+            total_scenes: event.details?.total as number | undefined,
+          };
+        });
         break;
         
       case "progress":
         // CRITICAL: Update orchestrationStatus from progress events (especially initial state)
         if (event.details?.state) {
           const progressState = event.details.state as string;
+          const currentProjectId = projectIdRef.current || projectId || "";
           console.log("Progress event - updating orchestrationStatus state to:", progressState);
-          setOrchestrationStatus(prev => ({
-            ...prev!,
-            project_id: prev?.project_id || projectId || "",
-            state: progressState,
-            status: progressState === "completed" || progressState === "completed_with_warnings" ? "completed" : (prev?.status || "running"),
-            current_phase: (event.details?.phase as string) || prev?.current_phase || null,
-            retry_count: prev?.retry_count || 0,
-            has_warnings: (event.details?.has_warnings as boolean) || prev?.has_warnings || false,
-            warning_details: prev?.warning_details || null,
-            started_at: prev?.started_at || null,
-            completed_at: progressState === "completed" || progressState === "completed_with_warnings" 
-              ? new Date().toISOString() 
-              : prev?.completed_at || null,
-            recent_transitions: prev?.recent_transitions || [],
-          }));
+          setOrchestrationStatus(prev => {
+            const defaults: OrchestrationStatusResponse = {
+              project_id: currentProjectId,
+              state: "idle",
+              status: "running",
+              current_phase: null,
+              retry_count: 0,
+              has_warnings: false,
+              warning_details: null,
+              started_at: null,
+              completed_at: null,
+              recent_transitions: [],
+            };
+            const base = prev || defaults;
+            return {
+              ...base,
+              project_id: base.project_id || currentProjectId,
+              state: progressState,
+              status: progressState === "completed" || progressState === "completed_with_warnings" ? "completed" : base.status,
+              current_phase: (event.details?.phase as string) || base.current_phase,
+              retry_count: base.retry_count,
+              has_warnings: (event.details?.has_warnings as boolean) || base.has_warnings,
+              warning_details: base.warning_details,
+              started_at: base.started_at,
+              completed_at: progressState === "completed" || progressState === "completed_with_warnings" 
+                ? new Date().toISOString() 
+                : base.completed_at,
+              recent_transitions: base.recent_transitions,
+            };
+          });
           
           // If already completed on initial connect, trigger iteration fetch and transformation complete
           if (progressState === "completed" || progressState === "completed_with_warnings") {
@@ -808,19 +844,35 @@ export default function ContinuityApp() {
         }
         
         // FIX: Update orchestrationStatus to completed state for stepper
-        setOrchestrationStatus(prev => ({
-          ...prev!,
-          project_id: prev?.project_id || projectId || "",
-          state: event.details?.has_warnings ? "completed_with_warnings" : "completed",
-          status: "completed",
-          current_phase: "complete",
-          retry_count: prev?.retry_count || 0,
-          has_warnings: (event.details?.has_warnings as boolean) || false,
-          warning_details: (event.details?.warning_details as Array<Record<string, unknown>>) || null,
-          started_at: prev?.started_at || null,
-          completed_at: new Date().toISOString(),
-          recent_transitions: prev?.recent_transitions || [],
-        }));
+        setOrchestrationStatus(prev => {
+          const currentProjectId = projectIdRef.current || projectId || "";
+          const defaults: OrchestrationStatusResponse = {
+            project_id: currentProjectId,
+            state: "idle",
+            status: "running",
+            current_phase: null,
+            retry_count: 0,
+            has_warnings: false,
+            warning_details: null,
+            started_at: null,
+            completed_at: null,
+            recent_transitions: [],
+          };
+          const base = prev || defaults;
+          return {
+            ...base,
+            project_id: base.project_id || currentProjectId,
+            state: event.details?.has_warnings ? "completed_with_warnings" : "completed",
+            status: "completed",
+            current_phase: "complete",
+            retry_count: base.retry_count,
+            has_warnings: (event.details?.has_warnings as boolean) || false,
+            warning_details: (event.details?.warning_details as Array<Record<string, unknown>>) || null,
+            started_at: base.started_at,
+            completed_at: new Date().toISOString(),
+            recent_transitions: base.recent_transitions,
+          };
+        });
         
         // Mark all running agent cards as completed
         setAgentCards(prev => {
@@ -989,9 +1041,12 @@ export default function ContinuityApp() {
   }, []);
 
   // Fetch all iterations to display in results timeline
-  const fetchIterations = useCallback(async (pId: string) => {
+  const fetchIterations = useCallback(async (pId: string, retryCount = 0) => {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000; // 1 second
+    
     try {
-      console.log("Fetching iterations for project:", pId);
+      console.log(`Fetching iterations for project: ${pId} (attempt ${retryCount + 1})`);
       const iterations = await getIterations(pId);
       console.log("Got iterations:", iterations.length, iterations);
       
@@ -1034,11 +1089,16 @@ export default function ContinuityApp() {
       
       console.log("Setting generatedPhases:", phases.length, phases);
       
-      // Only update if we have phases, don't clear existing ones if fetch returns empty
+      // Update phases if we have any, or retry if empty and retries remain
       if (phases.length > 0) {
         setGeneratedPhases(phases);
+      } else if (iterations.length === 0 && retryCount < MAX_RETRIES) {
+        // No iterations yet - retry after a delay (backend might still be writing)
+        console.log(`No iterations yet, retrying in ${RETRY_DELAY}ms (${MAX_RETRIES - retryCount - 1} retries left)`);
+        setTimeout(() => fetchIterations(pId, retryCount + 1), RETRY_DELAY);
+        return;
       } else if (iterations.length === 0) {
-        console.warn("No iterations returned from API - keeping existing generatedPhases");
+        console.warn("No iterations returned from API after all retries - keeping existing generatedPhases");
       }
       
       // Fetch detailed evaluation results for evaluated iterations
@@ -1089,19 +1149,17 @@ export default function ContinuityApp() {
     }
   }, [projectId, orchestrationStatus?.state, fetchAgentReasoning]);
 
-  // CRITICAL: Fetch iterations when orchestration completes - fallback if SSE missed it
+  // CRITICAL: Fetch iterations when orchestration completes - always fetch to ensure we have all images
   useEffect(() => {
     if (projectId && orchestrationStatus?.state && 
         (orchestrationStatus.state === "completed" || 
          orchestrationStatus.state === "completed_with_warnings")) {
-      // Only fetch if we don't have generated phases yet
-      if (generatedPhases.length === 0) {
-        console.log("Completion detected via state change - fetching iterations now");
-        fetchIterations(projectId);
-        setTransformationComplete(true);
-      }
+      // Always fetch iterations on completion to ensure we have the latest data
+      console.log("Completion detected via state change - fetching iterations now");
+      fetchIterations(projectId);
+      setTransformationComplete(true);
     }
-  }, [projectId, orchestrationStatus?.state, generatedPhases.length, fetchIterations]);
+  }, [projectId, orchestrationStatus?.state, fetchIterations]);
 
   useEffect(() => {
     const shouldFetch =
@@ -1442,9 +1500,8 @@ export default function ContinuityApp() {
       streamCleanupRef.current = cleanup;
       setIsConnected(true);
 
-      // FIX: Start lightweight status sync polling ALONGSIDE SSE
-      // This ensures orchestrationStatus stays in sync even if SSE events miss updates
-      startStatusSyncPolling(pId);
+      // NOTE: Removed duplicate polling - SSE is now the primary source of truth
+      // Polling only starts as fallback if SSE fails (see error handler above)
 
     } catch (err) {
       console.error("SSE connection failed, falling back to polling:", err);
@@ -1457,7 +1514,8 @@ export default function ContinuityApp() {
     }
   };
 
-  // Lightweight status sync polling - runs alongside SSE to ensure status is accurate
+  // Lightweight status sync polling - ONLY used as fallback when SSE is disconnected
+  // This is no longer called alongside SSE to prevent race conditions
   const startStatusSyncPolling = useCallback((pId: string) => {
     // Don't start if already have full polling running
     if (pollingRef.current) return;
@@ -1466,24 +1524,16 @@ export default function ContinuityApp() {
       try {
         const status = await getOrchestrationStatus(pId);
         
-        // Only update status-related fields, don't trigger full UI updates
-        setOrchestrationStatus(prev => ({
-          ...prev!,
-          project_id: status.project_id,
-          state: status.state,
-          status: status.status,
-          current_phase: status.current_phase,
-          retry_count: status.retry_count,
-          has_warnings: status.has_warnings,
-          warning_details: status.warning_details,
-          started_at: status.started_at,
-          completed_at: status.completed_at,
-          recent_transitions: status.recent_transitions,
-          total_scenes: status.total_scenes,
-          completed_scenes: status.completed_scenes,
-          is_batch: status.is_batch,
-          scene_progress: status.scene_progress,
-        }));
+        // Only update status-related fields, use safe update pattern
+        setOrchestrationStatus(prev => {
+          // If we have no previous state, use the fetched status directly
+          if (!prev) return status;
+          // Otherwise merge, preferring fetched data
+          return {
+            ...prev,
+            ...status,
+          };
+        });
 
         // Check if pipeline is complete
         const isTerminal = ["completed", "completed_with_warnings", "failed"].includes(status.state);
@@ -1500,9 +1550,7 @@ export default function ContinuityApp() {
       }
     }, 3000); // Poll every 3 seconds
 
-    // Store reference so we can clean it up
-    // Note: Using a separate ref would be cleaner but reusing pollingRef for simplicity
-    // The interval will self-clear on terminal state
+    // Return cleanup function
     return () => clearInterval(syncInterval);
   }, [fetchIterations]);
 

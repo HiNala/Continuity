@@ -38,9 +38,27 @@ router = APIRouter(prefix="/api/projects", tags=["Projects"])
 # ============================================
 class CreateProjectRequest(BaseModel):
     """Request to create a new project."""
-    goal: str = Field(..., min_length=1, description="The user's goal for the visualization")
-    images: List[str] = Field(default=[], description="List of image URLs or paths")
-    user_id: Optional[str] = Field(default=None, description="User identifier (optional)")
+    goal: str = Field(..., min_length=1, max_length=5000, description="The user's goal for the visualization")
+    images: List[str] = Field(
+        default=[], 
+        max_length=20,  # Max 20 images per project
+        description="List of image URLs or paths"
+    )
+    user_id: Optional[str] = Field(
+        default=None, 
+        max_length=255,
+        description="User identifier (optional)"
+    )
+    
+    @classmethod
+    def validate_images(cls, v: List[str]) -> List[str]:
+        """Validate image URLs/paths."""
+        if len(v) > 20:
+            raise ValueError("Maximum 20 images allowed per project")
+        for img in v:
+            if len(img) > 2048:  # Max URL length
+                raise ValueError("Image URL too long (max 2048 characters)")
+        return v
 
 
 class CreateProjectResponse(BaseModel):
@@ -115,7 +133,21 @@ class AnalyzeGoalResponse(BaseModel):
 
 class SubmitAnswersRequest(BaseModel):
     """Request to submit answers to clarifying questions."""
-    responses: Dict[str, Any] = Field(..., description="Map of question_id to answer_id(s)")
+    responses: Dict[str, Any] = Field(
+        ..., 
+        description="Map of question_id to answer_id(s)",
+        max_length=50  # Max 50 questions
+    )
+    
+    @classmethod
+    def validate_responses(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate response structure."""
+        if len(v) > 50:
+            raise ValueError("Maximum 50 responses allowed")
+        for key, value in v.items():
+            if len(str(key)) > 255 or len(str(value)) > 1000:
+                raise ValueError("Response key or value too long")
+        return v
 
 
 class RequirementsResponse(BaseModel):
@@ -2169,3 +2201,355 @@ async def get_agent_reasoning(
         reasoning_steps=reasoning_steps,
         weave_trace_url=weave_url,
     )
+
+
+# ============================================
+# Reference Images Models (Browserbase)
+# ============================================
+class FetchReferenceImagesRequest(BaseModel):
+    """Request to fetch reference images via Browserbase."""
+    styles: List[str] = Field(default=[], description="Style preferences to search for")
+    space_type: Optional[str] = Field(default=None, description="Type of space (bathroom, kitchen, etc.)")
+    goal_text: Optional[str] = Field(default=None, description="Goal text for additional context")
+
+
+class ReferenceImageItem(BaseModel):
+    """A single reference image from web scraping."""
+    id: str
+    url: str
+    thumbnail_url: Optional[str]
+    source_site: Optional[str]
+    title: Optional[str]
+    is_selected: bool = False
+
+
+class FetchReferenceImagesResponse(BaseModel):
+    """Response from fetching reference images."""
+    success: bool
+    images: List[ReferenceImageItem]
+    total_available: int
+    cached: bool
+    session_id: str
+    note: Optional[str] = None
+
+
+class SelectReferenceImagesRequest(BaseModel):
+    """Request to select reference images."""
+    selected_image_urls: List[str] = Field(
+        ..., 
+        description="URLs of images to select as references"
+    )
+
+
+class SelectReferenceImagesResponse(BaseModel):
+    """Response from selecting reference images."""
+    success: bool
+    selected_count: int
+    message: str
+
+
+# ============================================
+# Reference Images Endpoints (Browserbase)
+# ============================================
+@router.post("/{project_id}/reference-images/fetch", response_model=FetchReferenceImagesResponse)
+async def fetch_reference_images(
+    project_id: UUID,
+    request: FetchReferenceImagesRequest,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Fetch reference images via Browserbase web scraping.
+    
+    Searches design websites for inspiration images matching the user's
+    style preferences and space type. Results are cached for pagination.
+    
+    Returns the first 3 images; use GET /reference-images?page=N for more.
+    """
+    from app.browserbase_service import browserbase_service
+    from app.redis_service import redis_service
+    from app.models import ReferenceImage
+    import uuid as uuid_module
+    
+    # Verify project exists
+    result = await session.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Build search query from inputs
+    query_parts = []
+    if request.goal_text:
+        query_parts.append(request.goal_text[:100])
+    if request.space_type:
+        query_parts.append(f"{request.space_type} design")
+    if request.styles:
+        query_parts.extend([f"{s} style" for s in request.styles[:2]])
+    
+    query = " ".join(query_parts) if query_parts else "interior design inspiration"
+    
+    # Check for cached results
+    session_id = str(uuid_module.uuid4())
+    query_hash = redis_service.hash_query(query, ",".join(request.styles), request.space_type or "")
+    cached = await redis_service.get_cached_inspiration(query_hash)
+    
+    if cached:
+        all_images = cached
+        from_cache = True
+    else:
+        # Fetch from Browserbase
+        result = await browserbase_service.fetch_inspiration_images(
+            query=query,
+            style=request.styles[0] if request.styles else None,
+            space_type=request.space_type,
+            limit=9,  # Fetch 9 for 3 pages of 3
+        )
+        
+        all_images = result.get("images", [])
+        from_cache = False
+        
+        # Cache results
+        if all_images:
+            await redis_service.cache_inspiration_images(query_hash, all_images)
+    
+    # Store in database for this project
+    for idx, img in enumerate(all_images):
+        ref_img = ReferenceImage(
+            project_id=project_id,
+            url=img.get("url", ""),
+            thumbnail_url=img.get("thumbnail", img.get("url", "")),
+            source_site=img.get("source", "web"),
+            title=img.get("description", "Design inspiration"),
+            is_selected=False,
+            search_query=query,
+            search_styles=request.styles,
+            search_space_type=request.space_type,
+        )
+        session.add(ref_img)
+    
+    await session.flush()
+    
+    # Cache session state
+    await redis_service.cache_inspiration_session(
+        session_id,
+        {
+            "project_id": str(project_id),
+            "images": all_images,
+            "current_page": 0,
+            "query": query,
+            "styles": request.styles,
+            "space_type": request.space_type,
+        }
+    )
+    
+    # Return first 3 images
+    page_images = all_images[:3]
+    
+    return FetchReferenceImagesResponse(
+        success=True,
+        images=[
+            ReferenceImageItem(
+                id=img.get("id", f"ref_{i}"),
+                url=img.get("url", ""),
+                thumbnail_url=img.get("thumbnail", img.get("url")),
+                source_site=img.get("source", "web"),
+                title=img.get("description", "Design inspiration"),
+                is_selected=False,
+            )
+            for i, img in enumerate(page_images)
+        ],
+        total_available=len(all_images),
+        cached=from_cache,
+        session_id=session_id,
+        note=f"Found {len(all_images)} inspiration images. Showing 1-3.",
+    )
+
+
+@router.get("/{project_id}/reference-images")
+async def get_reference_images(
+    project_id: UUID,
+    page: int = 0,
+    session_id: Optional[str] = None,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Get paginated reference images from cache.
+    
+    Use after /fetch to get subsequent pages of 3 images.
+    """
+    from app.redis_service import redis_service
+    from app.models import ReferenceImage
+    
+    page_size = 3
+    
+    # Try to get from session cache
+    if session_id:
+        session_data = await redis_service.get_inspiration_session(session_id)
+        if session_data:
+            all_images = session_data.get("images", [])
+            start_idx = page * page_size
+            end_idx = start_idx + page_size
+            page_images = all_images[start_idx:end_idx]
+            
+            total_pages = (len(all_images) + page_size - 1) // page_size
+            
+            return {
+                "success": True,
+                "images": [
+                    {
+                        "id": img.get("id", f"ref_{i}"),
+                        "url": img.get("url", ""),
+                        "thumbnail_url": img.get("thumbnail", img.get("url")),
+                        "source_site": img.get("source", "web"),
+                        "title": img.get("description", ""),
+                        "is_selected": False,
+                    }
+                    for i, img in enumerate(page_images)
+                ],
+                "page": page,
+                "total_pages": total_pages,
+                "has_more": page < total_pages - 1,
+            }
+    
+    # Fall back to database
+    result = await session.execute(
+        select(ReferenceImage)
+        .where(ReferenceImage.project_id == project_id)
+        .order_by(ReferenceImage.created_at)
+        .offset(page * page_size)
+        .limit(page_size)
+    )
+    images = result.scalars().all()
+    
+    # Get total count
+    count_result = await session.execute(
+        select(ReferenceImage).where(ReferenceImage.project_id == project_id)
+    )
+    total = len(count_result.scalars().all())
+    total_pages = (total + page_size - 1) // page_size
+    
+    return {
+        "success": True,
+        "images": [
+            {
+                "id": str(img.id),
+                "url": img.url,
+                "thumbnail_url": img.thumbnail_url,
+                "source_site": img.source_site,
+                "title": img.title,
+                "is_selected": img.is_selected,
+            }
+            for img in images
+        ],
+        "page": page,
+        "total_pages": total_pages,
+        "has_more": page < total_pages - 1,
+    }
+
+
+@router.post("/{project_id}/reference-images/select", response_model=SelectReferenceImagesResponse)
+async def select_reference_images(
+    project_id: UUID,
+    request: SelectReferenceImagesRequest,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Save user's selected reference images.
+    
+    These images will be passed to the Generation Agent to guide style application.
+    """
+    from app.models import ReferenceImage
+    
+    # Verify project exists
+    result = await session.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Reset all selections first
+    await session.execute(
+        select(ReferenceImage).where(ReferenceImage.project_id == project_id)
+    )
+    
+    # Get all reference images for this project
+    ref_result = await session.execute(
+        select(ReferenceImage).where(ReferenceImage.project_id == project_id)
+    )
+    all_refs = ref_result.scalars().all()
+    
+    selected_count = 0
+    for ref in all_refs:
+        if ref.url in request.selected_image_urls:
+            ref.is_selected = True
+            ref.selection_order = request.selected_image_urls.index(ref.url) + 1
+            selected_count += 1
+        else:
+            ref.is_selected = False
+            ref.selection_order = None
+    
+    # If URLs don't match existing records, create new ones
+    existing_urls = {ref.url for ref in all_refs}
+    for idx, url in enumerate(request.selected_image_urls):
+        if url not in existing_urls:
+            new_ref = ReferenceImage(
+                project_id=project_id,
+                url=url,
+                thumbnail_url=url,
+                source_site="user_selection",
+                is_selected=True,
+                selection_order=idx + 1,
+            )
+            session.add(new_ref)
+            selected_count += 1
+    
+    await session.commit()
+    
+    return SelectReferenceImagesResponse(
+        success=True,
+        selected_count=selected_count,
+        message=f"Successfully saved {selected_count} reference image(s)",
+    )
+
+
+@router.get("/{project_id}/reference-images/selected")
+async def get_selected_reference_images(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Retrieve user's selected reference images.
+    
+    Returns only the images the user has chosen as style references.
+    """
+    from app.models import ReferenceImage
+    
+    result = await session.execute(
+        select(ReferenceImage)
+        .where(
+            ReferenceImage.project_id == project_id,
+            ReferenceImage.is_selected == True
+        )
+        .order_by(ReferenceImage.selection_order)
+    )
+    images = result.scalars().all()
+    
+    return {
+        "success": True,
+        "selected_count": len(images),
+        "images": [
+            {
+                "id": str(img.id),
+                "url": img.url,
+                "thumbnail_url": img.thumbnail_url,
+                "source_site": img.source_site,
+                "title": img.title,
+                "selection_order": img.selection_order,
+            }
+            for img in images
+        ],
+    }

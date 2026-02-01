@@ -26,7 +26,8 @@ from sqlalchemy import select, and_
 from app.config import settings
 from app.models import (
     Project, Policy, Iteration, Constraint, ProjectAnalysis, Requirements,
-    ProjectStatus, GenerationPhase, IterationStatus, ConstraintClassification
+    ProjectStatus, GenerationPhase, IterationStatus, ConstraintClassification,
+    ReferenceImage
 )
 from app.redis_service import redis_service
 from app.weave_ops import log_image_media
@@ -306,6 +307,62 @@ class GenerationAgent:
             "budget_tier": "mid_range",
             "intended_use": "personal",
         }
+    
+    @weave.op(name="generation_agent_load_reference_images")
+    async def load_reference_images(
+        self,
+        session: AsyncSession,
+        project_id: UUID
+    ) -> List[Dict[str, Any]]:
+        """
+        Load selected reference images for style guidance.
+        
+        These are images the user selected during the requirements phase
+        to guide the style application in the generation process.
+        """
+        result = await session.execute(
+            select(ReferenceImage)
+            .where(
+                ReferenceImage.project_id == project_id,
+                ReferenceImage.is_selected == True
+            )
+            .order_by(ReferenceImage.selection_order)
+        )
+        images = result.scalars().all()
+        
+        return [
+            {
+                "url": img.url,
+                "source": img.source_site or "web",
+                "title": img.title or "Design inspiration",
+            }
+            for img in images
+        ]
+    
+    def _build_reference_image_instructions(
+        self,
+        reference_images: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Build instructions for incorporating reference images into style generation.
+        """
+        if not reference_images:
+            return ""
+        
+        instructions = ["\nREFERENCE IMAGES SELECTED BY USER:"]
+        instructions.append("The user has selected the following images as style references.")
+        instructions.append("Use these as visual guidance for the design aesthetic:\n")
+        
+        for i, img in enumerate(reference_images, 1):
+            title = img.get("title", "Design inspiration")
+            source = img.get("source", "web")
+            instructions.append(f"Reference {i}: {title} (from {source})")
+            instructions.append(f"  URL: {img.get('url', 'N/A')}")
+        
+        instructions.append("\nIncorporate the color palette, materials, fixtures style,")
+        instructions.append("and overall aesthetic feeling from these reference images.")
+        
+        return "\n".join(instructions)
     
     def _build_constraint_instructions(
         self,
@@ -730,10 +787,14 @@ class GenerationAgent:
         requirements: Dict[str, Any],
         target_style: str,
         iteration_number: int = 1,
-        scene_id: Optional[UUID] = None
+        scene_id: Optional[UUID] = None,
+        reference_images: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Execute the style application phase for a specific style.
+        
+        If reference_images are provided, they are incorporated into the prompt
+        to guide the style application based on user-selected visual references.
         """
         config = policy["style_config"]
         
@@ -748,6 +809,11 @@ class GenerationAgent:
             f"Apply {target_style} design principles throughout the space."
         )
         
+        # Build reference image instructions if available
+        reference_instructions = ""
+        if reference_images:
+            reference_instructions = self._build_reference_image_instructions(reference_images)
+        
         prompt = config["prompt_template"].format(
             space_type=requirements.get("space_type", "room"),
             target_style=target_style,
@@ -756,6 +822,10 @@ class GenerationAgent:
             budget_tier=requirements.get("budget_tier", "mid_range"),
             constraint_instructions=constraint_instructions
         )
+        
+        # Append reference image instructions if present
+        if reference_instructions:
+            prompt = prompt + "\n" + reference_instructions
         
         iteration = Iteration(
             project_id=project_id,
@@ -888,12 +958,16 @@ class GenerationAgent:
             results["error"] = f"Fixture phase failed: {fixture_result.get('error')}"
             return results
         
+        # Load reference images for style guidance
+        reference_images = await self.load_reference_images(session, project_id)
+        
         # Phase 4: Style (run for each target style)
         style_targets = requirements.get("style_targets", ["modern"])
         for i, style in enumerate(style_targets[:3]):  # Limit to 3 styles
             style_result = await self.execute_style_phase(
                 session, project_id, current_image, policy, constraints,
-                requirements, style, iteration_number=i + 1
+                requirements, style, iteration_number=i + 1,
+                reference_images=reference_images  # Pass reference images
             )
             results["style_variations"].append(style_result)
             results["total_latency_ms"] += style_result.get("latency_ms", 0)
@@ -901,6 +975,9 @@ class GenerationAgent:
             if not style_result["success"]:
                 # Continue with other styles even if one fails
                 pass
+        
+        # Track if reference images were used
+        results["reference_images_used"] = len(reference_images) if reference_images else 0
         
         # Update project status
         if project:

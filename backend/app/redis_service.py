@@ -180,12 +180,74 @@ class RedisService:
         return current <= max_requests
     
     # ==========================================
+    # Inspiration Images Cache
+    # ==========================================
+    async def cache_inspiration_images(
+        self,
+        query_hash: str,
+        images: list,
+        ttl: int = 3600  # 1 hour default
+    ) -> None:
+        """
+        Cache inspiration image search results.
+        
+        Args:
+            query_hash: Hash of the search query
+            images: List of image objects
+            ttl: Time to live in seconds
+        """
+        key = f"inspiration:{query_hash}"
+        await self.client.setex(key, ttl, json.dumps(images))
+    
+    async def get_cached_inspiration(
+        self,
+        query_hash: str
+    ) -> Optional[list]:
+        """
+        Retrieve cached inspiration images if available.
+        
+        Returns:
+            Cached images list or None if not found/expired
+        """
+        key = f"inspiration:{query_hash}"
+        data = await self.client.get(key)
+        return json.loads(data) if data else None
+    
+    async def cache_inspiration_session(
+        self,
+        session_id: str,
+        data: Dict[str, Any],
+        ttl: int = 1800  # 30 minutes
+    ) -> None:
+        """
+        Cache inspiration browsing session state.
+        Stores which images the user has already seen.
+        """
+        key = f"inspiration_session:{session_id}"
+        await self.client.setex(key, ttl, json.dumps(data))
+    
+    async def get_inspiration_session(
+        self,
+        session_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get inspiration browsing session state."""
+        key = f"inspiration_session:{session_id}"
+        data = await self.client.get(key)
+        return json.loads(data) if data else None
+    
+    # ==========================================
     # Utility Methods
     # ==========================================
     @staticmethod
     def hash_image_url(url: str) -> str:
         """Generate a hash for an image URL for cache keys."""
         return hashlib.md5(url.encode()).hexdigest()
+    
+    @staticmethod
+    def hash_query(query: str, style: str = "", space_type: str = "") -> str:
+        """Generate a hash for a search query for cache keys."""
+        combined = f"{query.lower().strip()}:{style}:{space_type}"
+        return hashlib.md5(combined.encode()).hexdigest()
     
     async def health_check(self) -> bool:
         """Check Redis connectivity."""

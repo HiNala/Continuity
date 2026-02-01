@@ -129,6 +129,7 @@ class Project(Base):
     iterations = relationship("Iteration", back_populates="project", cascade="all, delete-orphan")
     constraints = relationship("Constraint", back_populates="project", cascade="all, delete-orphan")
     orchestration_logs = relationship("OrchestrationLog", back_populates="project", cascade="all, delete-orphan")
+    reference_images = relationship("ReferenceImage", backref="project", cascade="all, delete-orphan")
 
 
 # ============================================
@@ -607,6 +608,41 @@ class PolicyChange(Base):
     
     # Weave tracking
     weave_run_id = Column(String(255), nullable=True)
+
+
+# ============================================
+# Reference Images Table (Browserbase Integration)
+# ============================================
+class ReferenceImage(Base):
+    """
+    ReferenceImages table - Stores web-scraped inspiration images.
+    
+    These are images fetched via Browserbase from design websites
+    that users can select as style references for the Generation Agent.
+    """
+    __tablename__ = "reference_images"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    
+    # Image data
+    url = Column(Text, nullable=False)  # URL of the image
+    thumbnail_url = Column(Text, nullable=True)  # Smaller version for preview
+    source_site = Column(String(100), nullable=True)  # pinterest, houzz, dezeen, etc.
+    title = Column(Text, nullable=True)  # Title/description from source
+    
+    # Selection state
+    is_selected = Column(Boolean, default=False)  # User selected this as reference
+    selection_order = Column(Integer, nullable=True)  # Order of selection (1st, 2nd, etc.)
+    
+    # Search context
+    search_query = Column(Text, nullable=True)  # Query used to find this image
+    search_styles = Column(JSON, default=list)  # Style filters used
+    search_space_type = Column(String(100), nullable=True)  # Space type filter used
+    
+    # Metadata
+    metadata_ = Column("metadata", JSON, default=dict)
 
 
 # ============================================

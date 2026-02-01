@@ -1,5 +1,5 @@
 # ============================================
-# Continuity - Docker Compose Configuration
+# Clarity - Docker Compose Configuration
 # ============================================
 # Self-Improving Agent System for Design Visualization
 # WeaveHacks 3 - January 31-February 1, 2026
@@ -10,6 +10,11 @@
 #   docker compose down              # Stop all services
 #   docker compose logs -f           # View logs
 #   docker compose logs -f backend   # View backend logs only
+#
+# Environment Variables (set in .env or shell):
+#   POSTGRES_PASSWORD - Database password (required)
+#   POSTGRES_USER - Database user (default: clarity)
+#   POSTGRES_DB - Database name (default: clarity)
 #
 # ============================================
 
@@ -24,7 +29,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=${NODE_ENV:-development}
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       backend:
@@ -34,8 +39,15 @@ services:
       - ./frontend/src:/app/src:ro
       - ./frontend/public:/app/public:ro
     networks:
-      - continuity-network
+      - clarity-network
     restart: unless-stopped
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   # ==========================================
   # Backend - FastAPI + Python
@@ -47,12 +59,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - ENVIRONMENT=development
-      - DEBUG=true
-      - DATABASE_URL=postgresql://continuity:continuity_dev_password@postgres:5432/continuity
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-false}
+      # Use environment variables for database connection
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-clarity}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-clarity}
       - REDIS_URL=redis://redis:6379/0
       - FRONTEND_URL=http://localhost:3000
-      - WEAVE_PROJECT_NAME=continuity
+      - WEAVE_PROJECT_NAME=${WEAVE_PROJECT_NAME:-clarity}
     env_file:
       - .env
     depends_on:
@@ -63,10 +76,10 @@ services:
     volumes:
       # Mount source for hot reloading in development
       - ./backend/app:/app/app:ro
-      # Mount generated_images for persistence and access
-      - ./generated_images:/app/generated_images
+      # Mount generated_images for persistence and access (read-write)
+      - ./generated_images:/app/generated_images:rw
     networks:
-      - continuity-network
+      - clarity-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -74,41 +87,60 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
 
   # ==========================================
   # PostgreSQL Database
   # ==========================================
   postgres:
     image: postgres:16-alpine
-    ports:
-      - "5432:5432"
+    # NOTE: Port not exposed to host for security
+    # Access via docker exec or through backend service
+    # Uncomment below for local development debugging:
+    # ports:
+    #   - "5432:5432"
     environment:
-      - POSTGRES_USER=continuity
-      - POSTGRES_PASSWORD=continuity_dev_password
-      - POSTGRES_DB=continuity
+      - POSTGRES_USER=${POSTGRES_USER:-clarity}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - POSTGRES_DB=${POSTGRES_DB:-clarity}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
-      - continuity-network
+      - clarity-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U continuity -d continuity"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-clarity} -d ${POSTGRES_DB:-clarity}"]
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   # ==========================================
   # Redis - Caching & Vector Storage
   # ==========================================
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # NOTE: Port not exposed to host for security
+    # Uncomment below for local development debugging:
+    # ports:
+    #   - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
-      - continuity-network
+      - clarity-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -116,12 +148,19 @@ services:
       retries: 5
     command: redis-server --appendonly yes
     restart: unless-stopped
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
 
 # ============================================
 # Networks
 # ============================================
 networks:
-  continuity-network:
+  clarity-network:
     driver: bridge
 
 # ============================================

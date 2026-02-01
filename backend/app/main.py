@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import weave
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.database import init_db, get_db_status
@@ -98,18 +99,58 @@ app.mount("/generated_images", StaticFiles(directory="generated_images"), name="
 
 
 # ============================================
+# Security Headers Middleware
+# ============================================
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to all responses."""
+    
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        
+        # Security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        
+        # Cache control for API responses (not static files)
+        if not request.url.path.startswith("/generated_images"):
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+        
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+# ============================================
 # CORS Configuration
 # ============================================
+# Define allowed origins explicitly
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+# Add frontend URL if it's a valid URL and not localhost (to avoid duplicates)
+if settings.frontend_url and settings.frontend_url not in ALLOWED_ORIGINS:
+    ALLOWED_ORIGINS.append(settings.frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        settings.frontend_url,
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Restrict to actual methods used
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    # Restrict to common headers
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+        "X-Request-ID",
+    ],
+    # Allow frontend to read these response headers
+    expose_headers=["X-Request-ID", "Content-Disposition"],
 )
 
 
