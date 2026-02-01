@@ -18,6 +18,7 @@ from app.weave_ops import test_weave_operation
 from app.redis_service import redis_service
 from app.routes.projects import router as projects_router
 from app.routes.settings import router as settings_router
+from app.routes.inspiration import router as inspiration_router
 
 
 # ============================================
@@ -225,3 +226,6 @@ app.include_router(projects_router)
 
 # Include the settings router (API key testing)
 app.include_router(settings_router)
+
+# Include the inspiration router (Browserbase integration)
+app.include_router(inspiration_router)

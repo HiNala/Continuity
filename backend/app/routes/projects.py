@@ -64,13 +64,37 @@ class ClarifyingQuestion(BaseModel):
     multi_select: bool = False
 
 
+class InspirationImage(BaseModel):
+    """An inspiration image from Browserbase."""
+    id: str
+    url: str
+    thumbnail: str
+    description: str
+    source: str
+
+
+class StyleInspiration(BaseModel):
+    """Inspiration images for a specific style."""
+    style: str
+    images: List[InspirationImage]
+
+
+class InspirationData(BaseModel):
+    """Collection of inspiration images."""
+    inspiration_available: bool = True
+    style_inspiration: List[StyleInspiration] = []
+    space_inspiration: List[InspirationImage] = []
+    general_inspiration: List[InspirationImage] = []
+
+
 class AnalyzeGoalResponse(BaseModel):
-    """Response from goal analysis."""
+    """Response from goal analysis, including inspiration images."""
     project_id: str
     original_goal: str
     identified: Dict[str, Any]
     questions: List[ClarifyingQuestion]
     questions_needed: bool
+    inspiration: Optional[InspirationData] = None
 
 
 class SubmitAnswersRequest(BaseModel):
@@ -208,12 +232,59 @@ async def analyze_goal(
         identified["_auto_detected"] = analysis["auto_detected"]
         identified["_image_analysis_used"] = analysis.get("image_analysis_used", False)
     
+    # ============================================
+    # Step 4: Fetch inspiration images (Browserbase)
+    # ============================================
+    inspiration_data = None
+    try:
+        # Extract detected values for inspiration search
+        space_type = identified.get("space_type")
+        if not space_type and analysis.get("auto_detected", {}).get("space_type_suggestion"):
+            space_type = analysis["auto_detected"]["space_type_suggestion"]["value"]
+        
+        styles = identified.get("styles", [])
+        if not styles and analysis.get("auto_detected", {}).get("style_suggestions"):
+            styles = analysis["auto_detected"]["style_suggestions"]
+        
+        # Fetch inspiration
+        inspiration = await requirements_agent.fetch_inspiration(
+            goal=project.goal,
+            space_type=space_type,
+            styles=styles,
+            limit=8,
+        )
+        
+        if inspiration.get("inspiration_available"):
+            # Convert to response model
+            style_inspiration = [
+                StyleInspiration(
+                    style=s["style"],
+                    images=[InspirationImage(**img) for img in s.get("images", [])]
+                )
+                for s in inspiration.get("style_inspiration", [])
+            ]
+            
+            inspiration_data = InspirationData(
+                inspiration_available=True,
+                style_inspiration=style_inspiration,
+                space_inspiration=[
+                    InspirationImage(**img) for img in inspiration.get("space_inspiration", [])
+                ],
+                general_inspiration=[
+                    InspirationImage(**img) for img in inspiration.get("general_inspiration", [])
+                ],
+            )
+    except Exception as e:
+        print(f"Inspiration fetch failed: {e}")
+        # Continue without inspiration - it's enhancement only
+    
     return AnalyzeGoalResponse(
         project_id=str(project_id),
         original_goal=project.goal,
         identified=identified,
         questions=questions,
         questions_needed=len(questions) > 0,
+        inspiration=inspiration_data,
     )
 
 

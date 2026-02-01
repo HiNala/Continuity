@@ -790,6 +790,131 @@ class RequirementsAgent:
         return requirements
 
 
+    @weave.op(name="requirements_agent_fetch_inspiration")
+    async def fetch_inspiration(
+        self,
+        goal: str,
+        space_type: Optional[str] = None,
+        styles: Optional[List[str]] = None,
+        limit: int = 8
+    ) -> Dict[str, Any]:
+        """
+        Fetch design inspiration images to help user define their vision.
+        
+        Uses Browserbase to search for relevant design images based on
+        the user's goal and detected preferences. This helps users
+        visualize and refine their requirements.
+        
+        Args:
+            goal: The user's design goal
+            space_type: Detected or specified space type
+            styles: Detected or specified style preferences
+            limit: Number of images to return
+            
+        Returns:
+            Dict with inspiration images organized by category
+        """
+        from app.browserbase_service import browserbase_service
+        
+        result = {
+            "inspiration_available": True,
+            "style_inspiration": [],
+            "space_inspiration": [],
+            "general_inspiration": [],
+        }
+        
+        try:
+            # Fetch style-specific inspiration if styles are detected/specified
+            if styles:
+                for style in styles[:2]:  # Limit to 2 styles
+                    style_images = await browserbase_service.fetch_inspiration_images(
+                        query=f"{style} interior design",
+                        style=style,
+                        space_type=space_type,
+                        limit=4,
+                    )
+                    if style_images.get("success"):
+                        result["style_inspiration"].append({
+                            "style": style,
+                            "images": style_images.get("images", [])[:4],
+                        })
+            
+            # Fetch space-specific inspiration
+            if space_type:
+                space_images = await browserbase_service.fetch_inspiration_images(
+                    query=f"{space_type} design",
+                    space_type=space_type,
+                    limit=4,
+                )
+                if space_images.get("success"):
+                    result["space_inspiration"] = space_images.get("images", [])[:4]
+            
+            # Fetch general inspiration based on goal
+            if goal:
+                general_images = await browserbase_service.fetch_inspiration_images(
+                    query=goal[:100],  # Limit query length
+                    style=styles[0] if styles else None,
+                    space_type=space_type,
+                    limit=limit,
+                )
+                if general_images.get("success"):
+                    result["general_inspiration"] = general_images.get("images", [])
+            
+        except Exception as e:
+            print(f"Error fetching inspiration: {e}")
+            result["inspiration_available"] = False
+            result["error"] = str(e)
+        
+        return result
+    
+    @weave.op(name="requirements_agent_analyze_with_inspiration")
+    async def analyze_goal_with_inspiration(
+        self,
+        goal: str,
+        images: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze goal AND fetch relevant inspiration images.
+        
+        This is the enhanced version of analyze_goal that also fetches
+        inspiration images to help users better define their vision.
+        
+        Args:
+            goal: The user's design goal
+            images: Optional uploaded images
+            
+        Returns:
+            Analysis results plus inspiration images
+        """
+        # First, do the standard goal analysis
+        analysis = await self.analyze_goal(goal, images)
+        
+        # Extract detected values for inspiration search
+        identified = analysis.get("identified", {})
+        auto_detected = analysis.get("auto_detected", {})
+        
+        space_type = identified.get("space_type")
+        if not space_type and "space_type_suggestion" in auto_detected:
+            space_type = auto_detected["space_type_suggestion"]["value"]
+        
+        styles = identified.get("styles", [])
+        if not styles and "style_suggestions" in auto_detected:
+            styles = auto_detected["style_suggestions"]
+        
+        # Fetch inspiration images
+        inspiration = await self.fetch_inspiration(
+            goal=goal,
+            space_type=space_type,
+            styles=styles,
+            limit=8,
+        )
+        
+        # Add inspiration to the analysis result
+        analysis["inspiration"] = inspiration
+        
+        return analysis
+
+
 # ============================================
 # Singleton Instance
 # ============================================
