@@ -33,9 +33,14 @@ CREATE TABLE IF NOT EXISTS projects (
     status VARCHAR(50) DEFAULT 'created',
     goal TEXT,
     images JSONB DEFAULT '[]'::jsonb,
+    -- Batch processing fields
+    is_batch BOOLEAN DEFAULT FALSE,
+    total_scenes INTEGER DEFAULT 0,
+    completed_scenes INTEGER DEFAULT 0,
     -- Orchestration fields
     orchestration_state VARCHAR(50) DEFAULT 'created',
     current_phase VARCHAR(50),
+    current_scene_index INTEGER DEFAULT 0,
     retry_count INTEGER DEFAULT 0,
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
@@ -49,6 +54,43 @@ CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 CREATE INDEX IF NOT EXISTS idx_projects_orchestration_state ON projects(orchestration_state);
 CREATE INDEX IF NOT EXISTS idx_projects_created_at ON projects(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_projects_is_batch ON projects(is_batch);
+
+-- ============================================
+-- Scenes Table (Batch Processing)
+-- ============================================
+CREATE TABLE IF NOT EXISTS scenes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    -- Scene identification
+    scene_index INTEGER NOT NULL DEFAULT 0,
+    name VARCHAR(255),
+    -- Input/Output
+    input_image_path TEXT NOT NULL,
+    output_image_path TEXT,
+    -- Processing state
+    status VARCHAR(50) DEFAULT 'pending',
+    orchestration_state VARCHAR(50) DEFAULT 'created',
+    current_phase VARCHAR(50),
+    retry_count INTEGER DEFAULT 0,
+    -- Timing
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    -- Results
+    has_warnings BOOLEAN DEFAULT FALSE,
+    warning_details JSONB DEFAULT '[]'::jsonb,
+    error_message TEXT,
+    -- Scene-specific analysis
+    space_type_detected VARCHAR(100),
+    -- Metadata
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_scenes_project_id ON scenes(project_id);
+CREATE INDEX IF NOT EXISTS idx_scenes_status ON scenes(status);
+CREATE INDEX IF NOT EXISTS idx_scenes_scene_index ON scenes(scene_index);
 
 -- ============================================
 -- Requirements Table
@@ -101,6 +143,7 @@ CREATE INDEX IF NOT EXISTS idx_orchestration_logs_created_at ON orchestration_lo
 CREATE TABLE IF NOT EXISTS iterations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    scene_id UUID REFERENCES scenes(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     -- Phase and iteration tracking
     phase VARCHAR(50) NOT NULL,
@@ -131,6 +174,7 @@ CREATE TABLE IF NOT EXISTS iterations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_iterations_project_id ON iterations(project_id);
+CREATE INDEX IF NOT EXISTS idx_iterations_scene_id ON iterations(scene_id);
 CREATE INDEX IF NOT EXISTS idx_iterations_phase ON iterations(phase);
 CREATE INDEX IF NOT EXISTS idx_iterations_status ON iterations(status);
 
@@ -161,6 +205,7 @@ CREATE INDEX IF NOT EXISTS idx_evaluation_details_criterion ON evaluation_detail
 CREATE TABLE IF NOT EXISTS constraints (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    scene_id UUID REFERENCES scenes(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     -- Element identification
     element_type VARCHAR(100) NOT NULL,
@@ -176,6 +221,7 @@ CREATE TABLE IF NOT EXISTS constraints (
 );
 
 CREATE INDEX IF NOT EXISTS idx_constraints_project_id ON constraints(project_id);
+CREATE INDEX IF NOT EXISTS idx_constraints_scene_id ON constraints(scene_id);
 CREATE INDEX IF NOT EXISTS idx_constraints_classification ON constraints(classification);
 
 -- ============================================

@@ -219,16 +219,35 @@ class GenerationAgent:
     async def load_constraints(
         self,
         session: AsyncSession,
-        project_id: UUID
+        project_id: UUID,
+        scene_id: Optional[UUID] = None
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Load spatial constraints and analysis for a project.
         Returns (constraints_list, analysis_summary)
+        
+        If scene_id is provided, returns only constraints for that scene.
         """
-        # Load constraints
-        result = await session.execute(
-            select(Constraint).where(Constraint.project_id == project_id)
-        )
+        # Load constraints - either for specific scene or entire project
+        from sqlalchemy import and_, or_
+        
+        if scene_id:
+            # Load constraints for this specific scene, plus any project-level constraints
+            result = await session.execute(
+                select(Constraint).where(
+                    and_(
+                        Constraint.project_id == project_id,
+                        or_(
+                            Constraint.scene_id == scene_id,
+                            Constraint.scene_id.is_(None)
+                        )
+                    )
+                )
+            )
+        else:
+            result = await session.execute(
+                select(Constraint).where(Constraint.project_id == project_id)
+            )
         constraints = result.scalars().all()
         
         constraints_list = [
@@ -494,7 +513,8 @@ class GenerationAgent:
         input_image: str,
         policy: Dict[str, Any],
         constraints: List[Dict[str, Any]],
-        iteration_number: int = 1
+        iteration_number: int = 1,
+        scene_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         Execute the cleanup phase - remove debris and distractions.
@@ -513,6 +533,7 @@ class GenerationAgent:
         # Create iteration record
         iteration = Iteration(
             project_id=project_id,
+            scene_id=scene_id,
             phase=GenerationPhase.CLEANUP,
             iteration_number=iteration_number,
             input_image_path=input_image,
@@ -564,7 +585,8 @@ class GenerationAgent:
         input_image: str,
         policy: Dict[str, Any],
         constraints: List[Dict[str, Any]],
-        iteration_number: int = 1
+        iteration_number: int = 1,
+        scene_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         Execute the structural completion phase.
@@ -581,6 +603,7 @@ class GenerationAgent:
         
         iteration = Iteration(
             project_id=project_id,
+            scene_id=scene_id,
             phase=GenerationPhase.STRUCTURAL,
             iteration_number=iteration_number,
             input_image_path=input_image,
@@ -631,7 +654,8 @@ class GenerationAgent:
         policy: Dict[str, Any],
         constraints: List[Dict[str, Any]],
         requirements: Dict[str, Any],
-        iteration_number: int = 1
+        iteration_number: int = 1,
+        scene_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         Execute the fixture placement phase.
@@ -649,6 +673,7 @@ class GenerationAgent:
         
         iteration = Iteration(
             project_id=project_id,
+            scene_id=scene_id,
             phase=GenerationPhase.FIXTURE,
             iteration_number=iteration_number,
             input_image_path=input_image,
@@ -700,7 +725,8 @@ class GenerationAgent:
         constraints: List[Dict[str, Any]],
         requirements: Dict[str, Any],
         target_style: str,
-        iteration_number: int = 1
+        iteration_number: int = 1,
+        scene_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         Execute the style application phase for a specific style.
@@ -729,6 +755,7 @@ class GenerationAgent:
         
         iteration = Iteration(
             project_id=project_id,
+            scene_id=scene_id,
             phase=GenerationPhase.STYLE,
             iteration_number=iteration_number,
             input_image_path=input_image,

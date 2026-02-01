@@ -102,11 +102,17 @@ class Project(Base):
     # Project data
     status = Column(String(50), default=ProjectStatus.CREATED, index=True)
     goal = Column(Text, nullable=True)  # Original user goal text
-    images = Column(JSON, default=list)  # Array of image paths/URLs
+    images = Column(JSON, default=list)  # Array of image paths/URLs (legacy, use scenes for batch)
     
-    # Orchestration fields (Mission 06)
+    # Batch processing mode
+    is_batch = Column(Boolean, default=False)  # True = process each image independently
+    total_scenes = Column(Integer, default=0)  # Number of images in batch
+    completed_scenes = Column(Integer, default=0)  # Number of successfully processed scenes
+    
+    # Orchestration fields (Mission 06) - for single-image mode or batch coordination
     orchestration_state = Column(String(50), default=OrchestrationState.CREATED, index=True)
     current_phase = Column(String(50), nullable=True)  # Current generation phase
+    current_scene_index = Column(Integer, default=0)  # Which scene is being processed in batch
     retry_count = Column(Integer, default=0)  # Retries for current phase
     started_at = Column(DateTime(timezone=True), nullable=True)  # Processing start time
     completed_at = Column(DateTime(timezone=True), nullable=True)  # Processing end time
@@ -119,6 +125,7 @@ class Project(Base):
     # Relationships
     requirements = relationship("Requirements", back_populates="project", uselist=False, cascade="all, delete-orphan")
     analysis = relationship("ProjectAnalysis", back_populates="project", uselist=False, cascade="all, delete-orphan")
+    scenes = relationship("Scene", back_populates="project", cascade="all, delete-orphan", order_by="Scene.scene_index")
     iterations = relationship("Iteration", back_populates="project", cascade="all, delete-orphan")
     constraints = relationship("Constraint", back_populates="project", cascade="all, delete-orphan")
     orchestration_logs = relationship("OrchestrationLog", back_populates="project", cascade="all, delete-orphan")
@@ -149,6 +156,75 @@ class OrchestrationLog(Base):
     
     # Relationship
     project = relationship("Project", back_populates="orchestration_logs")
+
+
+# ============================================
+# Scene Status Enum (Batch Processing)
+# ============================================
+class SceneStatus:
+    """Status for individual scene/image processing."""
+    PENDING = "pending"           # Waiting to be processed
+    ANALYZING = "analyzing"       # Spatial analysis in progress
+    GENERATING = "generating"     # Generation phases running
+    COMPLETED = "completed"       # Successfully processed
+    FAILED = "failed"             # Processing failed
+    SKIPPED = "skipped"           # User chose to skip this image
+
+
+# ============================================
+# Scenes Table (Batch Processing)
+# ============================================
+class Scene(Base):
+    """
+    Scenes table - Individual image processing within a batch project.
+    
+    Each Scene represents ONE input image that will produce ONE output.
+    This enables batch processing where a user uploads multiple images
+    (e.g., an entire photoshoot) and each image gets processed independently
+    while sharing requirements and style settings.
+    
+    For virtual staging: Upload 50 photos of a building, get 50 staged outputs.
+    """
+    __tablename__ = "scenes"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
+    # Scene identification
+    scene_index = Column(Integer, nullable=False, default=0)  # Order in the batch
+    name = Column(String(255), nullable=True)  # Optional name (e.g., "living_room_01.jpg")
+    
+    # Input/Output
+    input_image_path = Column(Text, nullable=False)  # Original uploaded image
+    output_image_path = Column(Text, nullable=True)  # Final generated image
+    
+    # Processing state (independent per-scene)
+    status = Column(String(50), default=SceneStatus.PENDING, index=True)
+    orchestration_state = Column(String(50), default=OrchestrationState.CREATED)
+    current_phase = Column(String(50), nullable=True)
+    retry_count = Column(Integer, default=0)
+    
+    # Timing
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Results
+    has_warnings = Column(Boolean, default=False)
+    warning_details = Column(JSON, default=list)
+    error_message = Column(Text, nullable=True)
+    
+    # Scene-specific spatial analysis
+    space_type_detected = Column(String(100), nullable=True)  # What type of space this image shows
+    
+    # Metadata
+    metadata_ = Column("metadata", JSON, default=dict)
+    
+    # Relationships
+    project = relationship("Project", back_populates="scenes")
+    iterations = relationship("Iteration", back_populates="scene", cascade="all, delete-orphan")
+    constraints = relationship("Constraint", back_populates="scene", cascade="all, delete-orphan")
 
 
 # ============================================
@@ -243,6 +319,7 @@ class Iteration(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    scene_id = Column(UUID(as_uuid=True), ForeignKey("scenes.id", ondelete="CASCADE"), nullable=True)  # Links to scene in batch mode
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     # Phase and iteration tracking
@@ -281,6 +358,7 @@ class Iteration(Base):
     
     # Relationships
     project = relationship("Project", back_populates="iterations")
+    scene = relationship("Scene", back_populates="iterations")
     evaluation_details = relationship("EvaluationDetail", back_populates="iteration", cascade="all, delete-orphan")
 
 
@@ -388,6 +466,7 @@ class Constraint(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    scene_id = Column(UUID(as_uuid=True), ForeignKey("scenes.id", ondelete="CASCADE"), nullable=True)  # Links to scene in batch mode
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     # Element identification
@@ -405,8 +484,9 @@ class Constraint(Base):
     # Metadata
     metadata_ = Column("metadata", JSON, default=dict)
     
-    # Relationship
+    # Relationships
     project = relationship("Project", back_populates="constraints")
+    scene = relationship("Scene", back_populates="constraints")
 
 
 # ============================================

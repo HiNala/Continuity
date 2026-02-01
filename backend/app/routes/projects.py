@@ -1161,6 +1161,7 @@ async def evaluate_and_improve(
 class StartOrchestrationRequest(BaseModel):
     """Request to start orchestration."""
     skip_requirements: bool = False  # Skip to spatial analysis if requirements exist
+    batch_mode: bool = True  # Process each image independently (default for virtual staging)
 
 
 class ClarificationSubmitRequest(BaseModel):
@@ -1237,9 +1238,24 @@ async def start_orchestration(
         project.started_at = None
         project.completed_at = None
     
-    # Create and run orchestrator
+    # Create orchestrator
     orchestrator = Orchestrator(session, project_id)
-    result = await orchestrator.run()
+    
+    # Determine processing mode
+    batch_mode = request.batch_mode if request else True
+    
+    # If batch mode and multiple images, run batch processing
+    images = project.images or []
+    if batch_mode and len(images) > 1:
+        # Initialize scenes for batch processing
+        await orchestrator.initialize_scenes()
+        await session.commit()
+        
+        # Run batch pipeline
+        result = await orchestrator.run_batch()
+    else:
+        # Single image mode - run regular pipeline
+        result = await orchestrator.run()
     
     return result
 
@@ -1281,6 +1297,49 @@ async def get_orchestration_status(
         return OrchestrationStatusResponse(**status)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{project_id}/scenes")
+async def get_project_scenes(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Get all scenes for a batch project.
+    
+    Returns progress and output for each scene.
+    """
+    from app.models import Scene
+    
+    result = await session.execute(
+        select(Scene)
+        .where(Scene.project_id == project_id)
+        .order_by(Scene.scene_index)
+    )
+    scenes = result.scalars().all()
+    
+    return {
+        "project_id": str(project_id),
+        "total_scenes": len(scenes),
+        "scenes": [
+            {
+                "id": str(s.id),
+                "scene_index": s.scene_index,
+                "name": s.name,
+                "input_image": s.input_image_path,
+                "output_image": s.output_image_path,
+                "status": s.status,
+                "orchestration_state": s.orchestration_state,
+                "current_phase": s.current_phase,
+                "space_type": s.space_type_detected,
+                "has_warnings": s.has_warnings,
+                "error_message": s.error_message,
+                "started_at": s.started_at.isoformat() if s.started_at else None,
+                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+            }
+            for s in scenes
+        ]
+    }
 
 
 @router.post("/{project_id}/retry")

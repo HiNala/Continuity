@@ -18,9 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models import (
-    Project, Requirements, OrchestrationLog, Iteration,
+    Project, Requirements, OrchestrationLog, Iteration, Scene,
     OrchestrationState, OrchestrationTrigger, GenerationPhase,
-    ProjectStatus
+    ProjectStatus, SceneStatus
 )
 from app.agents.requirements_agent import requirements_agent
 from app.agents.spatial_agent import spatial_agent
@@ -181,6 +181,292 @@ class Orchestrator:
         self.project: Optional[Project] = None
         self.state_start_time: Optional[float] = None
         self._current_input_image: Optional[str] = None
+        self._current_scene: Optional[Scene] = None
+    
+    # ==========================================
+    # Batch Processing Methods
+    # ==========================================
+    
+    @weave.op(name="orchestrator_initialize_scenes")
+    async def initialize_scenes(self) -> List[Scene]:
+        """
+        Create Scene records from uploaded images for batch processing.
+        Each scene represents one input image that will produce one output.
+        """
+        await self.load_project()
+        images = self.project.images or []
+        
+        if not images:
+            return []
+        
+        scenes = []
+        for idx, image_path in enumerate(images):
+            # Extract filename for scene name
+            name = image_path.split("/")[-1] if "/" in image_path else image_path.split("\\")[-1]
+            
+            scene = Scene(
+                project_id=self.project_id,
+                scene_index=idx,
+                name=name,
+                input_image_path=image_path,
+                status=SceneStatus.PENDING,
+                orchestration_state=OrchestrationState.CREATED,
+            )
+            self.session.add(scene)
+            scenes.append(scene)
+        
+        # Update project batch tracking
+        self.project.is_batch = len(images) > 1
+        self.project.total_scenes = len(images)
+        self.project.completed_scenes = 0
+        
+        await self.session.flush()
+        return scenes
+    
+    async def get_scenes(self) -> List[Scene]:
+        """Get all scenes for the project, ordered by index."""
+        result = await self.session.execute(
+            select(Scene)
+            .where(Scene.project_id == self.project_id)
+            .order_by(Scene.scene_index)
+        )
+        return result.scalars().all()
+    
+    async def get_pending_scenes(self) -> List[Scene]:
+        """Get scenes that haven't been processed yet."""
+        result = await self.session.execute(
+            select(Scene)
+            .where(Scene.project_id == self.project_id)
+            .where(Scene.status == SceneStatus.PENDING)
+            .order_by(Scene.scene_index)
+        )
+        return result.scalars().all()
+    
+    @weave.op(name="orchestrator_run_batch")
+    async def run_batch(self) -> Dict[str, Any]:
+        """
+        Process all scenes in a batch project.
+        
+        This is the main entry point for batch processing:
+        1. Requirements are gathered ONCE for the entire batch
+        2. Each image is then processed independently through the pipeline
+        3. Progress is tracked per-scene and for the overall batch
+        """
+        await self.load_project()
+        
+        # Mark start time
+        if not self.project.started_at:
+            self.project.started_at = datetime.now(timezone.utc)
+        
+        # Initialize scenes if not already done
+        scenes = await self.get_scenes()
+        if not scenes:
+            scenes = await self.initialize_scenes()
+        
+        if not scenes:
+            return {
+                "success": False,
+                "error": "No images to process",
+                "project_id": str(self.project_id),
+            }
+        
+        # Step 1: Requirements gathering (once for entire batch)
+        await self._ensure_requirements_complete()
+        
+        # Step 2: Process each scene
+        results = []
+        for scene in scenes:
+            if scene.status in [SceneStatus.COMPLETED, SceneStatus.SKIPPED]:
+                results.append({
+                    "scene_id": str(scene.id),
+                    "status": scene.status,
+                    "output": scene.output_image_path,
+                })
+                continue
+            
+            self._current_scene = scene
+            scene_result = await self._process_scene(scene)
+            results.append(scene_result)
+            
+            # Update project progress
+            if scene_result.get("status") == SceneStatus.COMPLETED:
+                self.project.completed_scenes += 1
+            
+            await self.session.flush()
+        
+        # Mark batch complete
+        self.project.completed_at = datetime.now(timezone.utc)
+        
+        if self.project.completed_scenes == self.project.total_scenes:
+            self.project.status = ProjectStatus.COMPLETED
+            self.project.orchestration_state = OrchestrationState.COMPLETED
+        elif self.project.completed_scenes > 0:
+            self.project.status = ProjectStatus.COMPLETED
+            self.project.orchestration_state = OrchestrationState.COMPLETED_WITH_WARNINGS
+        else:
+            self.project.status = ProjectStatus.FAILED
+            self.project.orchestration_state = OrchestrationState.FAILED
+        
+        await self.session.commit()
+        
+        return {
+            "success": True,
+            "project_id": str(self.project_id),
+            "total_scenes": self.project.total_scenes,
+            "completed_scenes": self.project.completed_scenes,
+            "results": results,
+        }
+    
+    async def _ensure_requirements_complete(self) -> None:
+        """Ensure requirements gathering is complete for the batch."""
+        if self.project.orchestration_state == OrchestrationState.CREATED:
+            await self.transition(
+                OrchestrationState.GATHERING_REQUIREMENTS,
+                OrchestrationTrigger.START,
+            )
+            await self._handle_gathering_requirements()
+    
+    @weave.op(name="orchestrator_process_scene")
+    async def _process_scene(self, scene: Scene) -> Dict[str, Any]:
+        """
+        Process a single scene through the complete pipeline.
+        Each scene gets its own spatial analysis and generation phases.
+        """
+        scene.status = SceneStatus.ANALYZING
+        scene.started_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        
+        try:
+            # Step 1: Spatial analysis for this scene
+            analysis_result = await spatial_agent.analyze_images(
+                self.session,
+                self.project_id,
+                [scene.input_image_path],
+                scene_id=scene.id  # Link constraints to scene
+            )
+            
+            scene.space_type_detected = analysis_result.get("space_type")
+            scene.status = SceneStatus.GENERATING
+            await self.session.flush()
+            
+            # Step 2: Run generation phases
+            self._current_input_image = scene.input_image_path
+            current_image = scene.input_image_path
+            
+            phases = [
+                GenerationPhase.CLEANUP,
+                GenerationPhase.STRUCTURAL,
+                GenerationPhase.FIXTURE,
+                GenerationPhase.STYLE,
+            ]
+            
+            for phase in phases:
+                result = await self._run_phase_for_scene(scene, phase, current_image)
+                
+                if result.get("output_path"):
+                    current_image = result["output_path"]
+                else:
+                    # Phase failed, record warning but continue
+                    scene.has_warnings = True
+                    scene.warning_details.append({
+                        "phase": phase,
+                        "error": result.get("error", "Unknown error"),
+                    })
+            
+            # Store final output
+            scene.output_image_path = current_image
+            scene.status = SceneStatus.COMPLETED
+            scene.completed_at = datetime.now(timezone.utc)
+            scene.orchestration_state = OrchestrationState.COMPLETED
+            
+            return {
+                "scene_id": str(scene.id),
+                "status": SceneStatus.COMPLETED,
+                "input": scene.input_image_path,
+                "output": scene.output_image_path,
+                "space_type": scene.space_type_detected,
+            }
+            
+        except Exception as e:
+            scene.status = SceneStatus.FAILED
+            scene.error_message = str(e)
+            scene.orchestration_state = OrchestrationState.FAILED
+            return {
+                "scene_id": str(scene.id),
+                "status": SceneStatus.FAILED,
+                "error": str(e),
+            }
+    
+    async def _run_phase_for_scene(
+        self,
+        scene: Scene,
+        phase: str,
+        input_image: str
+    ) -> Dict[str, Any]:
+        """Run a single generation phase for a scene with retries."""
+        scene.current_phase = phase
+        await self.session.flush()
+        
+        requirements = await generation_agent.load_requirements(self.session, self.project_id)
+        constraints, _ = await generation_agent.load_constraints(
+            self.session, self.project_id, scene_id=scene.id
+        )
+        policy = await generation_agent.load_policy(self.session, self.project_id)
+        
+        max_retries = self.config.MAX_RETRIES_PER_PHASE
+        
+        for attempt in range(max_retries + 1):
+            try:
+                if phase == GenerationPhase.CLEANUP:
+                    result = await generation_agent.execute_cleanup_phase(
+                        self.session, self.project_id, input_image, policy, constraints,
+                        scene_id=scene.id
+                    )
+                elif phase == GenerationPhase.STRUCTURAL:
+                    result = await generation_agent.execute_structural_phase(
+                        self.session, self.project_id, input_image, policy, constraints,
+                        scene_id=scene.id
+                    )
+                elif phase == GenerationPhase.FIXTURE:
+                    result = await generation_agent.execute_fixture_phase(
+                        self.session, self.project_id, input_image, policy, constraints, requirements,
+                        scene_id=scene.id
+                    )
+                elif phase == GenerationPhase.STYLE:
+                    styles = requirements.get("style_targets", ["modern"])
+                    result = await generation_agent.execute_style_phase(
+                        self.session, self.project_id, input_image, policy, constraints,
+                        requirements, styles[0], scene_id=scene.id
+                    )
+                
+                if result.get("output_path"):
+                    # Evaluate result
+                    iteration_id = result.get("iteration_id")
+                    if iteration_id:
+                        eval_result = await qc_agent.compute_overall_evaluation(
+                            self.session, iteration_id
+                        )
+                        
+                        if eval_result.get("passed"):
+                            return result
+                        
+                        # Failed evaluation - try to improve policy
+                        if attempt < max_retries:
+                            analysis = await qc_agent.analyze_failure(self.session, iteration_id)
+                            changes = analysis.get("recommended_changes", [])
+                            if changes:
+                                await qc_agent.apply_policy_changes(
+                                    self.session, self.project_id, changes, iteration_id
+                                )
+                                policy = await generation_agent.load_policy(self.session, self.project_id)
+                    else:
+                        return result
+                        
+            except Exception as e:
+                if attempt == max_retries:
+                    return {"error": str(e)}
+        
+        return {"error": "Max retries exceeded"}
     
     async def load_project(self) -> Project:
         """Load project from database."""

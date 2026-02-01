@@ -469,7 +469,8 @@ class SpatialAnalysisAgent:
         self,
         session: AsyncSession,
         project_id: UUID,
-        images: List[str]
+        images: List[str],
+        scene_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         Complete workflow to analyze all project images and save results.
@@ -485,6 +486,7 @@ class SpatialAnalysisAgent:
             session: Database session
             project_id: The project ID
             images: List of image paths or URLs
+            scene_id: Optional scene ID for batch processing
             
         Returns:
             Analysis summary with constraint counts
@@ -530,7 +532,7 @@ class SpatialAnalysisAgent:
         # Step 5: Save to database
         try:
             project_analysis = await self.save_constraints(
-                session, project_id, merged, classified
+                session, project_id, merged, classified, scene_id=scene_id
             )
             await session.flush()
             
@@ -558,7 +560,9 @@ class SpatialAnalysisAgent:
         session: AsyncSession,
         project_id: UUID,
         analysis: Dict[str, Any],
-        classified_elements: List[Dict[str, Any]]
+        classified_elements: List[Dict[str, Any]],
+        *,
+        scene_id: Optional[UUID] = None
     ) -> ProjectAnalysis:
         """
         Save the analysis results to the database.
@@ -568,6 +572,7 @@ class SpatialAnalysisAgent:
             project_id: The project ID
             analysis: The merged analysis results
             classified_elements: Elements with classifications
+            scene_id: Optional scene ID for batch processing
             
         Returns:
             The created ProjectAnalysis record
@@ -600,6 +605,7 @@ class SpatialAnalysisAgent:
         for element in classified_elements:
             constraint = Constraint(
                 project_id=project_id,
+                scene_id=scene_id,
                 element_type=element.get("element_type", "unknown"),
                 element_location=element.get("location", ""),
                 classification=element.get("classification", ConstraintClassification.FLEXIBLE),
