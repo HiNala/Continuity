@@ -106,10 +106,10 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   };
   
   const styles = {
-    success: "bg-emerald-50 border-emerald-200 text-emerald-900",
-    error: "bg-red-50 border-red-200 text-red-900",
-    info: "bg-blue-50 border-blue-200 text-blue-900",
-    loading: "bg-white border-black/[0.08] text-foreground",
+    success: "bg-gradient-to-r from-emerald-50 to-emerald-100/80 border-emerald-200/60 text-emerald-900",
+    error: "bg-gradient-to-r from-red-50 to-red-100/80 border-red-200/60 text-red-900",
+    info: "bg-gradient-to-r from-blue-50 to-blue-100/80 border-blue-200/60 text-blue-900",
+    loading: "bg-white/95 border-black/[0.08] text-foreground",
   };
   
   const iconStyles = {
@@ -118,47 +118,82 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
     info: "text-blue-500",
     loading: "text-primary",
   };
+
+  const iconBgStyles = {
+    success: "bg-emerald-100",
+    error: "bg-red-100",
+    info: "bg-blue-100",
+    loading: "bg-primary/10",
+  };
+
+  const progressBarStyles = {
+    success: "bg-emerald-500",
+    error: "bg-red-500",
+    info: "bg-blue-500",
+    loading: "bg-primary",
+  };
   
   const Icon = icons[toast.type];
+  const duration = toast.duration ?? 4000;
   
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -10, scale: 0.95 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
+      initial={{ opacity: 0, y: 20, scale: 0.95, x: 20 }}
+      animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
+      exit={{ opacity: 0, x: 30, scale: 0.95 }}
+      transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
       className={cn(
-        "pointer-events-auto flex items-start gap-3 px-4 py-3 rounded-lg border shadow-lg backdrop-blur-sm min-w-[280px] max-w-[380px]",
+        "pointer-events-auto flex items-start gap-3 px-4 py-3.5 rounded-xl border shadow-xl backdrop-blur-xl min-w-[300px] max-w-[400px] relative overflow-hidden",
         styles[toast.type]
       )}
     >
-      <div className={cn("shrink-0 mt-0.5", iconStyles[toast.type])}>
+      {/* Icon with background */}
+      <div className={cn("shrink-0 w-8 h-8 rounded-lg flex items-center justify-center", iconBgStyles[toast.type])}>
         {toast.type === "loading" ? (
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
           >
-            <Icon className="w-4 h-4" />
+            <Icon className={cn("w-4 h-4", iconStyles[toast.type])} />
           </motion.div>
         ) : (
-          <Icon className="w-4 h-4" />
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: "spring", stiffness: 400, delay: 0.1 }}
+          >
+            <Icon className={cn("w-4 h-4", iconStyles[toast.type])} />
+          </motion.div>
         )}
       </div>
       
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium">{toast.title}</p>
+      <div className="flex-1 min-w-0 py-0.5">
+        <p className="text-sm font-semibold">{toast.title}</p>
         {toast.description && (
-          <p className="text-xs mt-0.5 opacity-80">{toast.description}</p>
+          <p className="text-xs mt-0.5 opacity-70">{toast.description}</p>
         )}
       </div>
       
       {toast.type !== "loading" && (
-        <button
+        <motion.button
           onClick={onClose}
-          className="shrink-0 p-1 rounded-md hover:bg-black/5 transition-colors"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          className="shrink-0 p-1.5 rounded-lg hover:bg-black/5 transition-colors"
         >
-          <X className="w-3.5 h-3.5 opacity-50" />
-        </button>
+          <X className="w-3.5 h-3.5 opacity-40" />
+        </motion.button>
+      )}
+
+      {/* Progress bar for non-loading toasts */}
+      {toast.type !== "loading" && (
+        <motion.div
+          initial={{ scaleX: 1 }}
+          animate={{ scaleX: 0 }}
+          transition={{ duration: duration / 1000, ease: "linear" }}
+          style={{ originX: 0 }}
+          className={cn("absolute bottom-0 left-0 right-0 h-0.5", progressBarStyles[toast.type])}
+        />
       )}
     </motion.div>
   );

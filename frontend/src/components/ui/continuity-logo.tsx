@@ -1,15 +1,18 @@
 "use client";
 
 import React from "react";
+import { motion } from "framer-motion";
 
 interface ContinuityLogoProps {
   className?: string;
   size?: number;
+  animate?: boolean;
 }
 
 export const ContinuityLogo: React.FC<ContinuityLogoProps> = ({
   className = "",
   size = 32,
+  animate = false,
 }) => {
   const uniqueId = React.useId();
   
@@ -35,7 +38,7 @@ export const ContinuityLogo: React.FC<ContinuityLogoProps> = ({
       </defs>
       
       {/* Outer rounded square with gradient border */}
-      <rect
+      <motion.rect
         x="2"
         y="2"
         width="28"
@@ -45,22 +48,39 @@ export const ContinuityLogo: React.FC<ContinuityLogoProps> = ({
         stroke={`url(#grad-${uniqueId})`}
         strokeWidth="1.5"
         opacity="0.5"
+        animate={animate ? { rotate: [0, 360] } : {}}
+        transition={animate ? { duration: 20, repeat: Infinity, ease: "linear" } : {}}
+        style={{ transformOrigin: "center" }}
       />
       
       {/* Inner flowing shape - infinity/continuity symbol simplified */}
-      <path
+      <motion.path
         d="M10 16C10 13.5 12 11.5 14.5 11.5C17 11.5 18 14 18 16C18 18 17 20.5 14.5 20.5C12 20.5 10 18.5 10 16Z"
         fill={`url(#grad-${uniqueId})`}
         opacity="0.85"
+        animate={animate ? { scale: [1, 1.05, 1] } : {}}
+        transition={animate ? { duration: 3, repeat: Infinity, ease: "easeInOut" } : {}}
+        style={{ transformOrigin: "center" }}
       />
-      <path
+      <motion.path
         d="M22 16C22 18.5 20 20.5 17.5 20.5C15 20.5 14 18 14 16C14 14 15 11.5 17.5 11.5C20 11.5 22 13.5 22 16Z"
         fill={`url(#grad2-${uniqueId})`}
         opacity="0.85"
+        animate={animate ? { scale: [1, 1.05, 1] } : {}}
+        transition={animate ? { duration: 3, repeat: Infinity, ease: "easeInOut", delay: 1.5 } : {}}
+        style={{ transformOrigin: "center" }}
       />
       
       {/* Center dot */}
-      <circle cx="16" cy="16" r="2" fill="white" opacity="0.95" />
+      <motion.circle 
+        cx="16" 
+        cy="16" 
+        r="2" 
+        fill="white" 
+        opacity="0.95"
+        animate={animate ? { scale: [1, 1.2, 1] } : {}}
+        transition={animate ? { duration: 2, repeat: Infinity, ease: "easeInOut" } : {}}
+      />
     </svg>
   );
 };

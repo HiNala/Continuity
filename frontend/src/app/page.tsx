@@ -896,22 +896,37 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
       className="flex-1 flex items-center justify-center px-6 py-16"
     >
       <div className="w-full max-w-xl">
-        {/* Hero */}
+        {/* Hero - Enhanced */}
         <div className="text-center mb-10">
+          {/* Animated logo */}
           <motion.div
             variants={itemVariants}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/60 bg-white/50 backdrop-blur-xl text-xs font-medium text-primary mb-5 shadow-sm"
+            className="flex justify-center mb-6"
+          >
+            <motion.div
+              whileHover={{ scale: 1.05 }}
+              className="relative"
+            >
+              {/* Glow effect */}
+              <div className="absolute inset-0 blur-2xl bg-gradient-to-r from-primary/30 to-accent/30 rounded-full scale-150 opacity-50" />
+              <ContinuityLogo size={56} animate className="relative" />
+            </motion.div>
+          </motion.div>
+          
+          <motion.div
+            variants={itemVariants}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-primary/20 bg-gradient-to-r from-primary/10 to-accent/10 backdrop-blur-xl text-xs font-semibold text-primary mb-5 shadow-sm"
           >
             <motion.span
-              animate={{ scale: [1, 1.2, 1] }}
+              animate={{ scale: [1, 1.3, 1], opacity: [0.7, 1, 0.7] }}
               transition={{ duration: 2, repeat: Infinity }}
-              className="w-1.5 h-1.5 rounded-full bg-primary"
+              className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-primary to-accent"
             />
             WeaveHacks 3
           </motion.div>
           <motion.h1
             variants={itemVariants}
-            className="text-4xl md:text-5xl font-bold tracking-tight text-balance text-foreground"
+            className="text-4xl md:text-5xl font-bold tracking-tight text-balance bg-gradient-to-br from-foreground via-foreground to-foreground/70 bg-clip-text"
           >
             Transform any space
           </motion.h1>
