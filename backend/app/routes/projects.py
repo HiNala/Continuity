@@ -143,8 +143,14 @@ async def analyze_goal(
     """
     Analyze the project's goal and generate clarifying questions.
     
-    The Requirements Agent analyzes the goal text to identify what
-    information is already specified and what needs to be clarified.
+    This endpoint is now SMART about image analysis:
+    1. First analyzes uploaded images to detect space type, existing styles, etc.
+    2. Combines image analysis with text analysis
+    3. Only asks questions for truly missing/ambiguous information
+    4. Provides context in questions when we detected something from images
+    
+    This reduces unnecessary questions like "What type of space is this?"
+    when we can clearly see the environment from the uploaded photo.
     """
     # Get the project
     result = await session.execute(
@@ -158,15 +164,32 @@ async def analyze_goal(
     if not project.goal:
         raise HTTPException(status_code=400, detail="Project has no goal text")
     
-    # Analyze the goal
-    analysis = requirements_agent.analyze_goal(project.goal)
+    # ============================================
+    # Step 1: Analyze images if present
+    # ============================================
+    image_analysis = None
+    if project.images and len(project.images) > 0:
+        try:
+            image_analysis = await requirements_agent.analyze_images(project.images)
+        except Exception as e:
+            # Log but don't fail - image analysis is optional enhancement
+            print(f"Image analysis failed for project {project_id}: {e}")
+            image_analysis = None
     
-    # Generate questions for missing information
+    # ============================================
+    # Step 2: Analyze goal text + image results
+    # ============================================
+    analysis = requirements_agent.analyze_goal(project.goal, image_analysis)
+    
+    # ============================================
+    # Step 3: Generate smart questions
+    # ============================================
     questions_data = requirements_agent.generate_questions(analysis)
     
-    # Convert to response format
-    questions = [
-        ClarifyingQuestion(
+    # Convert to response format, including suggested answers if available
+    questions = []
+    for q in questions_data:
+        question = ClarifyingQuestion(
             question_id=q["question_id"],
             question_text=q["question_text"],
             possible_answers=[
@@ -175,13 +198,20 @@ async def analyze_goal(
             ],
             multi_select=q.get("multi_select", False),
         )
-        for q in questions_data
-    ]
+        questions.append(question)
+    
+    # Build response with auto-detected info
+    identified = analysis["identified"]
+    
+    # Add auto_detected info to identified for frontend display
+    if analysis.get("auto_detected"):
+        identified["_auto_detected"] = analysis["auto_detected"]
+        identified["_image_analysis_used"] = analysis.get("image_analysis_used", False)
     
     return AnalyzeGoalResponse(
         project_id=str(project_id),
         original_goal=project.goal,
-        identified=analysis["identified"],
+        identified=identified,
         questions=questions,
         questions_needed=len(questions) > 0,
     )
@@ -198,6 +228,9 @@ async def submit_answers(
     
     After the user answers all questions, this endpoint processes the
     responses and creates a structured requirements specification.
+    
+    This endpoint also uses image analysis to combine auto-detected
+    information with user responses.
     """
     # Get the project
     result = await session.execute(
@@ -219,8 +252,16 @@ async def submit_answers(
             detail="Requirements already submitted for this project"
         )
     
-    # Re-analyze the goal to get the analysis object
-    analysis = requirements_agent.analyze_goal(project.goal)
+    # Re-analyze images if present (for process_responses to use auto-detected values)
+    image_analysis = None
+    if project.images and len(project.images) > 0:
+        try:
+            image_analysis = await requirements_agent.analyze_images(project.images)
+        except Exception:
+            pass
+    
+    # Re-analyze the goal to get the analysis object (with image context)
+    analysis = requirements_agent.analyze_goal(project.goal, image_analysis)
     
     # Process the responses
     specification = requirements_agent.process_responses(analysis, request.responses)

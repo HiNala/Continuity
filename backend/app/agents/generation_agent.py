@@ -92,7 +92,7 @@ FIXTURE PLACEMENT RULES:
 
 INSTALL:
 - Primary fixtures appropriate for a {space_type}
-- Standard supporting fixtures (mirrors, towel bars, etc. for bathroom; cabinets, appliances for kitchen)
+- Standard supporting fixtures appropriate for the space (e.g., storage, lighting, seating, appliances)
 - Lighting fixtures
 
 Ensure all fixtures are positioned correctly according to the locked constraints.

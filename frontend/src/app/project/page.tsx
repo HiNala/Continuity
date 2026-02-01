@@ -486,7 +486,7 @@ export default function ProjectPage() {
                 <textarea
                   value={goal}
                   onChange={(e) => setGoal(e.target.value)}
-                  placeholder="Example: Show me this bathroom in 3 different modern styles. I need it to be ADA compliant for a commercial building."
+                  placeholder="Example: Reimagine this space in 3 modern styles for a client presentation, with accessible design in mind."
                   className="w-full h-32 bg-transparent border-0 resize-none focus:outline-none text-lg placeholder:text-slate-600"
                 />
               </div>

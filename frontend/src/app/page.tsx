@@ -918,7 +918,7 @@ function WelcomeView({ onSend, isLoading }: { onSend: (message: string, files?: 
           <PromptInputBox 
             onSend={onSend} 
             isLoading={isLoading}
-            placeholder="A bright, modern kitchen with white oak cabinets..." 
+            placeholder="A warm, modern space with natural wood, soft lighting, and clean lines..." 
           />
         </motion.div>
 

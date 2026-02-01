@@ -4,17 +4,28 @@ Mission 02: Convert ambiguous user goals into structured specifications.
 
 This agent is the gatekeeper of the entire system. It ensures that
 user goals are well-defined before any expensive processing begins.
+
+Enhanced with smart image analysis to automatically detect:
+- Space type (bathroom, kitchen, etc.) from visual cues
+- Existing style elements in the space
+- Accessibility features or requirements
+- Construction state and renovation potential
 """
 
+import json
+import base64
+import httpx
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from uuid import UUID
+from pathlib import Path
 
 import weave
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models import Project, Requirements, ProjectStatus
+from app.config import settings
 
 
 # ============================================
@@ -107,6 +118,80 @@ ALL_QUESTIONS = [
 # Maximum questions to ask
 MAX_QUESTIONS = 5
 
+# Confidence threshold for auto-detected information
+# If detection confidence is below this, we still ask the user
+CONFIDENCE_THRESHOLD = 0.75
+
+
+# ============================================
+# Image Analysis Prompt
+# ============================================
+# This prompt is designed to extract requirements-relevant information from images
+IMAGE_ANALYSIS_PROMPT = """You are an expert at analyzing interior space photographs to determine 
+room type and design context. Analyze this image and identify the following:
+
+1. **Space Type**: What kind of room is this? Look for distinctive features:
+   - Bathroom: toilet, sink, shower/tub, tiles
+   - Kitchen: stove, refrigerator, countertops, cabinets
+   - Bedroom: bed, closet, nightstands
+   - Living Room: couch, TV area, open space
+   - Office: desk, computer, office chair
+   - Conference Room: large table, multiple chairs, presentation equipment
+   - Retail: shelves, product displays, checkout
+   - Restaurant/Cafe: dining tables, bar, service counter
+   - Lobby/Reception: front desk, waiting area
+   - Studio/Loft: open plan, multi-use space
+   - Gym/Fitness: equipment, mats, mirrors
+   - Classroom/Training: desks, whiteboards, projector
+   - Clinic/Healthcare: exam tables, medical equipment
+   - Outdoor/Patio: open air, patio furniture, landscaping
+   - Other: any other type
+
+2. **Existing Style Indicators**: What design elements are visible?
+   - Modern/Contemporary: clean lines, minimal ornamentation
+   - Traditional: ornate details, classic furniture
+   - Industrial: exposed brick, metal, pipes
+   - Minimalist: very sparse, neutral colors
+   - Other styles visible
+
+3. **Construction State**: 
+   - Unfinished: exposed studs, no finishes
+   - Under renovation: partial work done
+   - Existing finish: complete space
+
+4. **Accessibility Indicators**:
+   - Grab bars visible
+   - Wide doorways
+   - Wheelchair accessible features
+   - No accessibility features visible
+
+Return your analysis as JSON in this exact format:
+```json
+{
+  "space_type": {
+    "detected": "bathroom|kitchen|bedroom|living_room|office|conference_room|retail|restaurant|lobby|studio|gym|classroom|clinic|outdoor|other",
+    "confidence": 0.0-1.0,
+    "reasoning": "Brief explanation of why you identified this space type"
+  },
+  "existing_styles": [
+    {
+      "style": "modern|minimalist|industrial|traditional|etc",
+      "confidence": 0.0-1.0,
+      "indicators": ["list of visible indicators"]
+    }
+  ],
+  "construction_state": "unfinished|under_renovation|existing_finish",
+  "accessibility_features": {
+    "visible": true|false,
+    "features": ["list of visible features"],
+    "confidence": 0.0-1.0
+  },
+  "additional_notes": "Any other relevant observations about the space"
+}
+```
+
+Be thorough but only report what you can clearly see. If uncertain, reflect this in lower confidence scores."""
+
 
 # ============================================
 # Keyword Detection Patterns
@@ -151,55 +236,325 @@ class RequirementsAgent:
     """
     The Requirements Agent analyzes user goals and generates
     clarifying questions to produce structured specifications.
+    
+    Enhanced with smart image analysis to automatically detect
+    space type and other context from uploaded images before
+    asking the user questions.
     """
     
     def __init__(self):
         self.max_questions = MAX_QUESTIONS
+        self.gemini_api_key = settings.gemini_api_key
+        self.gemini_model = settings.gemini_model
+    
+    # ============================================
+    # Image Analysis Methods
+    # ============================================
+    
+    def _prepare_image(self, image_path: str) -> Optional[Dict[str, Any]]:
+        """
+        Prepare an image for Gemini vision API.
+        
+        Args:
+            image_path: Path to local file or URL
+            
+        Returns:
+            Dict with image data ready for API, or None if failed
+        """
+        try:
+            if image_path.startswith(('http://', 'https://')):
+                return {"type": "url", "url": image_path}
+            else:
+                # Read local file and encode as base64
+                file_path = Path(image_path)
+                if not file_path.exists():
+                    return None
+                
+                with open(file_path, "rb") as f:
+                    image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+                
+                # Determine mime type
+                suffix = file_path.suffix.lower()
+                mime_map = {
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".png": "image/png",
+                    ".gif": "image/gif",
+                    ".webp": "image/webp",
+                }
+                mime_type = mime_map.get(suffix, "image/jpeg")
+                
+                return {
+                    "type": "base64",
+                    "data": image_data,
+                    "mime_type": mime_type,
+                }
+        except Exception as e:
+            print(f"Error preparing image {image_path}: {e}")
+            return None
+    
+    @weave.op(name="requirements_agent_analyze_image")
+    async def analyze_image(self, image_path: str) -> Optional[Dict[str, Any]]:
+        """
+        Analyze a single image to detect space type and context.
+        
+        Args:
+            image_path: Path or URL to the image
+            
+        Returns:
+            Analysis results or None if analysis failed
+        """
+        if not self.gemini_api_key:
+            print("Warning: No Gemini API key configured for image analysis")
+            return None
+        
+        image_data = self._prepare_image(image_path)
+        if not image_data:
+            return None
+        
+        try:
+            # Build the request for Gemini
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model}:generateContent"
+            
+            # Build the parts based on image type
+            if image_data["type"] == "url":
+                image_part = {
+                    "file_data": {
+                        "file_uri": image_data["url"],
+                        "mime_type": "image/jpeg"
+                    }
+                }
+            else:
+                image_part = {
+                    "inline_data": {
+                        "mime_type": image_data["mime_type"],
+                        "data": image_data["data"]
+                    }
+                }
+            
+            request_body = {
+                "contents": [{
+                    "parts": [
+                        image_part,
+                        {"text": IMAGE_ANALYSIS_PROMPT}
+                    ]
+                }],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 2048,
+                }
+            }
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    url,
+                    json=request_body,
+                    params={"key": self.gemini_api_key},
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if response.status_code != 200:
+                    print(f"Gemini API error: {response.status_code} - {response.text}")
+                    return None
+                
+                result = response.json()
+            
+            # Extract the text response
+            if "candidates" not in result or not result["candidates"]:
+                return None
+            
+            text_response = result["candidates"][0]["content"]["parts"][0]["text"]
+            
+            # Parse JSON from the response
+            json_start = text_response.find("{")
+            json_end = text_response.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                json_str = text_response[json_start:json_end]
+                analysis = json.loads(json_str)
+                return analysis
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error analyzing image: {e}")
+            return None
+    
+    @weave.op(name="requirements_agent_analyze_images")
+    async def analyze_images(self, images: List[str]) -> Dict[str, Any]:
+        """
+        Analyze multiple images and combine results.
+        
+        Args:
+            images: List of image paths or URLs
+            
+        Returns:
+            Combined analysis results
+        """
+        if not images:
+            return {"analyzed": False, "results": []}
+        
+        results = []
+        for image_path in images[:3]:  # Analyze up to 3 images
+            analysis = await self.analyze_image(image_path)
+            if analysis:
+                results.append(analysis)
+        
+        if not results:
+            return {"analyzed": False, "results": []}
+        
+        # Combine results, using highest confidence for each field
+        combined = {
+            "analyzed": True,
+            "results": results,
+            "space_type": None,
+            "space_type_confidence": 0.0,
+            "existing_styles": [],
+            "accessibility_visible": False,
+            "construction_state": None,
+        }
+        
+        # Find best space type detection
+        for r in results:
+            if "space_type" in r and r["space_type"].get("confidence", 0) > combined["space_type_confidence"]:
+                combined["space_type"] = r["space_type"]["detected"]
+                combined["space_type_confidence"] = r["space_type"]["confidence"]
+                combined["space_type_reasoning"] = r["space_type"].get("reasoning", "")
+        
+        # Collect all detected styles
+        all_styles = []
+        for r in results:
+            if "existing_styles" in r:
+                for style in r["existing_styles"]:
+                    if style.get("confidence", 0) >= 0.5:
+                        all_styles.append(style["style"])
+        combined["existing_styles"] = list(set(all_styles))
+        
+        # Check for accessibility features
+        for r in results:
+            if "accessibility_features" in r and r["accessibility_features"].get("visible"):
+                combined["accessibility_visible"] = True
+                combined["accessibility_features"] = r["accessibility_features"].get("features", [])
+                break
+        
+        # Get construction state
+        for r in results:
+            if "construction_state" in r:
+                combined["construction_state"] = r["construction_state"]
+                break
+        
+        return combined
+    
+    # ============================================
+    # Goal Analysis Methods
+    # ============================================
     
     @weave.op(name="requirements_agent_analyze_goal")
-    def analyze_goal(self, goal_text: str) -> Dict[str, Any]:
+    def analyze_goal(self, goal_text: str, image_analysis: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Analyze the user's goal text to identify specified and missing information.
+        Analyze the user's goal text AND image analysis results to identify 
+        specified and missing information.
+        
+        This method combines:
+        1. Text analysis from the user's goal description
+        2. Visual analysis from uploaded images (if available)
+        
+        Information detected with high confidence from images will NOT
+        generate clarifying questions - we only ask about truly ambiguous items.
         
         Args:
             goal_text: The raw text goal from the user
+            image_analysis: Results from analyze_images() if images were provided
             
         Returns:
-            Dictionary with 'identified' and 'missing' information
+            Dictionary with 'identified', 'missing', and 'auto_detected' information
         """
         goal_lower = goal_text.lower()
         
         identified = {}
+        auto_detected = {}  # Track what was detected from images
         missing = []
         
-        # Check for space type
+        # ============================================
+        # 1. Check for space type
+        # ============================================
         space_type = self._detect_space_type(goal_lower)
+        
+        # Also check image analysis for space type
+        image_space_type = None
+        image_space_confidence = 0.0
+        if image_analysis and image_analysis.get("analyzed"):
+            image_space_type = image_analysis.get("space_type")
+            image_space_confidence = image_analysis.get("space_type_confidence", 0.0)
+        
         if space_type:
+            # User explicitly mentioned space type in text
             identified["space_type"] = space_type
+            identified["space_type_source"] = "text"
+        elif image_space_type and image_space_confidence >= CONFIDENCE_THRESHOLD:
+            # High-confidence detection from image - auto-fill
+            identified["space_type"] = image_space_type
+            identified["space_type_source"] = "image"
+            auto_detected["space_type"] = {
+                "value": image_space_type,
+                "confidence": image_space_confidence,
+                "reasoning": image_analysis.get("space_type_reasoning", "Detected from uploaded image")
+            }
+        elif image_space_type and image_space_confidence >= 0.5:
+            # Medium confidence - include but still ask for confirmation
+            auto_detected["space_type_suggestion"] = {
+                "value": image_space_type,
+                "confidence": image_space_confidence,
+            }
+            missing.append("space_type")
         else:
             missing.append("space_type")
         
-        # Check for styles
+        # ============================================
+        # 2. Check for styles
+        # ============================================
         styles = self._detect_styles(goal_lower)
+        
+        # Also check image analysis for existing styles
+        image_styles = []
+        if image_analysis and image_analysis.get("analyzed"):
+            image_styles = image_analysis.get("existing_styles", [])
+        
         if styles:
             identified["styles"] = styles
+        elif image_styles:
+            # Suggest styles based on what's visible but still ask
+            auto_detected["style_suggestions"] = image_styles
+            missing.append("styles")
         else:
             missing.append("styles")
         
-        # Check for accessibility mentions
+        # ============================================
+        # 3. Check for accessibility mentions
+        # ============================================
         if any(word in goal_lower for word in ["accessible", "accessibility", "ada", "wheelchair", "handicap"]):
             identified["accessibility"] = True
+        elif image_analysis and image_analysis.get("accessibility_visible"):
+            # Accessibility features visible in image
+            auto_detected["accessibility_visible"] = {
+                "features": image_analysis.get("accessibility_features", [])
+            }
+            # Still ask to confirm requirement, but note what we saw
+            missing.append("accessibility")
         else:
             missing.append("accessibility")
         
-        # Check for budget mentions
+        # ============================================
+        # 4. Check for budget mentions (can only come from text)
+        # ============================================
         budget = self._detect_budget(goal_lower)
         if budget:
             identified["budget"] = budget
         else:
             missing.append("budget")
         
-        # Check for intended use
+        # ============================================
+        # 5. Check for intended use (can only come from text)
+        # ============================================
         use = self._detect_intended_use(goal_lower)
         if use:
             identified["intended_use"] = use
@@ -209,7 +564,9 @@ class RequirementsAgent:
         return {
             "original_goal": goal_text,
             "identified": identified,
+            "auto_detected": auto_detected,
             "missing": missing,
+            "image_analysis_used": image_analysis is not None and image_analysis.get("analyzed", False),
             "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
         }
     
@@ -255,6 +612,11 @@ class RequirementsAgent:
         """
         Generate clarifying questions based on what information is missing.
         
+        This method is smarter about what questions to ask:
+        - Skips questions for high-confidence auto-detected information
+        - Provides context about suggestions when we detected something
+        - Only asks truly necessary questions
+        
         Args:
             analysis: The output from analyze_goal()
             
@@ -262,6 +624,7 @@ class RequirementsAgent:
             List of question objects, each with question_id, question_text, and possible_answers
         """
         missing = analysis.get("missing", [])
+        auto_detected = analysis.get("auto_detected", {})
         questions = []
         
         # Map missing fields to questions
@@ -273,10 +636,44 @@ class RequirementsAgent:
             "intended_use": INTENDED_USE_QUESTION,
         }
         
-        # Add questions for missing fields, respecting the max limit
+        # Add questions for missing fields, with smart modifications
         for field in missing:
-            if field in field_to_question and len(questions) < self.max_questions:
-                questions.append(field_to_question[field])
+            if field not in field_to_question or len(questions) >= self.max_questions:
+                continue
+            
+            question = field_to_question[field].copy()
+            
+            # Enhance questions with auto-detected context
+            if field == "space_type" and "space_type_suggestion" in auto_detected:
+                suggestion = auto_detected["space_type_suggestion"]
+                suggested_type = suggestion["value"]
+                confidence = suggestion["confidence"]
+                # Add a note about what we detected
+                question = {
+                    **question,
+                    "question_text": f"We detected this might be a {suggested_type.replace('_', ' ')} ({int(confidence * 100)}% confident). Is that correct, or is it a different type of space?",
+                    "suggested_answer": suggested_type,
+                }
+            
+            elif field == "styles" and "style_suggestions" in auto_detected:
+                suggestions = auto_detected["style_suggestions"]
+                if suggestions:
+                    style_names = [s.replace('_', ' ').title() for s in suggestions[:2]]
+                    question = {
+                        **question,
+                        "question_text": f"We noticed some {', '.join(style_names)} elements in your space. What design styles would you like to see? (Select up to 3)",
+                        "suggested_answers": suggestions,
+                    }
+            
+            elif field == "accessibility" and "accessibility_visible" in auto_detected:
+                features = auto_detected["accessibility_visible"].get("features", [])
+                if features:
+                    question = {
+                        **question,
+                        "question_text": f"We noticed some accessibility features ({', '.join(features[:2])}). Does this space need to be ADA/accessibility compliant?",
+                    }
+            
+            questions.append(question)
         
         return questions
     
