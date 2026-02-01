@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Enable standalone output for Docker
   output: "standalone",
+
+  // Ensure Next uses the frontend directory as tracing root
+  outputFileTracingRoot: __dirname,
   
   // Image optimization
   images: {
