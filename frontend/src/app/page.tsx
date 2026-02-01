@@ -3077,7 +3077,7 @@ function SplitView({
                     ...(questions.inspiration.space_inspiration || []),
                     ...(questions.inspiration.general_inspiration || []),
                   ].slice(0, 8).map((img, i) => (
-                    <div key={img.id || i} className="relative aspect-square rounded-lg overflow-hidden group cursor-pointer">
+                    <div key={`inspiration-${i}`} className="relative aspect-square rounded-lg overflow-hidden group cursor-pointer">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img 
                         src={img.url} 
