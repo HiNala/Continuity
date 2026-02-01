@@ -332,25 +332,42 @@ async def test_self_improvement_loop() -> TestResult:
         await session.commit()
         result.add_step("Setup evaluation scenario", "passed")
         
-        # Step 4: Generate recommended changes (simulating QC analysis)
+        # Step 4: Add evaluation details to make analyze_failure work
         result.add_step("Generate improvement recommendations", "running")
-        # These are the changes QC would recommend based on failure
-        recommended_changes = [
-            {
-                "type": "constraint_emphasis",
-                "current": "medium",
-                "proposed": "high",
-                "rationale": "Constraint violations detected. Increase emphasis."
-            },
-            {
-                "type": "prompt_addition",
-                "phase": GenerationPhase.CLEANUP,
-                "addition": "CRITICAL: Do not move or relocate any locked fixtures.",
-                "rationale": "Add explicit constraint reminder."
+        
+        # Add evaluation details with constraint failure
+        from app.models import EvaluationDetail, EvaluationCriterion
+        
+        eval_detail = EvaluationDetail(
+            iteration_id=iteration.id,
+            criterion=EvaluationCriterion.CONSTRAINT_COMPLIANCE,
+            weight=0.35,
+            passed=False,
+            score=0.45,
+            details="Constraint violations detected",
+            evidence={
+                "violations": [
+                    {"element": "window", "issue": "Window was moved from right wall"},
+                    {"element": "door", "issue": "Door position changed"}
+                ],
+                "locked_count": 3
             }
-        ]
+        )
+        session.add(eval_detail)
+        await session.flush()
+        
+        # Call the REAL analyze_failure function
+        analysis = await qc_agent.analyze_failure(session, iteration.id)
+        recommended_changes = analysis.get("recommended_changes", [])
+        
+        # Verify analyze_failure produced recommendations
+        if not recommended_changes:
+            result.add_error("analyze_failure did not produce any recommendations")
+        
         result.add_step("Generate improvement recommendations", "passed")
         result.metrics["recommendations_count"] = len(recommended_changes)
+        result.metrics["failed_criteria"] = len(analysis.get("failed_criteria", []))
+        result.metrics["insights_count"] = len(analysis.get("insights", []))
         
         # Step 5: Apply policy changes
         result.add_step("Apply policy changes", "running")
