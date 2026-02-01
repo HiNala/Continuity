@@ -1283,6 +1283,13 @@ async def get_project_gallery(
     )
     iterations = iterations_result.scalars().all()
 
+    iterations_by_id = {str(iteration.id): iteration for iteration in iterations}
+    phase_groups: Dict[str, List[Iteration]] = {}
+    for iteration in iterations:
+        phase_groups.setdefault(iteration.phase, []).append(iteration)
+    for phase in phase_groups:
+        phase_groups[phase] = sorted(phase_groups[phase], key=lambda i: i.iteration_number)
+
     policy_changes_result = await session.execute(
         select(PolicyChange)
         .where(PolicyChange.project_id == project_id)
@@ -1291,20 +1298,28 @@ async def get_project_gallery(
     policy_changes = policy_changes_result.scalars().all()
     changes_by_iteration: Dict[str, List[Dict[str, Any]]] = {}
     for change in policy_changes:
-        if change.trigger_iteration_id:
-            key = str(change.trigger_iteration_id)
-            changes_by_iteration.setdefault(key, []).extend(change.changes_made or [])
-
-    phase_groups: Dict[str, List[Iteration]] = {}
-    for iteration in iterations:
-        phase_groups.setdefault(iteration.phase, []).append(iteration)
+        if not change.trigger_iteration_id:
+            continue
+        trigger_id = str(change.trigger_iteration_id)
+        trigger_iteration = iterations_by_id.get(trigger_id)
+        if not trigger_iteration:
+            continue
+        phase_iterations = phase_groups.get(trigger_iteration.phase, [])
+        target_iteration = next(
+            (i for i in phase_iterations if i.iteration_number > trigger_iteration.iteration_number),
+            None
+        )
+        target_id = str(target_iteration.id) if target_iteration else trigger_id
+        changes_by_iteration.setdefault(target_id, []).extend(change.changes_made or [])
 
     phases: List[GalleryPhase] = []
     total_attempts = 0
     passed = 0
     failed = 0
     total_policy_updates = len(policy_changes)
-    overall_score_progression: List[float] = []
+    overall_score_progression: List[float] = [
+        i.evaluation_score for i in iterations if i.evaluation_score is not None
+    ]
     improvement_demonstrated = False
 
     phase_label_map = {
@@ -1315,7 +1330,6 @@ async def get_project_gallery(
     }
 
     for phase, phase_iterations in phase_groups.items():
-        phase_iterations = sorted(phase_iterations, key=lambda i: i.iteration_number)
         attempts: List[GalleryAttempt] = []
         score_progression: List[float] = []
         policy_updates_count = 0
@@ -1373,7 +1387,6 @@ async def get_project_gallery(
             score_delta = None
             if iteration.evaluation_score is not None:
                 score_progression.append(iteration.evaluation_score)
-                overall_score_progression.append(iteration.evaluation_score)
                 if previous_score is not None:
                     score_delta = iteration.evaluation_score - previous_score
                     if score_delta > 0:

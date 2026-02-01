@@ -540,7 +540,7 @@ export default function ContinuityApp() {
             });
           }
 
-          if (toState.includes("generating_")) {
+          if (toState.includes("generating_") && !event.details?.evaluation_passed) {
             const retryNumber = event.details?.retry_number as number | undefined;
             const attemptNumber = retryNumber ? retryNumber + 1 : (lastAttemptByPhaseRef.current[phaseKey] || 0) + 1;
             lastAttemptByPhaseRef.current[phaseKey] = attemptNumber;
