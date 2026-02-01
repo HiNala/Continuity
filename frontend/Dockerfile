@@ -7,12 +7,16 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dependencies
-RUN apk add --no-cache libc6-compat
+# Install dependencies required for Next.js SWC
+RUN apk add --no-cache libc6-compat python3 make g++
 
-# Copy package files and install
+# Copy package files
 COPY package.json package-lock.json* ./
-RUN npm install
+
+# Clean install with correct platform
+RUN npm cache clean --force && \
+    rm -rf node_modules package-lock.json && \
+    npm install
 
 # Copy application code
 COPY . .
