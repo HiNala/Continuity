@@ -1019,19 +1019,54 @@ function SplitView({
   weaveTraceUrl,
   pipelineStage,
 }: SplitViewProps) {
+  const [splitPosition, setSplitPosition] = useState(50); // Default 50%
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const newPosition = ((e.clientX - rect.left) / rect.width) * 100;
+      // Clamp between 25% and 75%
+      setSplitPosition(Math.min(75, Math.max(25, newPosition)));
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging]);
+
   return (
     <motion.div
+      ref={containerRef}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex-1 flex overflow-hidden"
+      className={cn("flex-1 flex overflow-hidden", isDragging && "select-none cursor-col-resize")}
     >
-      {/* Left Panel - Conversation (Claude-style: narrower, cleaner) */}
+      {/* Left Panel - Conversation */}
       <motion.div
         {...slideInLeft}
         transition={{ ...smoothTransition, delay: 0.1 }}
-        className="w-[360px] min-w-[320px] max-w-[400px] flex flex-col border-r border-black/[0.06]"
+        style={{ width: `${splitPosition}%` }}
+        className="flex flex-col border-r border-black/[0.06] min-w-[280px]"
       >
         {/* Minimal header */}
         <div className="shrink-0 h-14 flex items-center justify-between px-4 border-b border-black/[0.04] bg-white/60 backdrop-blur-sm">
@@ -1186,11 +1221,27 @@ function SplitView({
         </div>
       </motion.div>
 
-      {/* Right Panel - Agent Activity (wider, cleaner) */}
+      {/* Resizable Divider */}
+      <div
+        onMouseDown={handleMouseDown}
+        className={cn(
+          "w-1 hover:w-1.5 bg-transparent hover:bg-primary/20 cursor-col-resize transition-all duration-150 flex-shrink-0 relative group",
+          isDragging && "w-1.5 bg-primary/30"
+        )}
+      >
+        {/* Drag handle indicator */}
+        <div className={cn(
+          "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity",
+          isDragging && "opacity-100 bg-primary/50"
+        )} />
+      </div>
+
+      {/* Right Panel - Agent Activity */}
       <motion.div
         {...slideInRight}
         transition={{ ...smoothTransition, delay: 0.15 }}
-        className="flex-1 overflow-y-auto bg-gradient-to-br from-slate-50/30 to-white scrollbar-thin"
+        style={{ width: `${100 - splitPosition}%` }}
+        className="flex-1 overflow-y-auto bg-gradient-to-br from-slate-50/30 to-white scrollbar-thin min-w-[280px]"
       >
         <div className="p-6 max-w-3xl mx-auto">
           {/* Progress Timeline */}
